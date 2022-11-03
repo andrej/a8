@@ -1,0 +1,9 @@
+
+EXTRA_CFLAGS += -I$(src)/include
+obj-m += monmod.o
+cflags-y := -I$(src)/include
+monmod-y := \
+	src/main.o \
+	src/config.o \
+	src/util.o \
+	src/tracepoint_helpers.o

@@ -6,7 +6,12 @@ struct test {
 	test_fun_t fun;
 	const char *name;
 	const char *file;
-};
+}
+// On x86_64, the linker appears to add some padding to each test function
+// in our array ... we hence must make the struct size reflect that so our
+// code does not break.
+// TODO: figure out how to control linker padding
+__attribute__ ((aligned (64)));
 
 extern struct test __tests_start;
 extern struct test __tests_end;
@@ -16,11 +21,11 @@ extern struct test __tests_end;
 	const char __test_ ## name ## _name[] = #name; \
 	const char __test_ ## name ## _file[] = (__FILE__); \
 	struct test __attribute__((section("tests"))) __test_ ## name = { \
-		_test_ ## name, \
+		&_test_ ## name, \
 		__test_ ## name ## _name, \
 		__test_ ## name ## _file \
 	}; \
-	int _test_##name()
+	extern int _test_##name()
 
 #define ASSERT(cond) \
 	if(!(cond)) { \

@@ -26,6 +26,9 @@ ARCH           ?= $(shell uname -m)
 ifeq ($(ARCH),aarch64)
 	ARCH    := arm64
 endif
+ifeq ($(ARCH),x86_64)
+	ARCH	:= x86
+endif
 KERNEL_RELEASE ?= $(shell uname -r)
 
 BUILD_DIR      ?= $(PWD)/build
@@ -33,12 +36,14 @@ TEST_SRCS_DIR  ?= tests
 TEST_SUITE_DIR ?= test_suite
 TEST_CC        ?= gcc
 TEST_CFLAGS    ?= \
-    -I./include -I. -g \
+    -I./include -I./arch/$(ARCH)/include -I. -g \
 #    -I/usr/src/linux-headers-$(KERNEL_RELEASE)/include \
 #    -I/usr/src/linux-headers-$(KERNEL_RELEASE)/arch/$(ARCH)/include \
 #    -I/usr/src/linux-headers-$(KERNEL_RELEASE)/arch/$(ARCH)/include/generated
-TEST_DEPS_EXCLUDE ?= src/main.o arch/$(ARCH)/ptrace.o \
-	arch/$(ARCH)/export_symbols.o
+TEST_DEPS_EXCLUDE ?= \
+	src/main.o \
+	src/export_symbols.o \
+	arch/$(ARCH)/src/ptrace.o \
 
 
 # ############################################################################ #
@@ -68,7 +73,7 @@ module: $(BUILD_DIR)/Makefile
 $(BUILD_DIR)/Makefile: 
 	@mkdir -p $(@D)
 	@mkdir -p $(@D)/src
-	@mkdir -p $(@D)/arch/$(ARCH)
+	@mkdir -p $(@D)/arch/$(ARCH)/src
 	touch $@
 
 .PHONY: clean
@@ -88,9 +93,11 @@ tests: $(TEST_OBJS) $(TEST_DEP_OBJS)
 	cd $(TEST_SUITE_DIR); make
 
 $(TEST_SUITE_DIR)/tests/%.o: tests/%.c
+	@mkdir -p $(@D)
 	$(TEST_CC) $(TEST_CFLAGS) -o $@ -c $<
 
 $(TEST_SUITE_DIR)/dependencies/%.o: $(BUILD_DIR)/%.o
+	$(info called)
 	@mkdir -p $(@D)
 	ln -s -t $(@D) $^ 
 

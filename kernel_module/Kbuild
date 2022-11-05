@@ -1,11 +1,10 @@
 
-EXTRA_CFLAGS += -I$(src)/include
+EXTRA_CFLAGS += -I$(src)/include -I$(src)/arch/$(ARCH)/include
 obj-m += monmod.o
-cflags-y := -I$(src)/include
+cflags-y := -I$(src)/include -I$(src)/arch/$(ARCH)/include
 monmod-y := \
 	src/main.o \
 	src/config.o \
 	src/util.o \
-	src/tracepoint_helpers.o \
-	arch/$(ARCH)/ptrace.o \
-	arch/$(ARCH)/export_symbols.o
+	src/export_symbols.o \
+	arch/$(ARCH)/src/ptrace.o \

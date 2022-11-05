@@ -9,6 +9,6 @@
  * will crash the test suite. This is faster and works in more constrained
  * environments.
  */
-#define USE_FORK 0
+#define USE_FORK 1
 
 #endif

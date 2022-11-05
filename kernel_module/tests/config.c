@@ -154,12 +154,6 @@ TEST(_config_show_traced_syscalls)
 	return 0;
 }
 
-TEST(_config_store_traced_syscalls)
-{
-	ASSERT(_monmod_config_traced_syscalls_store(NULL, NULL, NULL, 0) < 0);
-	return 0;
-}
-
 int mocked_kobject_put_calls = 0;
 MOCK(void, kobject_put, struct kobject *kobj)
 {
@@ -190,6 +184,7 @@ TEST(config_traced_syscalls_store)
 		"5\n"
 		"kk\n"
 		"2\n";
+	const char buf3[] = "";
 	monmod_global_config = (struct monmod_config){};
 	monmod_global_config.kobj = &kobj;
 	kobj.name = "monmod";
@@ -212,6 +207,17 @@ TEST(config_traced_syscalls_store)
 	ASSERT(0 == monmod_syscall_is_active(6));
 	ASSERT(1 == monmod_syscall_is_active(99));
 	ASSERT(1 == monmod_syscall_is_active(5));
+	ASSERT(0 == monmod_syscall_is_active(2));
+
+
+	ASSERT(5 == _monmod_config_traced_syscalls_store(
+		&kobj, &attr, buf3, sizeof(buf3)));
+	ASSERT(0 == monmod_syscall_is_active(1));
+	ASSERT(0 == monmod_syscall_is_active(123));
+	ASSERT(0 == monmod_syscall_is_active(45));
+	ASSERT(0 == monmod_syscall_is_active(6));
+	ASSERT(0 == monmod_syscall_is_active(99));
+	ASSERT(0 == monmod_syscall_is_active(5));
 	ASSERT(0 == monmod_syscall_is_active(2));
 	return 0;
 }

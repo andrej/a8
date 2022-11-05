@@ -157,6 +157,8 @@ static inline int _config_callback_sanity_checks(const struct kobject *kobj,
                                                  const char *buf)
 {
     if(NULL == kobj || NULL == attr || NULL == buf) {
+        printk(KERN_WARNING "monmod: _config_callback_sanity_checks failed."
+               "<kobj: %p> <attr: %p> <buf: %p>\n", kobj, attr, buf);
         return 1;
     }
     return 0;

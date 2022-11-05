@@ -8,39 +8,13 @@
 #include <sys/user.h>
 #include <sys/uio.h>
 
-#define TRY(x) { if(0 != (x)) { \
-	printf("Something went wrong at " #x "\n"); \
-	return 1; \
-}}
+#include "util.h"   // TRY() macro
+#include "trace.h"  // get_regs(), get_syscall_no()
+
 
 // Swap this from PTRACE_SYSCALL to PTRACE_CONT when using monmod
 //#define PTRACE_CONTINUE_REQ PTRACE_SYSCALL
 #define PTRACE_CONTINUE_REQ PTRACE_CONT
-
-int read_user_regs(pid_t pid, struct user_regs_struct *into)
-{
-	struct iovec dest = {
-		(void *)into,
-		sizeof(struct user_regs_struct)
-	};
-	TRY(ptrace(PTRACE_GETREGSET, pid, NT_PRSTATUS, &dest));
-	if(dest.iov_len != sizeof(struct user_regs_struct)) {
-		printf("Only read %lu bytes, expected %lu.\n", 
-		        dest.iov_len, sizeof(struct user_regs_struct));
-		return 1;
-	}
-	return 0;
-}
-
-void print_regs(struct user_regs_struct *regs)
-{
-	printf("<pc: %p>", (void *)regs->pc);
-	printf(" <8: %lld>", (long long)regs->regs[8]);
-	// for(int i = 0; i < 31; i++) {
-	// 	printf(" <%d: %lld>", i, (long long)regs->regs[i]);
-	// }
-	printf("\n");
-}
 
 int main(int argc, char **argv)
 {
@@ -78,7 +52,7 @@ int main(int argc, char **argv)
 			} else {
 				printf("Exiting syscall.\n");
 			}
-			TRY(read_user_regs(child, &regs));
+			TRY(read_regs(child, &regs));
 			print_regs(&regs);
 			// Continue execution
 			TRY(ptrace(PTRACE_CONTINUE_REQ, child, 0, 0));

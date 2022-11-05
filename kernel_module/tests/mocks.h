@@ -6,6 +6,9 @@
  * not deeply depend on these structures; we just need them so we can pass
  * something useful to the linked kernel module object functions which
  * expect them. 
+ * 
+ * NOTE: mocking of kernel functions does not currently work in x86_64,
+ * leading to a bunch of failed tests (Segmentation faults). Test on ARM64.
  */
 
 #include <stdlib.h> // NULL 

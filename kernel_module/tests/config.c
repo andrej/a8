@@ -177,3 +177,41 @@ TEST(monmod_config_free)
 	ASSERT(monmod_global_config.kobj == NULL);
 	return 0;
 }
+
+TEST(config_traced_syscalls_store)
+{
+	struct kobject kobj = {};
+	struct kobj_attribute attr = {};
+	const char buf1[] = "123\n"
+		"45\n"
+		"\n"
+		"6";
+	const char buf2[] = "99\n"
+		"5\n"
+		"kk\n"
+		"2\n";
+	monmod_global_config = (struct monmod_config){};
+	monmod_global_config.kobj = &kobj;
+	kobj.name = "monmod";
+	attr.name = "traced_syscalls";
+
+	ASSERT(sizeof(buf1) == _monmod_config_traced_syscalls_store(
+		&kobj, &attr, buf1, sizeof(buf1)));
+	ASSERT(0 == monmod_syscall_is_active(1));
+	ASSERT(0 == monmod_syscall_is_active(99));
+	ASSERT(0 == monmod_syscall_is_active(5));
+	ASSERT(1 == monmod_syscall_is_active(123));
+	ASSERT(1 == monmod_syscall_is_active(45));
+	ASSERT(1 == monmod_syscall_is_active(6));
+
+	ASSERT(5 == _monmod_config_traced_syscalls_store(
+		&kobj, &attr, buf2, sizeof(buf2)));
+	ASSERT(0 == monmod_syscall_is_active(1));
+	ASSERT(0 == monmod_syscall_is_active(123));
+	ASSERT(0 == monmod_syscall_is_active(45));
+	ASSERT(0 == monmod_syscall_is_active(6));
+	ASSERT(1 == monmod_syscall_is_active(99));
+	ASSERT(1 == monmod_syscall_is_active(5));
+	ASSERT(0 == monmod_syscall_is_active(2));
+	return 0;
+}

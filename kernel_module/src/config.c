@@ -216,6 +216,9 @@ ssize_t _monmod_config_traced_syscalls_store(struct kobject *kobj,
         return -1;
     }
 
+    memset((void *)&monmod_global_config.syscall_masks, 
+           0, sizeof(monmod_global_config.syscall_masks));
+
     while(consumed < count) {
         int no = 0;
         ssize_t line_len = next_int_line(buf + consumed, count - consumed, &no);

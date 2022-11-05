@@ -6,4 +6,6 @@ monmod-y := \
 	src/main.o \
 	src/config.o \
 	src/util.o \
-	src/tracepoint_helpers.o
+	src/tracepoint_helpers.o \
+	arch/$(ARCH)/ptrace.o \
+	arch/$(ARCH)/export_symbols.o

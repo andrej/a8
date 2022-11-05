@@ -23,6 +23,9 @@
 # ############################################################################ #
 
 ARCH           ?= $(shell uname -m)
+ifeq ($(ARCH),aarch64)
+	ARCH    := arm64
+endif
 KERNEL_RELEASE ?= $(shell uname -r)
 
 BUILD_DIR      ?= $(PWD)/build
@@ -34,7 +37,8 @@ TEST_CFLAGS    ?= \
 #    -I/usr/src/linux-headers-$(KERNEL_RELEASE)/include \
 #    -I/usr/src/linux-headers-$(KERNEL_RELEASE)/arch/$(ARCH)/include \
 #    -I/usr/src/linux-headers-$(KERNEL_RELEASE)/arch/$(ARCH)/include/generated
-TEST_DEPS_EXCLUDE ?= src/main.o
+TEST_DEPS_EXCLUDE ?= src/main.o arch/$(ARCH)/ptrace.o \
+	arch/$(ARCH)/export_symbols.o
 
 
 # ############################################################################ #
@@ -64,6 +68,7 @@ module: $(BUILD_DIR)/Makefile
 $(BUILD_DIR)/Makefile: 
 	@mkdir -p $(@D)
 	@mkdir -p $(@D)/src
+	@mkdir -p $(@D)/arch/$(ARCH)
 	touch $@
 
 .PHONY: clean

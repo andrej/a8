@@ -7,4 +7,5 @@ monmod-y := \
 	src/config.o \
 	src/util.o \
 	src/export_symbols.o \
+	src/tracepoint_helpers.o \
 	arch/$(ARCH)/src/ptrace.o \

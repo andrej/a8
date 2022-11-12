@@ -20,7 +20,6 @@ static struct tracepoint *tp_sys_enter = NULL;
 static struct tracepoint *tp_sys_exit = NULL;
 u64 last_syscall = NO_SYSCALL;
 
-
 // Functions
 static inline int probe_prelude(void *__data, struct pt_regs *regs, u64 id)
 {
@@ -45,10 +44,10 @@ static inline int probe_prelude(void *__data, struct pt_regs *regs, u64 id)
 
 static void sys_enter_probe(void *__data, struct pt_regs *regs, long id)
 {
-	last_syscall = id;
 	if(0 != probe_prelude(__data, regs, id)) {
 		return;
 	}
+	last_syscall = id;
 #if MONMOD_LOG_INFO
 	printk(KERN_INFO "monmod: <%d> forwarding system call %lu entry\n", 
 	       monmod_global_config.tracee_pid, id);
@@ -65,8 +64,6 @@ static void sys_exit_probe(void *__data, struct pt_regs *regs,
                            unsigned long return_value)
 {
 	if(NO_SYSCALL == last_syscall) {
-		printk(KERN_WARNING "monmod: sys_exit probe called with no "
-		       "previous observed sys_enter.\n");
 		return;
 	}
 	if(0 != probe_prelude(__data, regs, last_syscall)) {
@@ -104,7 +101,7 @@ static int __init monmod_init(void)
 	TRY(tracepoint_probe_register(tp_sys_enter, (void *)sys_enter_probe, 
 	                              NULL),
 	    goto abort2);
-	TRY(tracepoint_probe_register(tp_sys_enter, (void *)sys_exit_probe, 
+	TRY(tracepoint_probe_register(tp_sys_exit, (void *)sys_exit_probe, 
 	                              NULL),
 	    goto abort3);
 	printk(KERN_INFO "monmod: module loaded\n");

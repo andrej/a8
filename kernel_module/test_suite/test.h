@@ -33,6 +33,16 @@ extern struct test __tests_end;
 		return 1; \
 	}
 
+#define ASSERT_EQ(l, r) { \
+	long long l_v = (l); \
+	long long r_v = (r); \
+	if(l_v != r_v) { \
+		printf("\n" __FILE__ ": %d: " #l " (%lld) != (%lld) " #r "\n", \
+		       __LINE__, l_v, r_v); \
+		return 1; \
+	} \
+}\
+
 #endif 
 
 #define MOCK(return_type, name, ...) return_type name(__VA_ARGS__)

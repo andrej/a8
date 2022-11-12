@@ -186,6 +186,8 @@ ssize_t _monmod_config_pid_store(struct kobject *kobj,
     }
     TRY(ret = kstrtoint(buf, 10, &monmod_global_config.tracee_pid),
         return -1);
+    printk(KERN_INFO "monmod: set PID to %d\n", 
+           monmod_global_config.tracee_pid);
     return count;
 }
 
@@ -225,10 +227,14 @@ ssize_t _monmod_config_traced_syscalls_store(struct kobject *kobj,
         int no = 0;
         ssize_t line_len = next_int_line(buf + consumed, count - consumed, &no);
         if(line_len < 0) {
+            // Invalid input encountered.
             MONMOD_WARNF("Parsing configuration: Invalid input at offset %lu", 
                          consumed);
+            return -1;
         }
         if(line_len == 0) {
+            // No input numbers remaining, but everything was valid.
+            consumed = count;
             break;
         }
         if(!monmod_syscall_is_active(no)) {
@@ -236,9 +242,15 @@ ssize_t _monmod_config_traced_syscalls_store(struct kobject *kobj,
                 MONMOD_WARNF("Reading config: Cannot activate tracing for "
                              "syscall no %d", no);
                 return -1;
+            } else {
+                printk(KERN_INFO "monmod: Activated tracing of system call "
+                       "%d\n", no);
             }
         }
         consumed += line_len;
     }
+
+    printk(KERN_INFO "monmod: configuration updated\n");
+
     return consumed;
 }

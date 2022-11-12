@@ -16,26 +16,34 @@ size_t line_length(const char *buf, size_t count)
 ssize_t next_int_line(const char *buf, size_t count, int *out)
 {
 	size_t line_n = 0;
-	char num_buf[32]; // Enough to hold base-10 64-bit integer
+	size_t skipped = 0;
+	char num_buf[32] = {}; // Enough to hold base-10 64-bit integer
 	int num = 0;
 
-	// Skip empty lines
-	size_t skipped = 0;
-	while((line_n = line_length(buf + skipped, count - skipped)) == 1) {
-		skipped += line_n;
+	// Skip empty lines and whitespace
+	for(; skipped < count && buf[skipped] != '\0' && isspace(buf[skipped]);
+	    skipped++);
+	if(skipped >= count || buf[skipped] == '\0') {
+		// There was only whitespace remaining.
+		return 0;
 	}
-	if(skipped >= count) {
-		return -1;
-	}
+	buf += skipped;
+	// This never overflows because we just ensured count > skipped:
+	count -= skipped;
 
 	// Parse integer
-	if(line_n > 31) {
+	for(; line_n < count && buf[line_n] != '\0' && isdigit(buf[line_n]);
+	    line_n++) {
+		num_buf[line_n] = buf[line_n];
+	}
+	if(line_n == 0 || line_n > 31) {
+		// First case: first character after whitespace was illegal
+		// Second case: number is too large
 		return -1;
 	}
-	memcpy(num_buf, buf + skipped, line_n);
 	num_buf[line_n] = '\0';
-	if(0 != kstrtoint(buf + skipped, 10, &num)) {
-		return 0;
+	if(0 != kstrtoint(num_buf, 10, &num)) {
+		return -1;
 	}
 	*out = num;
 	return skipped + line_n;

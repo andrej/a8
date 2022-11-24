@@ -11,4 +11,12 @@
  */
 #define USE_FORK 1
 
+/**
+ * ENABLE_PARALLELISM - if set, this allows definition of parallelized tests, 
+ * that is tests that make use of parallelization. This does NOT run multiple 
+ * tests in parallel; it is purely for defining tests using the PARALLEL_TEST 
+ * macros.
+ */
+#define ENABLE_PARALLELISM 1
+
 #endif

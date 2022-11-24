@@ -1,4 +1,5 @@
 *.o
+*.d
 *.ko
 kernel_module/build/*
 kernel_module/test_suite/build/*

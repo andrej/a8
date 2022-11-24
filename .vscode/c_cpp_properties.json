@@ -1,6 +1,20 @@
 {
     "configurations": [
         {
+            "name": "Library C",
+            "includePath": [
+                "${workspaceFolder}/library/**",
+                "${workspaceFolder}/dependencies/**",
+                "${workspaceFolder}/**",
+                "${default}",
+                "/usr/include/**",
+                "/usr/lib/gcc/x86_64-linux-gnu/5/include"
+            ],
+            "defines": [],
+            "compilerPath": "/usr/bin/gcc",
+            "cStandard": "gnu11"
+        },
+        {
             "name": "Linux Kernel 4.4.0-116 Aarch64",
             "defines": [
                 "__GNUC__",
@@ -14,9 +28,7 @@
                 "/usr/src/linux-headers-4.4.0-116-generic/arch/arm64/include/generated"
             ],
             "compilerPath": "/usr/bin/gcc",
-            "cStandard": "c11",
-            "intelliSenseMode": "linux-clang-arm64",
-            "configurationProvider": "ms-vscode.makefile-tools"
+            "cStandard": "c11"
         },
         {
             "name": "Linux Kernel 4.4.0-210 x86_64",
@@ -32,9 +44,7 @@
                 "/usr/src/linux-headers-4.4.0-116-generic/arch/x86/include/generated"
             ],
             "compilerPath": "/usr/bin/gcc",
-            "cStandard": "c11",
-            "intelliSenseMode": "linux-clang-arm64",
-            "configurationProvider": "ms-vscode.makefile-tools"
+            "cStandard": "c11"
         }
     ],
     "version": 4

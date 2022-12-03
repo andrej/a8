@@ -4,6 +4,7 @@
 #include <linux/init.h>
 #include <linux/types.h>
 #include <linux/ptrace.h>
+#include <linux/uaccess.h>
 #include <trace/events/syscalls.h>
 
 #include "build_config.h"
@@ -11,6 +12,7 @@
 #include "config.h"
 #include "ptrace.h"
 #include "tracepoint_helpers.h"
+#include "syscall_trace_func.h"
 
 // Macros
 #define NO_SYSCALL (__NR_syscalls+1)
@@ -19,16 +21,46 @@
 static struct tracepoint *tp_sys_enter = NULL;
 static struct tracepoint *tp_sys_exit = NULL;
 u64 last_syscall = NO_SYSCALL;
+bool last_was_trusted = false;
 
-// Functions
+
+// Helpers
+
+static int redirect_to_user_trace_func(void __user *target, 
+                                       struct pt_regs *regs)
+{
+	void __user *old_sp = (void __user *)STACK_PTR_REG(regs);
+	void __user *ret_addr = (void __user *)PC_REG(regs);
+	/* This stack looks "upside down" because copy_to_user() will write
+	   contiguously from low address to high address, but the stack grows
+	   from high address to low addres. In other words, the first element 
+	   in this array will be at the bottom (top element of stack). */
+	struct syscall_trace_func_stack stack = {};
+	/* The new stack pointer puts some information past the red zone.
+	   The called callback function is responsible for resetting the 
+	   stack pointer and properly returning to the original code that
+	   invoked the syscall. */
+	void __user *new_sp = old_sp - sizeof(stack) - 128;
+	stack.ret_addr = (long)ret_addr;
+	stack.saved_regs = *regs;
+	TRY(copy_to_user(new_sp, (void *)&stack, sizeof(stack)),
+	    return 1);
+	STACK_PTR_REG(regs) = (unsigned long)new_sp;
+	PC_REG(regs) = (unsigned long)target;
+	return 0;
+}
+
+
+// Probes
+
 static inline int probe_prelude(void *__data, struct pt_regs *regs, u64 id)
 {
 
 	// Exit as early as possible to not slow down other processes system
 	// calls. Keep in mind that any code here will be run for all system
 	// calls.
-	if(monmod_global_config.tracee_pid != current->pid
-	   || !(current->ptrace & PT_PTRACED) 
+	if(0 == monmod_global_config.active
+	   || monmod_global_config.tracee_pid != current->pid
 	   || !monmod_syscall_is_active(id)) {
 		return 1;
 	}
@@ -47,23 +79,51 @@ static void sys_enter_probe(void *__data, struct pt_regs *regs, long id)
 	if(0 != probe_prelude(__data, regs, id)) {
 		return;
 	}
+	
+	printk("monmod: <%d> syscall call site %p, trusted area %p + 32\n",
+		monmod_global_config.tracee_pid,
+	       (void *)PC_REG(regs),
+	       monmod_global_config.trusted_addr);
+
+	if(monmod_global_config.trusted_addr <= (void *)PC_REG(regs)
+	   && (void *)PC_REG(regs) <= monmod_global_config.trusted_addr + PAGE_SIZE) {
+	   /* FIXME FIXME FIXME -- Proeprly define trusted region start and
+	      end addresses. */
+	   	last_was_trusted = true;
+#if MONMOD_LOG_INFO
+		printk(KERN_INFO "monmod: trusted syscall at PC %p\n",
+		       (void *)PC_REG(regs));
+#endif
+		/* Let code inside the trusted region issue system calls
+		   regularly with no intervention from this module (otherwise
+		   would lead to infinite recurison). */
+		return;
+	}
+	last_was_trusted = false;
+
 	last_syscall = id;
 #if MONMOD_LOG_INFO
 	printk(KERN_INFO "monmod: <%d> forwarding system call %lu entry\n", 
 	       monmod_global_config.tracee_pid, id);
 #endif
-	if(0 != monmod_ptrace_report_syscall_entry(regs)) {
-		printk(KERN_WARNING " monmod: target client used "
-		       "PTRACE_SYSCALL, "
-		       "which is not the intended use. Use PTRACE_CONT to be "
-		       "notified of syscall stops under monmod.\n");
-	}
+
+	redirect_to_user_trace_func(monmod_global_config.trusted_addr, regs);
+	SYSCALL_NO_REG(regs) = (unsigned long)-1;
+
+	// Put stuff on user stack
+	
+	//if(0 != monmod_ptrace_report_syscall_entry(regs)) {
+	//	printk(KERN_WARNING " monmod: target client used "
+	//	       "PTRACE_SYSCALL, "
+	//	       "which is not the intended use. Use PTRACE_CONT to be "
+	//	       "notified of syscall stops under monmod.\n");
+	//}
 }
 
 static void sys_exit_probe(void *__data, struct pt_regs *regs, 
                            unsigned long return_value)
 {
-	if(NO_SYSCALL == last_syscall) {
+	if(NO_SYSCALL == last_syscall || last_was_trusted) {
 		return;
 	}
 	if(0 != probe_prelude(__data, regs, last_syscall)) {
@@ -73,15 +133,17 @@ static void sys_exit_probe(void *__data, struct pt_regs *regs,
 	printk(KERN_INFO "monmod: <%d> forwarding system call exit value %lu\n",
 	       monmod_global_config.tracee_pid, return_value);
 #endif
-	if(0 != monmod_ptrace_report_syscall_exit(regs)) {
-		printk(KERN_WARNING " monmod: target client used "
-		       "PTRACE_SYSCALL, "
-		       "which is not the intended use. Use PTRACE_CONT to be "
-		       "notified of syscall stops under monmod.\n");
-	}
+	//if(0 != monmod_ptrace_report_syscall_exit(regs)) {
+	//	printk(KERN_WARNING " monmod: target client used "
+	//	       "PTRACE_SYSCALL, "
+	//	       "which is not the intended use. Use PTRACE_CONT to be "
+	//	       "notified of syscall stops under monmod.\n");
+	//}
 	last_syscall = NO_SYSCALL;
 }
 
+
+// Init
 
 static int __init monmod_init(void)
 {

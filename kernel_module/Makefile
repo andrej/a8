@@ -31,15 +31,18 @@ ifeq ($(ARCH),x86_64)
 endif
 KERNEL_RELEASE ?= $(shell uname -r)
 
-BUILD_DIR      ?= $(PWD)/build
+BUILD_DIR      ?= $(CURDIR)/build
+
+TEST_BUILD_DIR ?= $(CURDIR)/tests_build
 TEST_SRCS_DIR  ?= tests
-TEST_SUITE_DIR ?= test_suite
+TEST_SUITE_DIR ?= ../test_suite
 TEST_CC        ?= gcc
 TEST_CFLAGS    ?= \
-    -I./include -I./arch/$(ARCH)/include -I. -g \
+    -I./include -I./arch/$(ARCH)/include -I.. -g \
 #    -I/usr/src/linux-headers-$(KERNEL_RELEASE)/include \
 #    -I/usr/src/linux-headers-$(KERNEL_RELEASE)/arch/$(ARCH)/include \
 #    -I/usr/src/linux-headers-$(KERNEL_RELEASE)/arch/$(ARCH)/include/generated
+
 TEST_DEPS_EXCLUDE ?= \
 	src/main.o \
 	src/export_symbols.o \
@@ -55,8 +58,8 @@ src = BUILD_DIR
 include ./Kbuild
 
 TEST_SRCS      := $(shell find $(TEST_SRCS_DIR) -name \*.c)
-TEST_OBJS      := $(TEST_SRCS:%.c=$(TEST_SUITE_DIR)/%.o)
-TEST_DEP_OBJS  := $(patsubst %.o,$(TEST_SUITE_DIR)/dependencies/%.o,\
+TEST_OBJS      := $(TEST_SRCS:$(TEST_SRCS_DIR)/%.c=$(TEST_BUILD_DIR)/%.o)
+TEST_DEP_OBJS  := $(patsubst %.o,$(BUILD_DIR)/%.o,\
                     $(filter-out $(TEST_DEPS_EXCLUDE),$(monmod-y)))
 
 
@@ -90,23 +93,19 @@ clean: clean_tests
 # Build tests without Kbuild
 .PHONY: tests
 tests: $(TEST_OBJS) $(TEST_DEP_OBJS)
-	cd $(TEST_SUITE_DIR); make
+	make -f $(TEST_SUITE_DIR)/Makefile \
+		SUITE_DIR=$(TEST_SUITE_DIR) \
+		TEST_OBJS="$(TEST_OBJS) $(TEST_DEP_OBJS)" \
+		BUILD_DIR=$(TEST_BUILD_DIR)
 
-$(TEST_SUITE_DIR)/tests/%.o: tests/%.c
+$(TEST_BUILD_DIR)/%.o: $(TEST_SRCS_DIR)/%.c
 	@mkdir -p $(@D)
 	$(TEST_CC) $(TEST_CFLAGS) -o $@ -c $<
 
-$(TEST_SUITE_DIR)/dependencies/%.o: $(BUILD_DIR)/%.o
-	$(info called)
-	@mkdir -p $(@D)
-	ln -s -t $(@D) $^ 
-
 .PHONY: clean_tests
 clean_tests: 
-	rm -rf $(TEST_SUITE_DIR)/tests/*
-	rm -rf $(TEST_SUITE_DIR)/dependencies/*
-	cd $(TEST_SUITE_DIR); make clean
+	rm -rf $(TEST_BUILD_DIR)
 
-.PHONY: run_tests
-run_tests:
-	$(TEST_SUITE_DIR)/build/test
+.PHONY: runtests
+runtests: tests
+	$(TEST_BUILD_DIR)/test

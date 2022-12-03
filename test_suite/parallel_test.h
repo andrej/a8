@@ -10,7 +10,6 @@ struct _test_main_thread_info {
 	pthread_barrier_t barrier;
 	pthread_mutex_t done_mutex;
 	pthread_cond_t done_cond;
-	int done_thread_num;
 };
 
 struct _test_thread_info {
@@ -18,7 +17,10 @@ struct _test_thread_info {
 	pthread_t thread_id;
 	int thread_num;
 	int is_done;
+	int is_joined;
 };
+
+#define mainthread(x) x
 
 #define PARALLEL_TEST(name, nthreads) \
 	static void *_test_##name##_thread(void *arg); \
@@ -28,7 +30,6 @@ struct _test_thread_info {
 		int s; \
 		pthread_attr_t attr; \
 		struct _test_main_thread_info minfo = {}; \
-		minfo.done_thread_num = -1; \
 		TEST_TRY_OR_RETURN(pthread_attr_init(&attr), 1); \
 		TEST_TRY_OR_RETURN(pthread_barrier_init(&minfo.barrier, \
 		                                        NULL, nthreads), 1); \
@@ -41,6 +42,7 @@ struct _test_thread_info {
 			tinfo[i].thread_num = i; \
 			tinfo[i].main_info = &minfo; \
 			tinfo[i].is_done = 0; \
+			tinfo[i].is_joined = 0; \
 			TEST_TRY_OR_RETURN( \
 				pthread_create(&tinfo[i].thread_id, &attr, \
 			                       &_test_##name##_thread, \
@@ -50,23 +52,29 @@ struct _test_thread_info {
 		int ret = 0; \
 		for(int i = 0; i < nthreads; i++) { \
 			void *res; \
-			int done_thread_num; \
+			int done_thread_num = -1; \
 			TEST_TRY_OR_RETURN( \
-				pthread_mutex_lock(&minfo.done_mutex), \
+				mainthread(pthread_mutex_lock(&minfo.done_mutex)), \
 				1); \
-			while(0 > minfo.done_thread_num) { \
+			while(1) { \
+				for(int j = 0; j < nthreads; j++) { \
+					if(tinfo[j].is_joined) { \
+						continue; \
+					} \
+					if(tinfo[j].is_done) { \
+						done_thread_num = j; \
+						break; \
+					} \
+				} \
+				if(0 <= done_thread_num) { \
+					break; \
+				} \
 				TEST_TRY_OR_RETURN( \
 					pthread_cond_wait(&minfo.done_cond,  \
 				                          &minfo.done_mutex), \
 					1); \
 			} \
-			done_thread_num = minfo.done_thread_num; \
-			if(0 < done_thread_num) { \
-				tinfo[done_thread_num].is_done = 1; \
-			} \
-			minfo.done_thread_num = -1; \
-			TEST_TRY_OR_RETURN( \
-				pthread_mutex_unlock(&minfo.done_mutex), 1);  \
+			tinfo[done_thread_num].is_joined = 1; \
 			TEST_TRY_OR_RETURN( \
 				pthread_join(tinfo[done_thread_num].thread_id, \
 			                     &res), \
@@ -74,7 +82,7 @@ struct _test_thread_info {
 			/* If one thread failed the test, cancel the others.*/ \
 			if(NULL != res) { \
 				for(int j = 0; j < nthreads; j++) { \
-					if(tinfo[j].is_done) { \
+					if(tinfo[j].is_joined) { \
 						continue; \
 					} \
 					/* Do not check for errors here; other \
@@ -84,9 +92,19 @@ struct _test_thread_info {
 				ret = 2; \
 				break; \
 			} \
+			TEST_TRY_OR_RETURN( \
+				mainthread(pthread_mutex_unlock(&minfo.done_mutex)), 1);  \
 		} \
 		TEST_TRY_OR_RETURN(pthread_attr_destroy(&attr), 1); \
-		TEST_TRY_OR_RETURN(pthread_barrier_destroy(&minfo.barrier), 1);\
+		/* Barriers that are waited-for cannot be destroyed. Since  \
+		   some threads may quit prematurely (failing tests) while \
+		   others continue to issue barrier-waits (racing with  \
+		   pthread_cancel), we choose not to destroy the barrier here. \
+		   This should be fine since we run each test in a separate  \
+		   process, so when the process dies, the barrier is destroyed.\
+		   */ \
+		/* TEST_TRY_OR_RETURN(\
+			pthread_barrier_destroy(&minfo.barrier), 1); */\
 		TEST_TRY_OR_RETURN(pthread_mutex_destroy(&minfo.done_mutex), \
 		                   1); \
 		TEST_TRY_OR_RETURN(pthread_cond_destroy(&minfo.done_cond), 1); \
@@ -96,10 +114,13 @@ struct _test_thread_info {
 		int ret; \
 		struct _test_thread_info *tinfo = arg; \
 		ret = _test_##name##_thread_inner(tinfo); \
+		if(ret != 0) { \
+			\
+		} \
 		TEST_TRY_OR_RETURN(\
 			pthread_mutex_lock(&tinfo->main_info->done_mutex), \
 			(void *)1L); \
-		tinfo->main_info->done_thread_num = tinfo->thread_num; \
+		tinfo->is_done = 1; \
 		TEST_TRY_OR_RETURN(\
 			pthread_cond_signal(&tinfo->main_info->done_cond), \
 			(void *)1L); \
@@ -111,6 +132,7 @@ struct _test_thread_info {
 	static inline int _test_##name##_thread_inner(struct _test_thread_info \
 	                                              *tinfo)
 
+#define THREAD_NUM() (tinfo->thread_num)
 #define ON_THREAD(n) if(tinfo->thread_num == n)
 
 #define BARRIER() ({ \

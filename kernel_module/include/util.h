@@ -20,7 +20,7 @@
 
 #define TRY(x, except) ({ \
 	if(0 != (x)) { \
-		printk(KERN_WARNING "lkm-fasttrace: " #x " failed\n"); \
+		printk(KERN_WARNING "monmod: " #x " failed\n"); \
 	 	except; \
 	} \
 })

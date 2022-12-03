@@ -1,4 +1,3 @@
-
 #include <linux/module.h>
 #include "util.h"
 #include "config.h"
@@ -30,14 +29,23 @@ struct monmod_config monmod_global_config = {};
  * Internal Variables                                                         *
  * ************************************************************************** */
 
+// FIXME In the following two, set more reasonable file permissions
+// (probably 0664)
 static struct kobj_attribute pid_attribute = 
     __ATTR(pid, 0664, _monmod_config_pid_show, _monmod_config_pid_store);
+static struct kobj_attribute addr_attribute = 
+    __ATTR(addr, 0664, _monmod_config_addr_show, _monmod_config_addr_store);
+static struct kobj_attribute active_attribute = 
+    __ATTR(active, 0664, _monmod_config_active_show, 
+           _monmod_config_active_store);
 static struct kobj_attribute traced_syscalls_attribute = 
     __ATTR(traced_syscalls, 0664, _monmod_config_traced_syscalls_show, 
            _monmod_config_traced_syscalls_store);
 
 static struct attribute *attrs[] = {
     &pid_attribute.attr,
+    &addr_attribute.attr,
+    &active_attribute.attr,
     &traced_syscalls_attribute.attr,
     NULL,
 };
@@ -164,32 +172,79 @@ static inline int _config_callback_sanity_checks(const struct kobject *kobj,
     return 0;
 }
 
-ssize_t _monmod_config_pid_show(struct kobject *kobj, 
-                                struct kobj_attribute *attr, 
-                                char *buf)
+
+// Generic callbacks
+
+ssize_t _monmod_config_long_show(struct kobject *kobj, 
+                                 struct kobj_attribute *attr, 
+                                 char *buf,
+                                 long val)
 {
     if(0 != _config_callback_sanity_checks(kobj, attr, buf)) {
         return -1;
     }
-    return snprintf(buf, PAGE_SIZE, "%d\n", 
-                    monmod_global_config.tracee_pid);
+    return snprintf(buf, PAGE_SIZE, "%ld\n", val);
 }
 
-ssize_t _monmod_config_pid_store(struct kobject *kobj, 
-                                 struct kobj_attribute *attr, 
-                                 const char *buf, 
-                                 size_t count)
+ssize_t _monmod_config_int_or_long_store(struct kobject *kobj, 
+                                         struct kobj_attribute *attr, 
+                                         const char *buf, 
+                                         size_t count,
+                                         bool is_long,
+                                         long *dest)
 {
     int ret = -1;
     if(0 != _config_callback_sanity_checks(kobj, attr, buf)) {
         return -1;
     }
-    TRY(ret = kstrtoint(buf, 10, &monmod_global_config.tracee_pid),
-        return -1);
-    printk(KERN_INFO "monmod: set PID to %d\n", 
-           monmod_global_config.tracee_pid);
+    if(is_long) {
+        TRY(ret = kstrtol(buf, 10, dest),
+            return -1);
+    } else {
+        TRY(ret = kstrtoint(buf, 10, (int *)dest),
+            return -1);
+    }
     return count;
 }
+
+#define CONFIG_LONG_SHOW_FUN(name, config_name) \
+    ssize_t _monmod_config_ ## name ## _show(struct kobject *kobj,  \
+                                             struct kobj_attribute *attr, \
+                                             char *buf) \
+    { \
+        ssize_t ret = _monmod_config_long_show( \
+                        kobj, attr, buf, \
+                        (long)monmod_global_config.config_name); \
+        return ret; \
+    } 
+
+#define CONFIG_LONG_STORE_FUN(name, config_name, is_long) \
+    ssize_t _monmod_config_ ## name ## _store(struct kobject *kobj, \
+                                              struct kobj_attribute *attr, \
+                                              const char *buf, \
+                                              size_t count) \
+    { \
+        ssize_t ret = _monmod_config_int_or_long_store( \
+                        kobj, attr, buf, count, is_long, \
+                        (long *)&monmod_global_config.config_name); \
+        if(0 < ret) { \
+            printk(KERN_INFO "monmod: Set configuration " #name " to %ld\n", \
+                (long)monmod_global_config.config_name); \
+        } else { \
+            printk(KERN_WARNING "monmod: Failed to set configuration " #name \
+                   " with return value %ld\n", ret); \
+        } \
+        return ret; \
+    }
+
+// Specific setting callbacks
+
+CONFIG_LONG_SHOW_FUN(pid, tracee_pid)
+CONFIG_LONG_STORE_FUN(pid, tracee_pid, false)
+CONFIG_LONG_SHOW_FUN(addr, trusted_addr)
+CONFIG_LONG_STORE_FUN(addr, trusted_addr, true)
+CONFIG_LONG_SHOW_FUN(active, active)
+CONFIG_LONG_STORE_FUN(active, active, false)
 
 ssize_t _monmod_config_traced_syscalls_show(struct kobject *kobj, 
                                             struct kobj_attribute *attr, 
@@ -250,7 +305,7 @@ ssize_t _monmod_config_traced_syscalls_store(struct kobject *kobj,
         consumed += line_len;
     }
 
-    printk(KERN_INFO "monmod: configuration updated\n");
+    printk(KERN_INFO "monmod: Traced syscalls configuration updated\n");
 
     return consumed;
 }

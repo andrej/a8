@@ -15,6 +15,7 @@
 #include <linux/unistd.h>
 #include <linux/kobject.h>
 #include <linux/sysfs.h>
+#include <linux/uaccess.h>
 #endif
 
 #include "build_config.h"
@@ -36,7 +37,8 @@
 struct monmod_config {
 	struct kobject *kobj;
 	pid_t tracee_pid;
-	pid_t tracer_pid;
+        void __user *trusted_addr;
+        long active;
 	u64 syscall_masks[MONMOD_N_SYSCALL_MASKS];
 };
 
@@ -63,17 +65,26 @@ int monmod_syscall_deactivate(u64 syscall_no);
 int _monmod_syscall_mask_index(u64 syscall_no);
 int _monmod_syscall_mask_offset(u64 syscall_no);
 
-ssize_t _monmod_config_pid_show(struct kobject *kobj, 
-                                struct kobj_attribute *attr, 
-                                char *buf);
-ssize_t _monmod_config_pid_store(struct kobject *kobj, 
-                                 struct kobj_attribute *attr, 
-                                 const char *buf, size_t count);
-ssize_t _monmod_config_traced_syscalls_show(struct kobject *kobj, 
-                                            struct kobj_attribute *attr,
-                                            char *buf);
-ssize_t _monmod_config_traced_syscalls_store(struct kobject *kobj, 
-                                             struct kobj_attribute *attr, 
-				             const char *buf, size_t count);
+#define CONFIG_SHOW_PROT(name) \
+        ssize_t _monmod_config_ ## name ## _show(struct kobject *kobj, \
+                                                 struct kobj_attribute *attr, \
+                                                 char *buf);
+#define CONFIG_STORE_PROT(name) \
+        ssize_t _monmod_config_ ## name ## _store(struct kobject *kobj, \
+                                                  struct kobj_attribute *attr, \
+                                                  const char *buf, \
+                                                  size_t count);
+
+CONFIG_SHOW_PROT(pid)
+CONFIG_STORE_PROT(pid)
+
+CONFIG_SHOW_PROT(addr)
+CONFIG_STORE_PROT(addr)
+
+CONFIG_SHOW_PROT(active)
+CONFIG_STORE_PROT(active)
+
+CONFIG_SHOW_PROT(traced_syscalls)
+CONFIG_STORE_PROT(traced_syscalls)
 
 #endif

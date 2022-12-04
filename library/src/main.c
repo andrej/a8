@@ -5,6 +5,7 @@
 #include <sys/syscall.h>
 #include <sys/user.h>
 #include <stdio.h>
+#include "arch.h"
 #include "syscall.h"
 #include "util.h"
 #include "config.h"
@@ -12,18 +13,6 @@
 #include "build_config.h"
 #include "syscall_trace_func.h"
 
-//#define PREPARE_RETURN_FROM_TRUSTED_AREA(stack_args_sz) \
-//	asm("mov %%rsp,%%rbp\n\t" /* undo what function prologue did; \
-//	                             this gives us SP like when kernel invoked \
-//				     the function (with struct args on stack) \
-//				     + the pushed rbp from function prologue */\
-//	    "sub $8,%%r8\n\t" /* old base pointer ... disregard */ \
-//	    "pop %%r8\n\t" /* return address in %r8 */ \
-//	    "sub %0,%%rsp\n\t" /* remove our args to restore original RSP */ \
-//	    "j %%r8" /* push return address for subsequent return */ \
-//	    : \
-//	    : "i" (stack_args_sz) \
-//	    : "rbp", "rsp", "r8", "memory")
 struct config conf;
 int own_id;
 struct communicator comm;
@@ -40,26 +29,27 @@ long trusted_area(struct syscall_trace_func_args *args)
 	char log[128];
 	long ret = 0;
 	int len = 0;
+	struct pt_regs *regs = &(args->regs);
 
 	len = snprintf(log, sizeof(log),
 	              "Entering system call %ld, called from %p.\n",
-		      args->regs.orig_rax,
+		      SYSCALL_NO_REG(regs),
 		      args->call_site);
 	if(0 < len && len < sizeof(log)) {
 		monmod_syscall(__NR_write, 0, (long)log, (long)len, 0, 0, 0);
 	}
 
-	ret = monmod_syscall(args->regs.orig_rax,
-	                     args->regs.rdi, 
-	                     args->regs.rsi, 
-	                     args->regs.rdx, 
-	                     args->regs.r10, 
-	                     args->regs.r8,
-	                     args->regs.r9);
+	ret = monmod_syscall(SYSCALL_NO_REG(regs),
+	                     SYSCALL_ARG0_REG(regs), 
+	                     SYSCALL_ARG1_REG(regs), 
+	                     SYSCALL_ARG2_REG(regs), 
+	                     SYSCALL_ARG3_REG(regs), 
+	                     SYSCALL_ARG4_REG(regs),
+	                     SYSCALL_ARG5_REG(regs));
 
 	len = snprintf(log, sizeof(log),
 	              "System call %ld returned %ld.\n",
-		      args->regs.orig_rax,
+		      SYSCALL_NO_REG(regs),
 		      ret);
 	if(0 < len && len < sizeof(log)) {
 		monmod_syscall(__NR_write, 0, (long)log, (long)len, 0, 0, 0);

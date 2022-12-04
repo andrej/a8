@@ -61,6 +61,16 @@ MOCK(int, kstrtoint, const char *s, unsigned int base, int *res)
 	return 0;
 }
 
+MOCK(int, kstrtoll, const char *s, unsigned int base, int *res)
+{
+	long long tmp = 0;
+	if(1 != sscanf(s, "%lld", &tmp)) { 
+		return -EINVAL;
+	}
+	*res = tmp;
+	return 0;
+}
+
 TEST(next_int_line)
 {
 	const char buf[] = "123\n"

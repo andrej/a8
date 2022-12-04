@@ -108,7 +108,13 @@ static void sys_enter_probe(void *__data, struct pt_regs *regs, long id)
 #endif
 
 	redirect_to_user_trace_func(monmod_global_config.trusted_addr, regs);
-	SYSCALL_NO_REG(regs) = (unsigned long)-1;
+	/* The following should cause a -ENOSYS return on both x86_64 and
+	   aarch64. If we use -1, aarch64 will go through the
+	   __sys_trace_return_skipped path (entry.S:719), which will also report
+	   trace_sys_exit(). For consistency with x86_64, which does not do
+	   that, we choose -2, which sould be well out of range as well and
+	   return -ENOSYS on both architectures. */
+	SYSCALL_NO_REG(regs) = (unsigned long)-2;
 
 	// Put stuff on user stack
 	

@@ -37,7 +37,11 @@
 struct monmod_config {
 	struct kobject *kobj;
 	pid_t tracee_pid;
+#ifndef TEST_H
         void __user *trusted_addr;
+#else
+        void *trusted_addr;
+#endif
         long active;
 	u64 syscall_masks[MONMOD_N_SYSCALL_MASKS];
 };

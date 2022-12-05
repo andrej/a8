@@ -4,12 +4,15 @@
 #include "test_suite/test.h"
 #include "../include/config.h"
 
+// Mock needed for running tests outside kernel ...
+struct sysfs_ops kobj_sysfs_ops = {};
+
 TEST(global_config)
 {
+	int i = 0;
 	fflush(stdout);
-	ASSERT(monmod_global_config.kobj == NULL);
-	ASSERT(monmod_global_config.tracee_pid == 0);
-	for(int i = 0; i < MONMOD_N_SYSCALL_MASKS; i++) {
+	ASSERT_EQ(monmod_global_config.n_tracees, 0);
+	for(i = 0; i < MONMOD_N_SYSCALL_MASKS; i++) {
 		ASSERT(monmod_global_config.syscall_masks[i] == 0);
 	}
 	return 0;
@@ -19,7 +22,7 @@ TEST(config_struct)
 {
 	struct monmod_config conf = {};
 	ASSERT(sizeof(conf) > sizeof(u64));
-	ASSERT(conf.tracee_pid == 0);
+	ASSERT_EQ(conf.n_tracees, 0);
 	ASSERT(MONMOD_N_SYSCALL_MASKS > 0);
 	ASSERT(MONMOD_N_SYSCALL_MASKS < 32);
 	return 0;
@@ -53,8 +56,8 @@ TEST(mask_offset)
 
 TEST(mask_activate_deactivate)
 {
+	u64 no;
 	monmod_global_config = (struct monmod_config){};
-	monmod_global_config.kobj = (struct kobject *)0x01;
 	ASSERT(monmod_syscall_is_active(0) == 0);
 	ASSERT(monmod_syscall_is_active(1) == 0);
 	ASSERT(monmod_syscall_is_active(7) == 0);
@@ -83,7 +86,7 @@ TEST(mask_activate_deactivate)
 	ASSERT(monmod_syscall_deactivate(65) == 1);
 	ASSERT(monmod_syscall_is_active(65) == 0);
 
-	for(u64 no = 0; no < __NR_syscalls; no++) {
+	for(no = 0; no < __NR_syscalls; no++) {
 		ASSERT(monmod_syscall_is_active(no) == 0);
 		ASSERT(monmod_syscall_activate(no) == 0);
 		ASSERT(monmod_syscall_activate(no) == 1);
@@ -94,19 +97,17 @@ TEST(mask_activate_deactivate)
 	return 0;
 }
 
-int mocked_kobject_create_and_add_calls = 0;
-MOCK(struct kobject *, kobject_create_and_add, const char *name, 
-     struct kobject *parent)
+int mocked_kobject_init_and_add_calls = 0;
+MOCK(int, kobject_init_and_add, 
+     struct kobject *kobject,
+     struct kobj_type *ktype,
+     struct kobject *parent,
+     const char *name)
 {
-	mocked_kobject_create_and_add_calls += 1;
-	struct kobject *kobj = malloc(sizeof(struct kobject));
-	if(!kobj) {
-		printf("Out of memory!");
-		raise(SIGSEGV);
-	}
-	kobj->name = name;
-	kobj->parent = parent;
-	return kobj;
+	mocked_kobject_init_and_add_calls += 1;
+	kobject->name = name;
+	kobject->parent = parent;
+	return 0;
 }
 
 int mocked_sysfs_create_group_calls = 0;
@@ -123,34 +124,21 @@ TEST(monmod_config_init)
 {
 	// reset config object from any previous tests
 	monmod_global_config = (struct monmod_config){};
-	int prev_calls = mocked_kobject_create_and_add_calls;
+	int prev_calls = mocked_kobject_init_and_add_calls;
 	ASSERT(monmod_config_init() == 0);
-	ASSERT(mocked_kobject_create_and_add_calls == prev_calls + 1);
-	ASSERT(monmod_global_config.kobj != NULL);
-	ASSERT(monmod_global_config.kobj->parent == kernel_kobj);
-	ASSERT(strcmp(monmod_global_config.kobj->name, "monmod") == 0);
-	ASSERT(monmod_config_init() == 1);  // repeated calls not ok
-	if(monmod_global_config.kobj != NULL) {
-		free(monmod_global_config.kobj);
-		monmod_global_config.kobj = NULL;
-	}
+	ASSERT(mocked_kobject_init_and_add_calls == prev_calls + 1);
+	ASSERT(monmod_global_config.kobj.parent == kernel_kobj);
+	ASSERT(strcmp(monmod_global_config.kobj.name, "monmod") == 0);
 	return 0;
 }
 
 TEST(_config_show_traced_syscalls)
 {
 	struct kobject kobj_a = {};
-	struct kobject kobj_b = {};
 	char buf[PAGE_SIZE] = "";
 	monmod_global_config = (struct monmod_config){};
-	monmod_global_config.kobj = &kobj_a;
 	ASSERT(_monmod_config_traced_syscalls_show(NULL, NULL, NULL) < 0);
 	ASSERT(_monmod_config_traced_syscalls_show(&kobj_a, NULL, NULL) < 0);
-	// for safety, method should only work if container_of(kobj) is 
-	// monmod_global_config
-	ASSERT(_monmod_config_traced_syscalls_show(&kobj_b, NULL, buf) < 0);
-	ASSERT(_monmod_config_traced_syscalls_show(&kobj_a, NULL, buf) < 0);
-	monmod_global_config.kobj = NULL;
 	return 0;
 }
 
@@ -158,9 +146,6 @@ int mocked_kobject_put_calls = 0;
 MOCK(void, kobject_put, struct kobject *kobj)
 {
 	mocked_kobject_put_calls += 1;
-	if(kobj) {
-		free(kobj);
-	}
 }
 
 TEST(monmod_config_free)
@@ -168,13 +153,12 @@ TEST(monmod_config_free)
 	int prev_calls = mocked_kobject_put_calls;
 	monmod_config_free();
 	ASSERT(mocked_kobject_put_calls = prev_calls+1);
-	ASSERT(monmod_global_config.kobj == NULL);
 	return 0;
 }
 
 TEST(config_traced_syscalls_store)
 {
-	struct kobject kobj = {};
+	struct kobject *kobj = &monmod_global_config.kobj;
 	struct kobj_attribute attr = {};
 	const char buf1[] = "123\n"
 		"45\n"
@@ -186,12 +170,11 @@ TEST(config_traced_syscalls_store)
 		"2\n";
 	const char buf3[] = { '\n' };
 	monmod_global_config = (struct monmod_config){};
-	monmod_global_config.kobj = &kobj;
-	kobj.name = "monmod";
+	monmod_global_config.kobj.name = "monmod";
 	attr.name = "traced_syscalls";
 
 	ASSERT_EQ(sizeof(buf1), _monmod_config_traced_syscalls_store(
-		&kobj, &attr, buf1, sizeof(buf1)));
+		kobj, &attr, buf1, sizeof(buf1)));
 	ASSERT_EQ(0, monmod_syscall_is_active(1));
 	ASSERT_EQ(0, monmod_syscall_is_active(99));
 	ASSERT_EQ(0, monmod_syscall_is_active(5));
@@ -200,7 +183,7 @@ TEST(config_traced_syscalls_store)
 	ASSERT_EQ(1, monmod_syscall_is_active(6));
 
 	ASSERT_EQ(-1, _monmod_config_traced_syscalls_store(
-		&kobj, &attr, buf2, sizeof(buf2)));
+		kobj, &attr, buf2, sizeof(buf2)));
 	ASSERT_EQ(0, monmod_syscall_is_active(1));
 	ASSERT_EQ(0, monmod_syscall_is_active(123));
 	ASSERT_EQ(0, monmod_syscall_is_active(45));
@@ -209,9 +192,8 @@ TEST(config_traced_syscalls_store)
 	ASSERT_EQ(1, monmod_syscall_is_active(5));
 	ASSERT_EQ(0, monmod_syscall_is_active(2));
 
-
 	ASSERT_EQ(sizeof(buf3), _monmod_config_traced_syscalls_store(
-		&kobj, &attr, buf3, sizeof(buf3)));
+		kobj, &attr, buf3, sizeof(buf3)));
 	ASSERT_EQ(0, monmod_syscall_is_active(1));
 	ASSERT_EQ(0, monmod_syscall_is_active(123));
 	ASSERT_EQ(0, monmod_syscall_is_active(45));
@@ -219,5 +201,83 @@ TEST(config_traced_syscalls_store)
 	ASSERT_EQ(0, monmod_syscall_is_active(99));
 	ASSERT_EQ(0, monmod_syscall_is_active(5));
 	ASSERT_EQ(0, monmod_syscall_is_active(2));
+	return 0;
+}
+
+TEST(_config_show_tracee_pids)
+{
+	ssize_t ret;
+	struct kobject *kobj = &monmod_global_config.kobj;
+	struct kobj_attribute attr = {};
+	char buf[PAGE_SIZE] = "";
+	char target_buf1[] = "32\n"
+	                   "42\n"
+	                   "57\n";
+	char target_buf2[] = "42\n";
+	monmod_global_config = (struct monmod_config){};
+	monmod_global_config.n_tracees = 3;
+	monmod_global_config.tracee_pids[2] = 32;
+	monmod_global_config.tracee_pids[3] = 42;
+	monmod_global_config.tracee_pids[6] = 57;
+	ret = _monmod_config_tracee_pids_show(kobj, &attr, buf);
+	ASSERT_EQ(ret, sizeof(target_buf1));
+	ASSERT_EQ(strcmp(buf, target_buf1), 0);
+	monmod_global_config.n_tracees = 1;
+	monmod_global_config.tracee_pids[2] = 0;
+	monmod_global_config.tracee_pids[3] = 0;
+	monmod_global_config.tracee_pids[6] = 42;
+	ASSERT_EQ(_monmod_config_tracee_pids_show(kobj, &attr, buf),
+	          sizeof(target_buf2));
+	ASSERT_EQ(strcmp(buf, target_buf2), 0);
+	return 0;
+}
+
+TEST(config_store_tracee_pids)
+{
+	struct kobject *kobj = &monmod_global_config.kobj; 
+	struct kobj_attribute attr = {};
+	const char buf1[] = "123\n"
+		"45\n"
+		"\n"
+		"6";
+	const char buf2[] = "99\n"
+		"5\n"
+		"kk\n"
+		"2\n";
+	const char buf3[] = { '\n' };
+	monmod_global_config = (struct monmod_config){};
+	kobj->name = "monmod";
+	attr.name = "traced_syscalls";
+
+	ASSERT_EQ(sizeof(buf1), _monmod_config_tracee_pids_store(
+		kobj, &attr, buf1, sizeof(buf1)));
+	ASSERT_EQ(0, monmod_is_pid_traced(1));
+	ASSERT_EQ(0, monmod_is_pid_traced(99));
+	ASSERT_EQ(0, monmod_is_pid_traced(5));
+	ASSERT_EQ(1, monmod_is_pid_traced(123));
+	ASSERT_EQ(1, monmod_is_pid_traced(45));
+	ASSERT_EQ(1, monmod_is_pid_traced(6));
+
+	ASSERT_EQ(-1, _monmod_config_tracee_pids_store(
+		kobj, &attr, buf2, sizeof(buf2)));
+	ASSERT_EQ(0, monmod_is_pid_traced(1));
+	ASSERT_EQ(1, monmod_is_pid_traced(123));
+	ASSERT_EQ(1, monmod_is_pid_traced(45));
+	ASSERT_EQ(1, monmod_is_pid_traced(6));
+	ASSERT_EQ(0, monmod_is_pid_traced(99));
+	ASSERT_EQ(0, monmod_is_pid_traced(5));
+	ASSERT_EQ(0, monmod_is_pid_traced(2));
+
+
+	ASSERT_EQ(sizeof(buf3), _monmod_config_tracee_pids_store(
+		kobj, &attr, buf3, sizeof(buf3)));
+	ASSERT_EQ(0, monmod_is_pid_traced(1));
+	ASSERT_EQ(0, monmod_is_pid_traced(123));
+	ASSERT_EQ(0, monmod_is_pid_traced(45));
+	ASSERT_EQ(0, monmod_is_pid_traced(6));
+	ASSERT_EQ(0, monmod_is_pid_traced(99));
+	ASSERT_EQ(0, monmod_is_pid_traced(5));
+	ASSERT_EQ(0, monmod_is_pid_traced(2));
+
 	return 0;
 }

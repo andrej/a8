@@ -1,4 +1,7 @@
-#define __ALIGN	    .align 4, 0x90
+#define EXPORT(name)           \
+        .globl name;           \
+	name:
+
 #define ENTRY(name)            \
 	.globl name;           \
 	.type name, @function; \
@@ -15,4 +18,5 @@ ENTRY(monmod_syscall)
 	movq %r9, %r8
 	movq 8(%rsp), %r9
 	syscall
+EXPORT(monmod_syscall_trusted_addr)
 	ret  # return raw syscall return value in %rax

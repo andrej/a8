@@ -1,7 +1,8 @@
 
 EXTRA_CFLAGS += -I$(src)/include -I$(src)/arch/$(ARCH)/include
 obj-m += monmod.o
-cflags-y := -I$(src)/include -I$(src)/arch/$(ARCH)/include
+#CC += -ggdb
+cflags-y := -I$(src)/include -I$(src)/arch/$(ARCH)/include 
 monmod-y := \
 	src/main.o \
 	src/config.o \

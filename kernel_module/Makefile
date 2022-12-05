@@ -39,6 +39,18 @@ TEST_SUITE_DIR ?= ../test_suite
 TEST_CC        ?= gcc
 TEST_CFLAGS    ?= \
     -I./include -I./arch/$(ARCH)/include -I.. -g \
+    -fno-pie -Wall -Wundef -Wstrict-prototypes -Wno-trigraphs \
+    -fno-strict-aliasing -fno-common -Werror-implicit-function-declaration \
+    -Wno-format-security -std=gnu89 -fno-PIE -fno-pie -no-pie \
+    -DCONFIG_AS_LSE=1 \
+    -fno-delete-null-pointer-checks -Wno-maybe-uninitialized -O2 \
+    --param=allow-store-data-races=0 -DCC_HAVE_ASM_GOTO \
+    -Wframe-larger-than=1024 -fstack-protector-strong \
+    -Wno-unused-but-set-variable -fno-omit-frame-pointer \
+    -fno-optimize-sibling-calls -fno-var-tracking-assignments -pg \
+    -Wdeclaration-after-statement -Wno-pointer-sign -fno-strict-overflow \
+    -fconserve-stack -Werror=implicit-int -Werror=strict-prototypes \
+    -Werror=date-time -DMODULE -mcmodel=large 
 #    -I/usr/src/linux-headers-$(KERNEL_RELEASE)/include \
 #    -I/usr/src/linux-headers-$(KERNEL_RELEASE)/arch/$(ARCH)/include \
 #    -I/usr/src/linux-headers-$(KERNEL_RELEASE)/arch/$(ARCH)/include/generated

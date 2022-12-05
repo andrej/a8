@@ -21,12 +21,15 @@ DEPS      := $(C_OBJECTS:%.o=%.d)
 TEST_SUITE_DIR := ../test_suite
 TEST_SOURCES   := $(shell find $(TESTS_DIR) -maxdepth 1 -name \*.c)
 TEST_OBJECTS   := $(TEST_SOURCES:%.c=$(BUILD_DIR)/%.o)
-TEST_DEP_OBJS  := $(filter-out $(BUILD_DIR)/$(SOURCE_DIR)/main.o,\
-                               $(OBJECTS))
+TEST_DEP_OBJS  := $(filter-out $(SOURCE_DIRS:%=$(BUILD_DIR)/%/main.o),\
+                               $(C_OBJECTS))
 TEST_DEPS      := $(TEST_OBJECTS:%.o=%.d)
 TEST_LDFLAGS   := 
 TEST_LDLIBS    := ../dependencies/libconfig-install/lib/libconfig.a
 
+
+$(info $(OBJECTS))
+$(info $(TEST_DEP_OBJS))
 
 .PHONY: all
 all: $(BUILD_DIR)/libmonmod.so
@@ -63,3 +66,4 @@ clean:
 
 -include $(DEPS)
 -include $(TEST_DEPS)
+

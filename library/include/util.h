@@ -34,4 +34,25 @@
 #define LZ_TRY(x) LZ_TRY_EXCEPT(x, return 1)
 #define Z_TRY(x) Z_TRY_EXCEPT(x, return 1)
 
+#define SAFE_LOGF(log_fd, msg, ...) { \
+	char log[128]; \
+	int len = 0; \
+	len = snprintf(log, sizeof(log), \
+	              msg, __VA_ARGS__); \
+	if(0 < len && len < sizeof(log)) { \
+		monmod_syscall(__NR_write, log_fd, (long)log, (long)len, \
+		               0, 0, 0); \
+	} \
+}
+
+static inline unsigned long sdbm_hash(size_t buf_len, char *buf) {
+	unsigned long hash = 0;
+	int c = 0;
+	for(size_t i = 0; i < buf_len; i++) {
+		c = buf[i];
+		hash = c + (hash << 6) + (hash << 16) - hash;
+	}
+	return hash;
+}
+
 #endif

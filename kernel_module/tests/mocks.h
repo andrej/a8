@@ -28,12 +28,33 @@ typedef uint64_t u64;
 
 typedef unsigned short umode_t;
 
-struct kobject { const char *name; struct kobject *parent; };
+struct sysfs_ops {};
+
+struct kobject { 
+	const char *name;
+	void *a, *b; /* struct list_head { struct list_head *next, *prev }*/
+	struct kobject *parent;
+	void *c; /* struct kset *kset */
+	void *d; /* struct kobj_type *ktype */
+	void *e; /* struct kernfs_node *sd */
+	int f; /* struct kref { atomic_t( == struct with an int) refcount }*/
+	unsigned int g:1, h:1, i:1, j:1, k:1;
+};
 
 struct kobj_attribute { struct kobject *kobj; const char *name; };
 
 struct attribute { const char *name; umode_t mode; };
 struct attribute_group { const char *name; struct attribute **attrs; };
+
+struct kobj_type {
+	void (*release)(struct kobject *kobj);
+	const struct sysfs_ops *sysfs_ops;
+	struct attribute **default_attrs;
+	/*const struct kobj_ns_type_operations *(*child_ns_type)(struct kobject *kobj);
+	const void *(*namespace)(struct kobject *kobj);*/
+};
+
+extern struct sysfs_ops kobj_sysfs_ops;
 
 struct tracepoint {
 	const char *name;

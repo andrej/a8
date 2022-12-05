@@ -4,7 +4,7 @@
 #include <stdio.h>
 #include "test_config.h"
 
-typedef int (* test_fun_t)();
+typedef int (* test_fun_t)(void);
 struct test {
 	test_fun_t fun;
 	const char *name;
@@ -20,7 +20,7 @@ extern struct test __tests_start;
 extern struct test __tests_end;
 
 #define TEST(name) \
-	int _test_##name(); \
+	int _test_##name(void); \
 	const char __test_ ## name ## _name[] = #name; \
 	const char __test_ ## name ## _file[] = (__FILE__); \
 	struct test __attribute__((section("tests"))) __test_ ## name = { \
@@ -37,8 +37,8 @@ extern struct test __tests_end;
 	}
 
 #define ASSERT_REL(l, r, l_s, r_s, rel, inv_rel_s) { \
-	long long l_v = (l); \
-	long long r_v = (r); \
+	long long l_v = (long long)(l); \
+	long long r_v = (long long)(r); \
 	if(!(l_v rel r_v)) { \
 		printf("\n" __FILE__ ": %d: " l_s " (%lld) " inv_rel_s \
 		       " (%lld) " r_s "\n", __LINE__, l_v, r_v); \

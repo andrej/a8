@@ -11,7 +11,8 @@ struct tracepoint dummy_tps[] = {
 MOCK(void, for_each_kernel_tracepoint,
 	void (*fct)(struct tracepoint *tp, void *priv), void *priv)
 {
-	for(int i = 0; i < sizeof(dummy_tps) / sizeof(dummy_tps[0]); i++) {
+	int i = 0;
+	for(i = 0; i < sizeof(dummy_tps) / sizeof(dummy_tps[0]); i++) {
 		fct(&dummy_tps[i], priv);
 	}
 }

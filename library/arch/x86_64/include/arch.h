@@ -1,7 +1,11 @@
 #ifndef X86_ARCH_H
 #define X86_ARCH_H
 
+#include <sys/syscall.h>
+
 #define __NR_syscalls  __NR_execveat
+#define MIN_SYSCALL_NO __NR_read
+#define MAX_SYSCALL_NO __NR_mlock2
 
 #define SYSCALL_INSTR_SIZE 2 // syscall == 0f 05
 

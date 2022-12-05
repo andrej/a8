@@ -15,13 +15,11 @@
 #include "syscall_trace_func.h"
 
 // Macros
-#define NO_SYSCALL (__NR_syscalls+1)
+#define __NR_monmod_toggle (__NR_syscalls+2)
 
 // Global Variables
 static struct tracepoint *tp_sys_enter = NULL;
 static struct tracepoint *tp_sys_exit = NULL;
-u64 last_syscall = NO_SYSCALL;
-bool last_was_trusted = false;
 
 
 // Helpers
@@ -50,18 +48,49 @@ static int redirect_to_user_trace_func(void __user *target,
 	return 0;
 }
 
+static int sys_monmod_toggle(struct pt_regs *regs,
+                             struct monmod_tracee_config *tracee_conf)
+{
+	const pid_t pid = current->pid;
+	if(tracee_conf->trusted_addr == (void *)PC_REG(regs)) {
+		long arg0 = SYSCALL_ARG0_REG(regs);
+		if(0 != arg0 && 1 != arg0) {
+			printk(KERN_WARNING "monmod: <%d> invalid toggle call "
+			       "with argument %ld.\n", pid,
+			       arg0);
+			return 2;
+		}
+		tracee_conf->active = (bool)arg0;
+#if MONMOD_LOG_INFO
+		if(tracee_conf->active) {
+			printk(KERN_INFO "monmod: <%d> monitoring activated.\n",
+				pid);
+		} else {
+			printk(KERN_INFO "monmod: <%d> monitoring "
+				"deactivated.\n", pid);
+		}
+#endif
+		return 1 | (tracee_conf->active << 1);
+	}
+#if MONMOD_LOG_INFO
+	printk(KERN_INFO "monmod: <%d> attempt to toggle monmod monitoring "
+	       "from non authorized address %p (authorized: %p)\n",
+		pid, (void *)PC_REG(regs), 
+		(void *)tracee_conf->trusted_addr);
+#endif
+	return 2;
+}
+
 
 // Probes
 
-static inline int probe_prelude(void *__data, struct pt_regs *regs, u64 id)
+static inline int probe_prelude(void *__data, struct pt_regs *regs)
 {
-
 	// Exit as early as possible to not slow down other processes system
 	// calls. Keep in mind that any code here will be run for all system
 	// calls.
-	if(0 == monmod_global_config.active
-	   || monmod_global_config.tracee_pid != current->pid
-	   || !monmod_syscall_is_active(id)) {
+	if(0 == monmod_global_config.active 
+	   || !monmod_is_pid_traced(current->pid)) {
 		return 1;
 	}
 #if !MONMOD_SKIP_SANITY_CHECKS
@@ -76,22 +105,33 @@ static inline int probe_prelude(void *__data, struct pt_regs *regs, u64 id)
 
 static void sys_enter_probe(void *__data, struct pt_regs *regs, long id)
 {
-	if(0 != probe_prelude(__data, regs, id)) {
+	const pid_t pid = current->pid;
+	struct monmod_tracee_config *tracee_conf = NULL;
+	if(0 != probe_prelude(__data, regs)) {
 		return;
 	}
-	
-	printk("monmod: <%d> syscall call site %p, trusted area %p + 32\n",
-		monmod_global_config.tracee_pid,
-	       (void *)PC_REG(regs),
-	       monmod_global_config.trusted_addr);
+	if(__NR_monmod_toggle != id && !monmod_syscall_is_active(id)) {
+		return;
+	}
+	if(NULL == (tracee_conf = monmod_get_tracee_config(current->pid))) {
+		printk(KERN_WARNING "monmod: <%d> cannot get config for "
+		       "tracee although it is traced.\n", pid);
+		return;
+	}
+	tracee_conf->inject_return = 0;
+	tracee_conf->last_syscall = id;
 
-	if(monmod_global_config.trusted_addr <= (void *)PC_REG(regs)
-	   && (void *)PC_REG(regs) <= monmod_global_config.trusted_addr + PAGE_SIZE) {
-	   /* FIXME FIXME FIXME -- Proeprly define trusted region start and
-	      end addresses. */
-	   	last_was_trusted = true;
+	if(__NR_monmod_toggle == id) {
+		tracee_conf->inject_return = 
+			sys_monmod_toggle(regs, tracee_conf);
+		return;
+	}
+
+	if(!tracee_conf->active) {
 #if MONMOD_LOG_INFO
-		printk(KERN_INFO "monmod: trusted syscall at PC %p\n",
+		printk(KERN_INFO "monmod: <%d> entering trusted system call "
+		       "%lu at PC %p\n", pid,
+		       (unsigned long)SYSCALL_NO_REG(regs),
 		       (void *)PC_REG(regs));
 #endif
 		/* Let code inside the trusted region issue system calls
@@ -99,15 +139,13 @@ static void sys_enter_probe(void *__data, struct pt_regs *regs, long id)
 		   would lead to infinite recurison). */
 		return;
 	}
-	last_was_trusted = false;
 
-	last_syscall = id;
 #if MONMOD_LOG_INFO
 	printk(KERN_INFO "monmod: <%d> forwarding system call %lu entry\n", 
-	       monmod_global_config.tracee_pid, id);
+	       pid, id);
 #endif
 
-	redirect_to_user_trace_func(monmod_global_config.trusted_addr, regs);
+	redirect_to_user_trace_func(tracee_conf->trace_func_addr, regs);
 	/* The following should cause a -ENOSYS return on both x86_64 and
 	   aarch64. If we use -1, aarch64 will go through the
 	   __sys_trace_return_skipped path (entry.S:719), which will also report
@@ -115,37 +153,38 @@ static void sys_enter_probe(void *__data, struct pt_regs *regs, long id)
 	   that, we choose -2, which sould be well out of range as well and
 	   return -ENOSYS on both architectures. */
 	SYSCALL_NO_REG(regs) = (unsigned long)-2;
-
-	// Put stuff on user stack
 	
-	//if(0 != monmod_ptrace_report_syscall_entry(regs)) {
-	//	printk(KERN_WARNING " monmod: target client used "
-	//	       "PTRACE_SYSCALL, "
-	//	       "which is not the intended use. Use PTRACE_CONT to be "
-	//	       "notified of syscall stops under monmod.\n");
-	//}
 }
 
 static void sys_exit_probe(void *__data, struct pt_regs *regs, 
                            unsigned long return_value)
 {
-	if(NO_SYSCALL == last_syscall || last_was_trusted) {
+	struct monmod_tracee_config *tracee_conf = NULL;
+	const pid_t pid = current->pid;
+	long no = 0;
+	if(0 != probe_prelude(__data, regs)) {
 		return;
 	}
-	if(0 != probe_prelude(__data, regs, last_syscall)) {
+	if(NULL == (tracee_conf = monmod_get_tracee_config(current->pid))) {
+		printk(KERN_WARNING "monmod: <%d> cannot get config for "
+		       "tracee although it is traced.\n", pid);
 		return;
 	}
+	no = tracee_conf->last_syscall;
+	tracee_conf->last_syscall = MONMOD_NO_SYSCALL;
+	if(MONMOD_NO_SYSCALL == no) {
+		return;
+	}
+
+	if(__NR_monmod_toggle == no) {
+		return_value = tracee_conf->inject_return;
+		SYSCALL_RET_REG(regs) = tracee_conf->inject_return;
+	}
+
 #if MONMOD_LOG_INFO
-	printk(KERN_INFO "monmod: <%d> forwarding system call exit value %lu\n",
-	       monmod_global_config.tracee_pid, return_value);
+	printk(KERN_INFO "monmod: <%d> forwarding system call %ld exit value "
+	       " %lu\n", pid, no, return_value);
 #endif
-	//if(0 != monmod_ptrace_report_syscall_exit(regs)) {
-	//	printk(KERN_WARNING " monmod: target client used "
-	//	       "PTRACE_SYSCALL, "
-	//	       "which is not the intended use. Use PTRACE_CONT to be "
-	//	       "notified of syscall stops under monmod.\n");
-	//}
-	last_syscall = NO_SYSCALL;
 }
 
 

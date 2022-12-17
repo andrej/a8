@@ -14,6 +14,16 @@
 
 #include "test.h"
 
+ssize_t find_test(struct test *tests, size_t n_tests, const char *name)
+{
+	for(size_t i = 0; i < n_tests; i++) {
+		if(strcmp(tests[i].name, name) == 0) {
+			return i;
+		}
+	}
+	return -1;
+}
+
 int main(int argc, char **argv)
 {
 	struct test *tests = &__tests_start;
@@ -23,8 +33,22 @@ int main(int argc, char **argv)
 #if USE_FORK
 	size_t n_crashed = 0;
 #endif
-	for(size_t i = 0; i < n_tests; i++) {
-		printf("%03lu/%03lu %-30s %-30s", i + 1UL, n_tests, 
+	size_t test_start = 0;
+	size_t test_end = n_tests;
+
+	if(argc == 2) {
+		test_start = find_test(tests, n_tests, argv[1]);
+		if(-1 == test_start) {
+			printf("No such test: %s\n", argv[1]);
+			return 1;
+		}
+		test_end = test_start + 1;
+	}
+
+	n_tests = test_end - test_start;
+
+	for(size_t i = test_start; i < test_end; i++) {
+		printf("%03lu/%03lu %-30s %-30s", i - test_start + 1, n_tests, 
 		       tests[i].file, tests[i].name);
 		fflush(stdout);
 #if USE_FORK

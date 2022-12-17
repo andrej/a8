@@ -5,7 +5,9 @@
 #include "linux/syscalls.h"
 #endif
 
-#define __NR_syscalls  __NR_execveat
+#define MIN_SYSCALL_NO __NR_read
+#define MAX_SYSCALL_NO __NR_mlock2
+#define __NR_syscalls  (MAX_SYSCALL_NO-MIN_SYSCALL_NO)
 
 #define SYSCALL_INSTR_SIZE 2 // syscall == 0f 05
 

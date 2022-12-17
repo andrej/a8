@@ -5,7 +5,7 @@
 syscall_trace_func:
 	mov     x0,       sp
 	add     x0, x0, #8
-	bl trusted_area
+	bl monmod_syscall_handle
 	/* After returning from user-space syscall trace subroutine call, we 
 	   must restore the state to appear unchanged to the syscall-site
 	   as if we just returned from the kernel. 

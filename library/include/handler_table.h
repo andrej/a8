@@ -10,14 +10,43 @@ SYSCALL_EXIT_PROT(default);
 #define SYSCALLS(X) \
 /* ************************************************************************* *\
  * Syscall Handler Definitions                                               *\
- *  number,        name,       enter,                 exit                   *\
+ *  number,        name,       enter,                  exit                  *\
+ *                             get_arg_types,                                *\
+ *                             free_arg_types                                *\
  * ************************************************************************* */\
- X( __NR_getpid,   getpid,     SYSCALL_ENTER(default), NULL) \
- X( __NR_read,     read,       SYSCALL_ENTER(read),   SYSCALL_EXIT(read)) \
- X( __NR_write,    write,      SYSCALL_ENTER(write),  NULL) \
+ X( __NR_brk,      brk,        SYSCALL_ENTER(brk),     NULL, \
+                               NULL, \
+			       NULL) \
+ X( __NR_uname,    uname,      SYSCALL_ENTER(default), NULL, \
+                               NULL, \
+			       NULL) \
+ X( __NR_access,   access,     SYSCALL_ENTER(default), NULL, \
+                               NULL, \
+			       NULL) \
+ X( __NR_open,     open,       SYSCALL_ENTER(open),    SYSCALL_EXIT(open), \
+                               NULL, \
+			       NULL) \
+ X( __NR_fstat,    fstat,      SYSCALL_ENTER(default), NULL, \
+                               NULL, \
+			       NULL) \
+ X( __NR_mmap,     mmap,       NULL,    NULL, \
+                               NULL, \
+			       NULL) \
+ X( __NR_getpid,   getpid,     SYSCALL_ENTER(default), NULL, \
+                               NULL, \
+			       NULL) \
+ X( __NR_read,     read,       SYSCALL_ENTER(read),    SYSCALL_EXIT(read), \
+                               NULL, \
+			       NULL) \
+ X( __NR_write,    write,      SYSCALL_ENTER(write),   NULL, \
+                               NULL, \
+			       NULL) \
+ X( __NR_writev,   writev,     SYSCALL_ENTER(writev),  SYSCALL_EXIT(writev), \
+ 		               SYSCALL_GET_ARG_TYPES(writev),  \
+			       SYSCALL_FREE_ARG_TYPES(writev)) \
 
 
-#include "handler_table_define.h"
+#include "handler_table_prototypes.h"
 
 /*
 syscall				modifies fd?	needs fd? 	needs sync?

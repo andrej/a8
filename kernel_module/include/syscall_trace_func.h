@@ -6,8 +6,8 @@
 struct syscall_trace_func_stack
 {
 // low addr, top of stack
-	struct pt_regs saved_regs;
-	long ret_addr;
+    unsigned long syscall_no;
+	void *ret_addr;
 // high addr, bottom of stack
 };
 

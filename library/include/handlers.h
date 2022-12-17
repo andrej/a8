@@ -2,6 +2,7 @@
 #define HANDLERS_H
 
 #include "arch.h"
+#include "serialization.h"
 #include "environment.h"
 
 /* 1. Syscall entry
@@ -20,30 +21,43 @@
 #define DISPATCH_LEADER          0x2
 #define DISPATCH_UNCHECKED       0x4
 #define DISPATCH_CHECKED         0x8
-#define DISPATCH_DEFERRED_CHECK 0x16
+#define DISPATCH_DEFERRED_CHECK 0x10
+
+struct arg_types {
+	struct type arg_types[N_SYSCALL_ARGS];
+};
 
 struct syscall_handler {
 	long canonical_no;
 	long arch_no;
-	int (*enter)(struct environment *, long *, long *, size_t *, char *);
-	void (*exit)(struct environment *, long, long *, long *);
+	int (*enter)(struct environment *, long *, long[N_SYSCALL_ARGS]);
+	void (*exit)(struct environment *, long, long[N_SYSCALL_ARGS], long *);
+	struct arg_types (*get_arg_types)(struct environment *, long, 
+	                             long[N_SYSCALL_ARGS]);
+	void (*free_arg_types)(struct type[N_SYSCALL_ARGS]);
 	const char *name;
 };
 
 #define SYSCALL_ENTER(name) __ ## name ## _enter 
 #define SYSCALL_EXIT(name) __ ## name ## _exit
+#define SYSCALL_GET_ARG_TYPES(name) __ ## name ## _get_arg_types
+#define SYSCALL_FREE_ARG_TYPES(name) __ ## name ## _free_arg_types
 #define SYSCALL_ENTER_PROT(name) \
 	int __ ## name ## _enter (struct environment *env, long *no, \
-	                          long *args, size_t *buf_len, char *buf)
+	                          long args[N_SYSCALL_ARGS])
 #define SYSCALL_EXIT_PROT(name) \
 	void __ ## name ## _exit (struct environment *env, long no, \
-	                          long *args, long *ret)
+	                          long args[N_SYSCALL_ARGS], long *ret)
+#define SYSCALL_GET_ARG_TYPES_PROT(name) \
+	struct arg_types __ ## name ## _get_arg_types( \
+		struct environment *env, long no, long args[N_SYSCALL_ARGS])
+#define SYSCALL_FREE_ARG_TYPES_PROT(name) \
+	void __ ## name ## _free_arg_types( \
+		struct type arg_types[N_SYSCALL_ARGS])
 
-extern const struct syscall_handler *syscall_handlers_arch[];
-extern const struct syscall_handler *syscall_handlers_canonical[];
+extern const struct syscall_handler * const syscall_handlers_arch[];
+extern const struct syscall_handler * const syscall_handlers_canonical[];
 
 struct syscall_handler const *get_handler(long no);
-
-
 
 #endif

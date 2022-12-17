@@ -43,15 +43,15 @@ static struct kobj_attribute trace_func_addr_attribute =
 static struct kobj_attribute active_attribute = 
     __ATTR(active, 0664, _monmod_config_active_show, 
            _monmod_config_active_store);
-static struct kobj_attribute traced_syscalls_attribute = 
-    __ATTR(traced_syscalls, 0664, _monmod_config_traced_syscalls_show, 
-           _monmod_config_traced_syscalls_store);
+static struct kobj_attribute untraced_syscalls_attribute = 
+    __ATTR(untraced_syscalls, 0664, _monmod_config_untraced_syscalls_show, 
+           _monmod_config_untraced_syscalls_store);
 
 static struct attribute *attrs[] = {
     &tracee_pids_attribute.attr,
     &tracee_pids_add_attribute.attr,
     &active_attribute.attr,
-    &traced_syscalls_attribute.attr,
+    &untraced_syscalls_attribute.attr,
     NULL
 };
 
@@ -89,6 +89,8 @@ int monmod_config_init()
 {
     int s = 0;
     memset(&monmod_global_config, 0, sizeof(monmod_global_config));
+    memset((void *)&monmod_global_config.syscall_masks, 
+           ~0U, sizeof(monmod_global_config.syscall_masks));
     s = kobject_init_and_add(&monmod_global_config.kobj, 
                              &static_kobj_ktype,
                              kernel_kobj,
@@ -538,9 +540,9 @@ ssize_t _monmod_config_tracee_pids_add_store(struct kobject *kobject,
     return count;
 }
 
-ssize_t _monmod_config_traced_syscalls_show(struct kobject *kobj, 
-                                            struct kobj_attribute *attr, 
-                                            char *buf)
+ssize_t _monmod_config_untraced_syscalls_show(struct kobject *kobj, 
+                                              struct kobj_attribute *attr, 
+                                              char *buf)
 {
     size_t n_written = 0;
     u64 no = 0;
@@ -549,7 +551,7 @@ ssize_t _monmod_config_traced_syscalls_show(struct kobject *kobj,
     }
     buf[0] = '\0';
     for(no = 0; no < __NR_syscalls && n_written < PAGE_SIZE; no++) {
-        if(monmod_syscall_is_active(no)) {
+        if(!monmod_syscall_is_active(no)) {
             n_written += snprintf(buf + n_written, PAGE_SIZE - n_written,
                                   "%llu\n", no);
         }
@@ -557,18 +559,19 @@ ssize_t _monmod_config_traced_syscalls_show(struct kobject *kobj,
     return n_written;
 }
 
-ssize_t _monmod_config_traced_syscalls_store(struct kobject *kobj, 
-                                             struct kobj_attribute *attr, 
-                                             const char *buf, 
-                                             size_t count)
+ssize_t _monmod_config_untraced_syscalls_store(struct kobject *kobj, 
+                                               struct kobj_attribute *attr, 
+                                               const char *buf, 
+                                               size_t count)
 {
     size_t consumed = 0;
     if(0 != _config_callback_sanity_checks(kobj, attr, buf)) {
         return -1;
     }
 
+    // By default, mark everything traced
     memset((void *)&monmod_global_config.syscall_masks, 
-           0, sizeof(monmod_global_config.syscall_masks));
+           ~0U, sizeof(monmod_global_config.syscall_masks));
 
     while(consumed < count) {
         int no = 0;
@@ -582,13 +585,13 @@ ssize_t _monmod_config_traced_syscalls_store(struct kobject *kobj,
             consumed = count;
             break;
         }
-        if(!monmod_syscall_is_active(no)) {
-            if(0 != monmod_syscall_activate(no)) {
-                MONMOD_WARNF("Reading config: Cannot activate tracing for "
+        if(monmod_syscall_is_active(no)) {
+            if(0 != monmod_syscall_deactivate(no)) {
+                MONMOD_WARNF("Reading config: Cannot deactivate tracing for "
                              "syscall no %d", no);
                 return -1;
             } else {
-                printk(KERN_INFO "monmod: Activated tracing of system call "
+                printk(KERN_INFO "monmod: Deactivated tracing of system call "
                        "%d\n", no);
             }
         }

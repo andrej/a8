@@ -41,13 +41,13 @@
 
 struct monmod_tracee_config {
         struct kobject kobj;
-        //#ifndef TEST_H
-        //        void __user *trusted_addr;
-        //        void __user *trace_func_addr;
-        //#else
+        #ifndef TEST_H
+                void __user *trusted_addr;
+                void __user *trace_func_addr;
+        #else
                 void *trusted_addr;
                 void *trace_func_addr;
-        //#endif
+        #endif
         bool active;
         long inject_return;
         long last_syscall;
@@ -122,8 +122,8 @@ CONFIG_STORE_PROT(tracee_pids_add)
 CONFIG_SHOW_PROT(active)
 CONFIG_STORE_PROT(active)
 
-CONFIG_SHOW_PROT(traced_syscalls)
-CONFIG_STORE_PROT(traced_syscalls)
+CONFIG_SHOW_PROT(untraced_syscalls)
+CONFIG_STORE_PROT(untraced_syscalls)
 
 CONFIG_SHOW_PROT(trusted_addr)
 CONFIG_STORE_PROT(trusted_addr)

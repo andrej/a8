@@ -15,7 +15,7 @@
 #include "syscall_trace_func.h"
 
 // Macros
-#define __NR_monmod_toggle (__NR_syscalls+2)
+#define __NR_monmod_toggle (MAX_SYSCALL_NO+2)
 
 // Global Variables
 static struct tracepoint *tp_sys_enter = NULL;
@@ -33,14 +33,15 @@ static int redirect_to_user_trace_func(void __user *target,
 	   contiguously from low address to high address, but the stack grows
 	   from high address to low addres. In other words, the first element 
 	   in this array will be at the bottom (top element of stack). */
-	struct syscall_trace_func_stack stack = {};
+	struct syscall_trace_func_stack stack = {
+		.syscall_no = SYSCALL_NO_REG(regs),
+		.ret_addr = ret_addr
+	};
 	/* The new stack pointer puts some information past the red zone.
 	   The called callback function is responsible for resetting the 
 	   stack pointer and properly returning to the original code that
 	   invoked the syscall. */
 	void __user *new_sp = old_sp - sizeof(stack) - 128;
-	stack.ret_addr = (long)ret_addr;
-	stack.saved_regs = *regs;
 	TRY(copy_to_user(new_sp, (void *)&stack, sizeof(stack)),
 	    return 1);
 	STACK_PTR_REG(regs) = (unsigned long)new_sp;
@@ -179,11 +180,12 @@ static void sys_exit_probe(void *__data, struct pt_regs *regs,
 	if(__NR_monmod_toggle == no) {
 		return_value = tracee_conf->inject_return;
 		SYSCALL_RET_REG(regs) = tracee_conf->inject_return;
+		return;
 	}
 
 #if MONMOD_LOG_INFO
 	printk(KERN_INFO "monmod: <%d> forwarding system call %ld exit value "
-	       " %lu\n", pid, no, return_value);
+	       " %ld/%lu\n", pid, no, (long)return_value);
 #endif
 }
 

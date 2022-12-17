@@ -8,8 +8,12 @@ INCLUDE_DIRS ?= include $(ARCH_DIR)/$(ARCH)/include ../dependencies/libconfig-in
 LIB_DIRS     ?= ../dependencies/libconfig-install/lib
 
 CC      := gcc
-CFLAGS  := -g -fpic $(INCLUDE_DIRS:%=-I%)
-LDFLAGS := -g -shared $(LIB_DIRS:%=-L%) $(LIB_DIRS:%=-Wl,-rpath,%)
+CFLAGS  := -g -fpic $(INCLUDE_DIRS:%=-I%) \
+           -fvisibility=hidden \
+           #-O2 -flto
+LDFLAGS := -g -shared $(LIB_DIRS:%=-L%) $(LIB_DIRS:%=-Wl,-rpath,%) \
+           -fvisibility=hidden \
+           #-flto
 LDLIBS  := -lconfig
 
 C_SOURCES := $(shell find $(SOURCE_DIRS) -maxdepth 1 -name \*.c)
@@ -26,10 +30,6 @@ TEST_DEP_OBJS  := $(filter-out $(SOURCE_DIRS:%=$(BUILD_DIR)/%/main.o),\
 TEST_DEPS      := $(TEST_OBJECTS:%.o=%.d)
 TEST_LDFLAGS   := 
 TEST_LDLIBS    := ../dependencies/libconfig-install/lib/libconfig.a
-
-
-$(info $(OBJECTS))
-$(info $(TEST_DEP_OBJS))
 
 .PHONY: all
 all: $(BUILD_DIR)/libmonmod.so

@@ -6,6 +6,11 @@
 #include <string.h>
 #include "build_config.h"
 
+#define free_and_null(x) { \
+	free(x); \
+	x = NULL; \
+}
+
 #if VERBOSITY > 0
 #define WARN(msg) { \
 	WARNF(msg "%s", ""); \
@@ -34,8 +39,8 @@
 #define LZ_TRY(x) LZ_TRY_EXCEPT(x, return 1)
 #define Z_TRY(x) Z_TRY_EXCEPT(x, return 1)
 
-#define SAFE_LOGF(log_fd, msg, ...) { \
-	char log[128]; \
+#define SAFE_LOGF_LEN(n, log_fd, msg, ...) { \
+	char log[n]; \
 	int len = 0; \
 	len = snprintf(log, sizeof(log), \
 	              msg, __VA_ARGS__); \
@@ -44,6 +49,7 @@
 		               0, 0, 0); \
 	} \
 }
+#define SAFE_LOGF(log_fd, msg, ...) SAFE_LOGF_LEN(128, log_fd, msg, __VA_ARGS__)
 
 static inline unsigned long sdbm_hash(size_t buf_len, char *buf) {
 	unsigned long hash = 0;

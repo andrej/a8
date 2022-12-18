@@ -38,11 +38,12 @@
 /* Arguments with this flag are a descriptor that should be remapped. */
 #define ARG_REMAP_FD       0x2
 
-struct normalized_args {
-	uint64_t canonical_no;
+struct syscall_info {
+	uint64_t no;
 	long args[N_SYSCALL_ARGS];
 	int arg_flags[N_SYSCALL_ARGS];
 	struct type arg_types[N_SYSCALL_ARGS];
+	long ret;
 	int ret_flags;
 	struct type ret_type;
 };
@@ -50,31 +51,28 @@ struct normalized_args {
 struct syscall_handler {
 	long canonical_no;
 	long arch_no;
-	int (*enter)(struct environment *, long *, long[N_SYSCALL_ARGS]);
-	void (*exit)(struct environment *, long, long[N_SYSCALL_ARGS], 
-	             struct normalized_args *, long *, int);
-	int (*normalize_args)(struct environment *, struct normalized_args *);
-	void (*free_normalized_args)(struct normalized_args *);
+	int (*enter)(struct environment *, const struct syscall_handler *,
+	             struct syscall_info *, struct syscall_info *, void **);
+	void (*exit)(struct environment *, const struct syscall_handler *, int,
+	             struct syscall_info *, struct syscall_info *, void **);
 	const char *name;
 };
 
 #define SYSCALL_ENTER(name) __ ## name ## _enter 
 #define SYSCALL_EXIT(name) __ ## name ## _exit
-#define SYSCALL_NORMALIZE_ARGS(name) __ ## name ## _normalize_args
-#define SYSCALL_FREE_NORMALIZED_ARGS(name) __ ## name ## _free_normalized_args
 #define SYSCALL_ENTER_PROT(name) \
-	int __ ## name ## _enter (struct environment *env, long *no, \
-	                          long args[N_SYSCALL_ARGS])
+	int __ ## name ## _enter (struct environment *env, \
+	                          const struct syscall_handler *handler, \
+	                          struct syscall_info *actual, \
+	                          struct syscall_info *canonical, \
+	                          void **scratch)
 #define SYSCALL_EXIT_PROT(name) \
-	void __ ## name ## _exit (struct environment *env, long no, \
-	                          long args[N_SYSCALL_ARGS], \
-				  struct normalized_args *normalized_args, \
-				  long *ret, int dispatch)
-#define SYSCALL_NORMALIZE_ARGS_PROT(name) \
-	int __ ## name ## _normalize_args( \
-		struct environment *env, struct normalized_args *normal)
-#define SYSCALL_FREE_NORMALIZED_ARGS_PROT(name) \
-	void __ ## name ## _free_normalized_args(struct normalized_args *normal)
+	void __ ## name ## _exit (struct environment *env, \
+	                          const struct syscall_handler *handler, \
+				  int dispatch, \
+	                          struct syscall_info *actual, \
+	                          struct syscall_info *canonical, \
+	                          void **scratch)
 
 extern const struct syscall_handler * const syscall_handlers_arch[];
 extern const struct syscall_handler * const syscall_handlers_canonical[];

@@ -299,6 +299,40 @@ int comm_send(struct communicator *comm, int peer_id, size_t n,
 	return 0;
 }
 
+static inline int comm_receive_header(struct communicator *comm, 
+                                      struct peer *peer,
+                                      struct message *msg)
+{
+	// Get peer info
+	Z_TRY(peer->status == PEER_CONNECTED);
+
+	// Read message header only
+	NZ_TRY(read_all(peer->fd, (char *)msg, sizeof(msg)));
+	msg->length = ntohl(msg->length);
+
+	return 0;
+}
+
+static inline int comm_receive_body(struct communicator *comm,
+                                    struct peer *peer,
+				    struct message *msg,
+				    size_t *n, char *buf)
+{
+	size_t read_n = 0;
+	const size_t msg_length = msg->length;
+
+	read_n = (msg_length > *n ? *n : msg_length);
+	read_all(peer->fd, buf, read_n);
+	*n = msg_length;
+	if(read_n < msg_length) {
+		// Throw away the remainder of the message because the buffer
+		// was too small.
+		NZ_TRY(flush_fd(peer->fd, msg_length - read_n));
+	}
+
+	return 0;
+}
+
 int comm_receive_partial(struct communicator *comm, int peer_id, size_t *n,
                          char *buf)
 {
@@ -311,19 +345,11 @@ int comm_receive_partial(struct communicator *comm, int peer_id, size_t *n,
 	Z_TRY(peer = get_peer(comm, peer_id));
 	Z_TRY(peer->status == PEER_CONNECTED);
 
-	// Read message header only
-	NZ_TRY(read_all(peer->fd, (char *)&msg, sizeof(msg)));
-	msg.length = ntohl(msg.length);
+	// Get header
+	comm_receive_header(comm, peer, &msg);
 
 	// Check message size
-	read_n = (msg.length > *n ? *n : msg.length);
-	read_all(peer->fd, buf, read_n);
-	*n = msg.length;
-	if(read_n < msg.length) {
-		// Throw away the remainder of the message because the buffer
-		// was too small.
-		NZ_TRY(flush_fd(peer->fd, msg.length - read_n));
-	}
+	comm_receive_body(comm, peer, &msg, n, buf);
 
 	return 0;
 }
@@ -355,17 +381,14 @@ int comm_receive_dynamic(struct communicator *comm, int peer_id, size_t *n,
 	Z_TRY(peer = get_peer(comm, peer_id));
 	Z_TRY(peer->status == PEER_CONNECTED);
 
-	// Read message header only
-	NZ_TRY(read_all(peer->fd, (char *)&msg, sizeof(msg)));
-	msg.length = ntohl(msg.length);
+	comm_receive_header(comm, peer, &msg);
 
-	// Check message size
 	recv_buf = malloc(msg.length);
 	if(NULL == recv_buf) {
 		return 1;
 	}
-	read_all(peer->fd, recv_buf, msg.length);
 	*n = msg.length;
+	comm_receive_body(comm, peer, &msg, n, recv_buf);
 	*buf = recv_buf;
 	return 0;
 }
@@ -389,7 +412,9 @@ int comm_all_agree(struct communicator *comm, int leader_id, size_t n,
 	long ret = 1;
 	char recv_buf[n];
 	size_t n_received = n;
-	sanity_checks(comm);
+
+	NZ_TRY_EXCEPT(sanity_checks(comm),
+	              return -1);
 
 	// Leader
 	if(comm->self.id == leader_id) {

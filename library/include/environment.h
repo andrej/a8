@@ -92,5 +92,14 @@ static inline struct descriptor_info
 	return NULL;
 }
 
+static inline int canonical_to_local_fd(struct environment *env, int fd)
+{
+	struct descriptor_info *di;
+	di = env_get_canonical_descriptor_info(env, fd);
+	if(NULL == di) {
+		return -1;
+	}
+	return di->local_fd;
+}
 
 #endif

@@ -1,7 +1,7 @@
 #ifndef BUILD_CONFIG_H
 #define BUILD_CONFIG_H
 
-#define VERBOSITY 3
+#define VERBOSITY 4
 #define CHECK_HASHES_ONLY 1
 
 #define MONMOD_SYSFS_PATH "/sys/kernel/monmod"

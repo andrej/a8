@@ -13,44 +13,21 @@ SYSCALL_ENTER_PROT(default_unchecked);
 /* ************************************************************************* *\
  * Syscall Handler Definitions                                               *\
  *  number,        name,       enter,                  exit                  *\
- *                             normalize_args,                                *\
- *                             free_normalized_args                                *\
  * ************************************************************************* */\
- X( __NR_brk,      brk,        SYSCALL_ENTER(brk),     NULL, \
-                               SYSCALL_NORMALIZE_ARGS(brk), \
-			       NULL) \
- X( __NR_uname,    uname,      SYSCALL_ENTER(default_checked), NULL, \
-                               NULL, \
-			       NULL) \
- X( __NR_access,   access,     SYSCALL_ENTER(default_checked), NULL, \
-                               NULL, \
-			       NULL) \
- X( __NR_open,     open,       SYSCALL_ENTER(open),    SYSCALL_EXIT(open), \
-                               NULL, \
-			       NULL) \
- X( __NR_fstat,    fstat,      SYSCALL_ENTER(default_checked), NULL, \
-                               NULL, \
-			       NULL) \
- X( __NR_mmap,     mmap,       NULL,    NULL, \
-                               NULL, \
-			       NULL) \
- X( __NR_getpid,   getpid,     SYSCALL_ENTER(default_checked), NULL, \
-                               NULL, \
-			       NULL) \
- X( __NR_read,     read,       SYSCALL_ENTER(default_checked_arg1_fd), \
-                               NULL, \
-                               SYSCALL_NORMALIZE_ARGS(read), \
-			       SYSCALL_FREE_NORMALIZED_ARGS(read)) \
- X( __NR_read,     readv,      SYSCALL_ENTER(default_checked_arg1_fd), \
-                               NULL, \
-                               SYSCALL_NORMALIZE_ARGS(readv), \
-			       SYSCALL_FREE_NORMALIZED_ARGS(readv)) \
- X( __NR_write,    write,      SYSCALL_ENTER(write),   NULL, \
-                               SYSCALL_NORMALIZE_ARGS(write), \
-			       SYSCALL_FREE_NORMALIZED_ARGS(write)) \
- X( __NR_writev,   writev,     SYSCALL_ENTER(writev),  NULL, \
- 		               SYSCALL_NORMALIZE_ARGS(writev),  \
-			       SYSCALL_FREE_NORMALIZED_ARGS(writev)) \
+ X( __NR_brk,      brk,        SYSCALL_ENTER(brk),     NULL ) \
+ X( __NR_uname,    uname,      SYSCALL_ENTER(default_checked), NULL ) \
+ X( __NR_access,   access,     SYSCALL_ENTER(access),  SYSCALL_EXIT(access) ) \
+ X( __NR_open,     open,       SYSCALL_ENTER(open),    SYSCALL_EXIT(openat) ) \
+ X( __NR_openat,   openat,     SYSCALL_ENTER(openat),  SYSCALL_EXIT(openat) ) \
+ X( __NR_close,    close,      SYSCALL_ENTER(close),   SYSCALL_EXIT(close) ) \
+ X( __NR_mmap,     mmap,       SYSCALL_ENTER(mmap),    NULL ) \
+ X( __NR_munmap,   munmap,     SYSCALL_ENTER(munmap),  NULL ) \
+ X( __NR_getpid,   getpid,     SYSCALL_ENTER(default_checked), NULL  ) \
+ X( __NR_read,     read,       SYSCALL_ENTER(read),    SYSCALL_EXIT(read) ) \
+ X( __NR_readv,    readv,      SYSCALL_ENTER(readv),   SYSCALL_EXIT(readv) ) \
+ X( __NR_write,    write,      SYSCALL_ENTER(write),   SYSCALL_EXIT(write) ) \
+ X( __NR_writev,   writev,     SYSCALL_ENTER(writev),  SYSCALL_EXIT(writev) ) \
+ X( __NR_fstat,    fstat,      SYSCALL_ENTER(fstat),   SYSCALL_EXIT(fstat) ) \
 
 
 #include "handler_table_prototypes.h"

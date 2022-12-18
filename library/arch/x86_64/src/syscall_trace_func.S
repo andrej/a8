@@ -53,7 +53,8 @@ monmod_syscall_trace_enter:
 	popq %r10
 	popq %r9
 	popq %r8
-	popq %rax
+	addq $8, %rsp /* rax -- keep monmod_syscall_handle() return as 
+	                 syscall return value */
 	popq %rcx
 	popq %rdx
 	popq %rsi

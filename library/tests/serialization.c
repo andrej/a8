@@ -331,3 +331,23 @@ TEST(log_str_of)
 
 	return 0;
 }
+
+TEST(serialize_deserialize_str)
+{
+	const char str[] = "Hello, World!";
+
+	size_t serialized_len = 0;
+	char *serialized = NULL;
+	char des_str[sizeof(str)];
+
+	struct type t = STRING_TYPE();
+
+	serialized = serialize(str, &t, &serialized_len);
+	ASSERT_NEQ(serialized, NULL);
+	ASSERT_EQ(serialized_len, sizeof(str));
+
+	deserialize_overwrite(serialized, &t, des_str);
+	ASSERT_EQ(strcmp(des_str, str), 0);
+
+	return 0;
+}

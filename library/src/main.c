@@ -47,6 +47,7 @@ bool kernel_monmod_active = false;
 
 int monmod_exit(int code)
 {
+	comm_destroy(&comm);
 	return monmod_syscall(__NR_exit, code, 0, 0, 0, 0, 0);
 }
 
@@ -73,88 +74,126 @@ long monmod_syscall_handle(struct syscall_trace_func_args *raw_args)
 		monmod_exit(1);
 	}
 
-	long ret = 0;
+	int s = 0;
 	struct user_regs_struct *regs = &(raw_args->regs);
 	struct syscall_handler const *handler = NULL;
-	struct normalized_args normalized_args = {};
+	struct syscall_info actual = {};
+	struct syscall_info canonical = {};
+	void *handler_scratch_space;
 	int dispatch = 0;
-	long no, args[N_SYSCALL_ARGS];
 
-	/* Preparation: Initialize data. */
-	no = raw_args->syscall_no;
-	SYSCALL_ARGS_TO_ARRAY(regs, args);
-
-	/* Phase 1: Find entry handler and cross-check arguments. */
-	handler = get_handler(no);
-	if(NULL != handler && NULL != handler->enter) {
-#if VERBOSITY >= 2
-		SAFE_LOGF(log_fd, "%s (%ld/%ld) -- enter from %p.\n",
-		          handler->name, no, 
-		          handler->canonical_no, raw_args->ret_addr);
-#endif
-		dispatch = handler->enter(&env, &no, args);
-	} else {
-#if VERBOSITY >= 2
-		SAFE_LOGF(log_fd, "%ld -- enter with no handler!\n",
-		          no);
-#endif 
-		dispatch = DISPATCH_EVERYONE | DISPATCH_UNCHECKED;
+	/* Find syscall handlers handler. */
+	handler = get_handler(raw_args->syscall_no);
+	if(NULL == handler) {
+		SAFE_LOGF(log_fd, "%ld -- no handler!\n",
+		          raw_args->syscall_no);
+		monmod_exit(1);
 	}
 
-	NZ_TRY_EXCEPT(normalize_args(&env, handler, &normalized_args, args),
-	              monmod_exit(1));
+	/* Preparation: Initialize data. */
+	actual.no = raw_args->syscall_no;
+	SYSCALL_ARGS_TO_ARRAY(regs, actual.args);
+	actual.ret = -ENOSYS;
+	canonical.no = handler->canonical_no;
+	memcpy(canonical.args, actual.args, sizeof(actual.args));
+
+	/* Phase 1: Cross-check arguments. */
+	handler = get_handler(actual.no);
+	if(NULL == handler) {
+		SAFE_LOGF(log_fd, "%ld -- no handler!\n",
+		          actual.no);
+		monmod_exit(1);
+	}
+#if VERBOSITY >= 2
+	SAFE_LOGF(log_fd, "%s (%ld) -- enter from %p.\n",
+			handler->name, actual.no, raw_args->ret_addr);
+#endif
+	if(NULL != handler->enter) {
+		dispatch = handler->enter(&env, handler, &actual, &canonical,
+		                          &handler_scratch_space);
+	} else {
+		dispatch = DISPATCH_CHECKED | DISPATCH_EVERYONE;	
+	}
+
+#if VERBOSITY >= 3
+	char log_buf[1024];
+	log_buf[0] = '\0';
+	log_args(log_buf, sizeof(log_buf), &canonical);
+	SAFE_LOGF_LEN(sizeof(log_buf), log_fd, "%s", log_buf);
+#endif
 
 	if(dispatch & DISPATCH_ERROR) {
 		SAFE_LOGF(log_fd, "Error on dispatch.%s", "\n");
 		monmod_exit(1);
 	} else if(dispatch & (DISPATCH_CHECKED | DISPATCH_DEFERRED_CHECK)) {
-		if(false == cross_check_args(&env, &normalized_args)) {
+		s = cross_check_args(&env, &canonical);
+		if(0 == s) {
 			SAFE_LOGF(log_fd, "Divergence -- abort!%s", "\n");
+			monmod_exit(1);
+		} else if(0 > s) {
+			SAFE_LOGF(log_fd, "Argument cross-checking failed%s",
+			          "\n");
 			monmod_exit(1);
 		}
 	}
 
-#if VERBOSITY >= 3
-	char log_buf[1024];
-	log_args(log_buf, sizeof(log_buf), &normalized_args);
-	SAFE_LOGF_LEN(sizeof(log_buf), log_fd, "%s", log_buf);
-#endif
-
 	/* Phase 2: Execute system call locally if needed. */
 	if(dispatch & DISPATCH_EVERYONE || 
-	   (dispatch & DISPATCH_LEADER && is_leader)) {
-		ret = monmod_syscall(no, args[0], args[1], args[2], args[3],
-		                     args[4], args[5]);
-	} else {
-		/* It is the exit handler's responsibility to replicate the
-		   return value and overwrite the following. */
-		ret = -ENOSYS;
+	   ((dispatch & DISPATCH_LEADER) && is_leader)) {
+#if VERBOSITY >= 4
+		SAFE_LOGF(log_fd, "Executing syscall no. %ld with ("
+		          "%ld, %ld, %ld, %ld, %ld, %ld)\n",
+			   actual.no, actual.args[0], actual.args[1],
+			   actual.args[2], actual.args[3], actual.args[4],
+			   actual.args[5]);
+#endif
+		actual.ret = monmod_syscall(actual.no, 
+		                            actual.args[0], 
+					    actual.args[1],
+					    actual.args[2],
+					    actual.args[3],
+		                            actual.args[4], 
+					    actual.args[5]);
+#if VERBOSITY >= 4
+		SAFE_LOGF(log_fd, "Returned: %ld\n", actual.ret);
+#endif
 	}
 
 	/* Phase 3: Replicate results if needed */
+#if VERBOSITY >= 2
+	if(dispatch & DISPATCH_LEADER) {
+		if(!(dispatch & DISPATCH_NEEDS_REPLICATION)) {
+			SAFE_LOGF(log_fd,
+				  "Warning: Syscall dispatched only on leader, "
+			          "but no replication flag set.%s", "\n"); 
+		}
+		if(!(canonical.ret_flags & ARG_FLAG_REPLICATE)) {
+			SAFE_LOGF(log_fd,
+				  "Warning: Syscall dispatched only on leader, "
+			          "but no replication flag set for return "
+				  "value. This is probably not what you want."
+				  "%s", "\n");
+		}
+	}
+#endif
 	if(dispatch & DISPATCH_NEEDS_REPLICATION) {
-		NZ_TRY_EXCEPT(replicate_results(&env, &normalized_args,
-		                                args, &ret),
+#if VERBOSITY >= 4
+		SAFE_LOGF(log_fd, "Replicating results.%s", "\n");
+#endif
+		NZ_TRY_EXCEPT(replicate_results(&env, &actual, &canonical),
 			      monmod_exit(1));
 	}
 
 	/* Phase 4: Run exit handlers, potentially denormalizing results. */
-	if(NULL != handler && NULL != handler->exit) {
-		handler->exit(&env, no, args, &normalized_args, &ret, dispatch);
-	}
-
-	if(NULL != handler->free_normalized_args) {
-		handler->free_normalized_args(&normalized_args);
+	if(NULL != handler->exit) {
+		handler->exit(&env, handler, dispatch, &actual, &canonical,
+		              &handler_scratch_space);
 	}
 
 #if VERBOSITY >= 2
 	if(NULL != handler) {
-		SAFE_LOGF(log_fd, "%s (%ld/%ld) -- exit with %ld.\n\n",
-		          handler->name, no, 
-			  handler->canonical_no, ret);
-	} else {
-		SAFE_LOGF(log_fd, "%ld -- exit with %ld.\n\n", 
-		          no, ret);
+		SAFE_LOGF(log_fd, "%s (%ld) -- exit with %ld.\n\n",
+		          handler->name, actual.no, actual.ret);
 	}
 #endif
 
@@ -164,7 +203,7 @@ long monmod_syscall_handle(struct syscall_trace_func_args *raw_args)
 		monmod_exit(1);
 	}
 
-	return ret;
+	return actual.ret;
 }
 
 static int write_monmod_config(const char *path, const char *val, 

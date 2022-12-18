@@ -343,6 +343,33 @@ int comm_receive(struct communicator *comm, int peer_id, size_t *n,
 	return 0;
 }
 
+int comm_receive_dynamic(struct communicator *comm, int peer_id, size_t *n,
+                         char **buf) {
+	struct peer *peer;
+	struct message msg = {};
+	size_t read_n = 0;
+	char *recv_buf = NULL;
+
+	// Get peer info
+	NZ_TRY(sanity_checks(comm));
+	Z_TRY(peer = get_peer(comm, peer_id));
+	Z_TRY(peer->status == PEER_CONNECTED);
+
+	// Read message header only
+	NZ_TRY(read_all(peer->fd, (char *)&msg, sizeof(msg)));
+	msg.length = ntohl(msg.length);
+
+	// Check message size
+	recv_buf = malloc(msg.length);
+	if(NULL == recv_buf) {
+		return 1;
+	}
+	read_all(peer->fd, recv_buf, msg.length);
+	*n = msg.length;
+	*buf = recv_buf;
+	return 0;
+}
+
 int comm_broadcast(struct communicator *comm, size_t n, const char *buf)
 {
 	int ret = 0;

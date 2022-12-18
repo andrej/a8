@@ -1,5 +1,5 @@
-#ifndef CONFIG_H
-#define CONFIG_H
+#ifndef TEST_CONFIG_H
+#define TEST_CONFIG_H
 
 /**
  * USE_FORK - if set, this will launch each test in its own process. This allows

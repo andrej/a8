@@ -46,7 +46,6 @@ enum type_kind {
 
 struct type;
 
-
 struct immediate {
 	size_t size;
 };
@@ -74,6 +73,7 @@ struct descriptor {
 
 struct type {
 	enum type_kind kind;
+	int flags;
 	union {
 		struct immediate immediate;
 		struct pointer pointer;
@@ -83,9 +83,18 @@ struct type {
 	};
 };
 
-#define IMMEDIATE_TYPE(typ) {IMMEDIATE, .immediate = {sizeof(typ)}}
-#define SIMPLE_BUFFER_TYPE(sz) {BUFFER, .buffer = {sz}}
-#define POINTER_TYPE(pointee_typ) {POINTER, .pointer = {pointee_typ}}
+enum deserialize_approach {
+	DESERIALIZE_IN_PLACE,
+	DESERIALIZE_OVERWRITE
+};
+
+#define IGNORE_TYPE() (struct type){IGNORE}
+#define IMMEDIATE_TYPE(typ) (struct type){IMMEDIATE, .immediate = {sizeof(typ)}}
+#define POINTER_TYPE(pointee_typ) (struct type)\
+	{POINTER, .pointer = {pointee_typ}}
+#define BUFFER_TYPE(...) (struct type){BUFFER, .buffer = {__VA_ARGS__}}
+#define STRING_TYPE() (struct type){STRING}
+#define DESCRIPTOR_TYPE() (struct type){DESCRIPTOR, .immediate = {sizeof(int)}}
 
 size_t get_serialized_size(const void *buf, const struct type *type);
 
@@ -98,6 +107,9 @@ size_t get_serialized_size(const void *buf, const struct type *type);
 ssize_t serialize_into(const void *inp, const struct type *type, void *buf);
 
 char *serialize(const void *inp, const struct type *type, size_t *len);
+
+ssize_t deserialize(void *buf, const struct type *type, void *dest,
+                    enum deserialize_approach approach);
 
 /**
  * Deserialize buffer in place s.t. a pointer to this buffer can be
@@ -112,8 +124,9 @@ char *serialize(const void *inp, const struct type *type, size_t *len);
  * appropriately updated -- the total number of bytes consumed for this is
  * stored in consumed.
  */
-ssize_t deserialize_in_place(void *buf, const struct type *type, 
-                             size_t *consumed);
+ssize_t deserialize_in_place(void *buf, struct type *type);
+
+ssize_t deserialize_overwrite(void *buf, struct type *type, void *dest);
 
 /**
  * Return string in human-readable format that represents the data `inp`
@@ -121,4 +134,10 @@ ssize_t deserialize_in_place(void *buf, const struct type *type,
  */
 size_t log_str_of(const void *inp, const struct type *type, 
                   char *buf, size_t max_len);
+
+/**
+ * Return size taken up by a type, excluding any references.
+ */
+size_t type_size(const struct type *type);
+
 #endif

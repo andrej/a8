@@ -100,6 +100,13 @@ int comm_receive(struct communicator *comm, int peer_id, size_t *n,
 })
 
 /**
+ * comm_receive_dynamic - Receive arbitrary-length data into an appropriately
+ * sized dynamically allocated buffer.
+ */
+int comm_receive_dynamic(struct communicator *comm, int peer_id, size_t *n,
+                         char **buf);
+
+/**
  * comm_broadcast - Call comm_send for the given buffer for each connected peer.
  */
 int comm_broadcast(struct communicator *comm, size_t n, const char *buf);

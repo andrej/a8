@@ -17,8 +17,21 @@
 #include "handlers.h"
 #include "environment.h"
 #include "serialization.h"
+#include "replication.h"
 
 #define __NR_monmod_toggle (MAX_SYSCALL_NO+2)
+
+#define SAFE_LOGF_LEN(n, log_fd, msg, ...) { \
+	char log[n]; \
+	int len = 0; \
+	len = snprintf(log, sizeof(log), \
+	              msg, __VA_ARGS__); \
+	if(0 < len && len < sizeof(log)) { \
+		monmod_syscall(__NR_write, log_fd, (long)log, (long)len, \
+		               0, 0, 0); \
+	} \
+}
+#define SAFE_LOGF(log_fd, msg, ...) SAFE_LOGF_LEN(128, log_fd, msg, __VA_ARGS__)
 
 struct config conf;
 int own_id;
@@ -51,93 +64,6 @@ int monmod_toggle(bool onoff)
 	return 0;
 }
 
-char *serialize_args(size_t *len, const struct syscall_handler *handler, 
-                     long args[N_SYSCALL_ARGS])
-{
-	size_t n = 0;
-	size_t written = 0;
-	int n_args = 0;
-	char *out = NULL;
-#if VERBOSITY >= 3
-	char log_buf[512] = {};
-	size_t log_written = 0;
-#endif
-	struct arg_types arg_types = {};
-	if(NULL != handler->get_arg_types) {
-		arg_types = 
-			handler->get_arg_types(&env, handler->arch_no, args);
-	}
-	/* If there is no get_arg_types() handler, arg_types is initialized to
-	   all zeroes. Since IGNORED argument type maps to zero, this simply
-	   ignores all arguments and serializes only the system call number. */
-	for(int i = 0; i < N_SYSCALL_ARGS; i++) {
-		if(IGNORE == arg_types.arg_types[i].kind) {
-			continue;
-		}
-		n += get_serialized_size((const char *)&args[i], 
-		                         &arg_types.arg_types[i]);
-		n_args++;
-	}
-	n += sizeof(uint64_t); // For syscall no
-	out = calloc(n, 1);
-	memcpy(out, &handler->canonical_no, sizeof(uint64_t));
-	written += sizeof(uint64_t);
-	for(int i = 0; i < n_args; i++) {
-		if(IGNORE == arg_types.arg_types[i].kind) {
-			continue;
-		}
-		written += serialize_into((const char *)&args[i],
-			                  &arg_types.arg_types[i],
-			                  out + written);
-#if VERBOSITY >= 3
-		log_written += snprintf(log_buf + log_written,
-		                        sizeof(log_buf) - log_written,
-				        "  Argument %d:\n    ", i);
-		log_written += log_str_of((const char *)&args[i],
-		                          &arg_types.arg_types[i],
-					  log_buf + log_written, 
-					  sizeof(log_buf) - log_written);
-		log_written += snprintf(log_buf + log_written,
-		                        sizeof(log_buf) - log_written, "\n");
-#endif
-	}
-#if VERBOSITY >= 3
-	SAFE_LOGF_LEN(1024, log_fd, "%s", log_buf);
-#endif
-	if(NULL != handler->free_arg_types) {
-		handler->free_arg_types(arg_types.arg_types);
-	}
-	*len = written;
-	return out;
-}
-
-bool cross_check_arguments(const struct syscall_handler *handler, long args[7])
-{
-	bool ret = false;
-	char *serialized_args_buf = NULL;
-	size_t serialized_args_buf_len = 0;
-	serialized_args_buf = serialize_args(&serialized_args_buf_len,
-	                                     handler,
-	                                     args);
-	if(NULL == serialized_args_buf) {
-		SAFE_LOGF(log_fd, "could not serialize args%s", "\n");
-		return false;
-	}
-#if CHECK_HASHES_ONLY
-	const unsigned long hash = sdbm_hash(serialized_args_buf_len,
-						serialized_args_buf);
-	free_and_null(serialized_args_buf);
-	serialized_args_buf = malloc(sizeof(unsigned long));
-	memcpy(serialized_args_buf, &hash, sizeof(hash));
-	serialized_args_buf_len = sizeof(hash);
-#endif
-	ret = comm_all_agree(&comm, conf.leader_id,
-	                     serialized_args_buf_len,
-			     serialized_args_buf);
-	free_and_null(serialized_args_buf);
-	return ret;
-}
-
 long monmod_syscall_handle(struct syscall_trace_func_args *raw_args)
 {
 	/* Disable system call monitoring for any syscalls issued from the 
@@ -150,6 +76,7 @@ long monmod_syscall_handle(struct syscall_trace_func_args *raw_args)
 	long ret = 0;
 	struct user_regs_struct *regs = &(raw_args->regs);
 	struct syscall_handler const *handler = NULL;
+	struct normalized_args normalized_args = {};
 	int dispatch = 0;
 	long no, args[N_SYSCALL_ARGS];
 
@@ -174,15 +101,24 @@ long monmod_syscall_handle(struct syscall_trace_func_args *raw_args)
 		dispatch = DISPATCH_EVERYONE | DISPATCH_UNCHECKED;
 	}
 
+	NZ_TRY_EXCEPT(normalize_args(&env, handler, &normalized_args, args),
+	              monmod_exit(1));
+
 	if(dispatch & DISPATCH_ERROR) {
-		SAFE_LOGF(log_fd, "error on dispatch.%s", "\n");
+		SAFE_LOGF(log_fd, "Error on dispatch.%s", "\n");
 		monmod_exit(1);
-	} else if(dispatch & DISPATCH_CHECKED) {
-		if(false == cross_check_arguments(handler, args)) {
-			SAFE_LOGF(log_fd, "divergence!%s", "\n");
+	} else if(dispatch & (DISPATCH_CHECKED | DISPATCH_DEFERRED_CHECK)) {
+		if(false == cross_check_args(&env, &normalized_args)) {
+			SAFE_LOGF(log_fd, "Divergence -- abort!%s", "\n");
 			monmod_exit(1);
 		}
 	}
+
+#if VERBOSITY >= 3
+	char log_buf[1024];
+	log_args(log_buf, sizeof(log_buf), &normalized_args);
+	SAFE_LOGF_LEN(sizeof(log_buf), log_fd, "%s", log_buf);
+#endif
 
 	/* Phase 2: Execute system call locally if needed. */
 	if(dispatch & DISPATCH_EVERYONE || 
@@ -195,9 +131,20 @@ long monmod_syscall_handle(struct syscall_trace_func_args *raw_args)
 		ret = -ENOSYS;
 	}
 
-	/* Phase 3: Run exit handlers, potentially replicating results. */
+	/* Phase 3: Replicate results if needed */
+	if(dispatch & DISPATCH_NEEDS_REPLICATION) {
+		NZ_TRY_EXCEPT(replicate_results(&env, &normalized_args,
+		                                args, &ret),
+			      monmod_exit(1));
+	}
+
+	/* Phase 4: Run exit handlers, potentially denormalizing results. */
 	if(NULL != handler && NULL != handler->exit) {
-		handler->exit(&env, no, args, &ret);
+		handler->exit(&env, no, args, &normalized_args, &ret, dispatch);
+	}
+
+	if(NULL != handler->free_normalized_args) {
+		handler->free_normalized_args(&normalized_args);
 	}
 
 #if VERBOSITY >= 2
@@ -220,17 +167,7 @@ long monmod_syscall_handle(struct syscall_trace_func_args *raw_args)
 	return ret;
 }
 
-static inline struct variant_config *get_variant(int id)
-{
-	for(int i = 0; i < conf.n_variants; i++) {
-		if(conf.variants[i].id == id) {
-			return &conf.variants[i];
-		}
-	}
-	return NULL;
-}
-
-static inline int write_monmod_config(const char *path, const char *val, 
+static int write_monmod_config(const char *path, const char *val, 
                                       size_t len)
 {
 	int f = open(path, O_WRONLY);
@@ -244,7 +181,7 @@ static inline int write_monmod_config(const char *path, const char *val,
 	return 0;
 }
 
-static inline int write_monmod_config_long(const char *path, long val)
+static int write_monmod_config_long(const char *path, long val)
 {
 	char valstr[24];
 	int valstr_len = snprintf(valstr, sizeof(valstr), "%ld\n", val);
@@ -254,8 +191,8 @@ static inline int write_monmod_config_long(const char *path, long val)
 	return write_monmod_config(path, valstr, valstr_len);
 }
 
-static inline int write_monmod_config_longs(const char *path, size_t n_longs,
-                                            long *vals)
+static int write_monmod_config_longs(const char *path, size_t n_longs,
+                                     long *vals)
 {
 	const int max_val_len = 24;  // longmax takes 20 digits
 	size_t valstr_max_len = max_val_len * n_longs;
@@ -325,7 +262,7 @@ void __attribute__((constructor)) init()
 
 	// Parse configuration.
 	NZ_TRY_EXCEPT(parse_config(config_path, &conf), exit(1));
-	Z_TRY_EXCEPT(own_variant_conf = get_variant(own_id), exit(1));
+	Z_TRY_EXCEPT(own_variant_conf = get_variant(&conf, own_id), exit(1));
 	is_leader = conf.leader_id == own_id;
 
 	// Connect all nodes.
@@ -380,6 +317,8 @@ void __attribute__((constructor)) init()
 			exit(1);
 		}
 	}
+
+	env_init(&env, &comm, &conf, own_id);
 
 	if(0 != monmod_toggle(true)) {
 		WARN("Unable to activate monitoring.\n");

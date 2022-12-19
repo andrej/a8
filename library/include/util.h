@@ -20,7 +20,7 @@
 }
 #else
 #define WARN(...)
-#define WARNF(x)
+#define WARNF(...)
 #endif
 
 #define TRY_EXCEPT(x, rhs, except) { \

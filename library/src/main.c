@@ -27,8 +27,8 @@
 	len = snprintf(log, sizeof(log), \
 	              msg, __VA_ARGS__); \
 	if(0 < len && len < sizeof(log)) { \
-		monmod_syscall(__NR_write, log_fd, (long)log, (long)len, \
-		               0, 0, 0); \
+		monmod_trusted_syscall(__NR_write, log_fd, (long)log, \
+		                       (long)len, 0, 0, 0); \
 	} \
 }
 #define SAFE_LOGF(log_fd, msg, ...) SAFE_LOGF_LEN(128, log_fd, msg, __VA_ARGS__)
@@ -48,12 +48,13 @@ bool kernel_monmod_active = false;
 int monmod_exit(int code)
 {
 	comm_destroy(&comm);
-	return monmod_syscall(__NR_exit, code, 0, 0, 0, 0, 0);
+	return monmod_trusted_syscall(__NR_exit, code, 0, 0, 0, 0, 0);
 }
 
 int monmod_toggle(bool onoff)
 {
-	int ret = monmod_syscall(__NR_monmod_toggle, onoff, 0, 0, 0, 0, 0);
+	int ret = monmod_trusted_syscall(__NR_monmod_toggle, onoff,  
+	                                 0, 0, 0, 0, 0);
 	if(ret & 1 != 1) {
 		SAFE_LOGF(log_fd, "monmod_toggle unsuccessfully returned with "
 		          "%x\n", ret);
@@ -87,28 +88,27 @@ long monmod_syscall_handle(struct syscall_trace_func_args *raw_args)
 	if(NULL == handler) {
 		SAFE_LOGF(log_fd, "%ld -- no handler!\n",
 		          raw_args->syscall_no);
-		monmod_exit(1);
 	}
 
 	/* Preparation: Initialize data. */
 	actual.no = raw_args->syscall_no;
 	SYSCALL_ARGS_TO_ARRAY(regs, actual.args);
 	actual.ret = -ENOSYS;
-	canonical.no = handler->canonical_no;
+	if(NULL != handler) {
+		canonical.no = handler->canonical_no;
+	} else {
+		canonical.no = actual.no;
+	}
 	memcpy(canonical.args, actual.args, sizeof(actual.args));
 
 	/* Phase 1: Cross-check arguments. */
-	handler = get_handler(actual.no);
-	if(NULL == handler) {
-		SAFE_LOGF(log_fd, "%ld -- no handler!\n",
-		          actual.no);
-		monmod_exit(1);
-	}
 #if VERBOSITY >= 2
-	SAFE_LOGF(log_fd, "%s (%ld) -- enter from %p.\n",
-			handler->name, actual.no, raw_args->ret_addr);
+	if(NULL != handler) {
+		SAFE_LOGF(log_fd, "%s (%ld) -- enter from %p.\n",
+			  handler->name, actual.no, raw_args->ret_addr);
+	}
 #endif
-	if(NULL != handler->enter) {
+	if(NULL != handler && NULL != handler->enter) {
 		dispatch = handler->enter(&env, handler, &actual, &canonical,
 		                          &handler_scratch_space);
 	} else {
@@ -116,10 +116,12 @@ long monmod_syscall_handle(struct syscall_trace_func_args *raw_args)
 	}
 
 #if VERBOSITY >= 3
-	char log_buf[1024];
-	log_buf[0] = '\0';
-	log_args(log_buf, sizeof(log_buf), &canonical);
-	SAFE_LOGF_LEN(sizeof(log_buf), log_fd, "%s", log_buf);
+	if(NULL != handler) {
+		char log_buf[1024];
+		log_buf[0] = '\0';
+		log_args(log_buf, sizeof(log_buf), &canonical);
+		SAFE_LOGF_LEN(sizeof(log_buf), log_fd, "%s", log_buf);
+	}
 #endif
 
 	if(dispatch & DISPATCH_ERROR) {
@@ -147,13 +149,13 @@ long monmod_syscall_handle(struct syscall_trace_func_args *raw_args)
 			   actual.args[2], actual.args[3], actual.args[4],
 			   actual.args[5]);
 #endif
-		actual.ret = monmod_syscall(actual.no, 
-		                            actual.args[0], 
-					    actual.args[1],
-					    actual.args[2],
-					    actual.args[3],
-		                            actual.args[4], 
-					    actual.args[5]);
+		actual.ret = monmod_trusted_syscall(actual.no, 
+		                                    actual.args[0], 
+		                                    actual.args[1],
+		                                    actual.args[2],
+		                                    actual.args[3],
+		                                    actual.args[4], 
+		                                    actual.args[5]);
 #if VERBOSITY >= 4
 		SAFE_LOGF(log_fd, "Returned: %ld\n", actual.ret);
 #endif
@@ -185,7 +187,8 @@ long monmod_syscall_handle(struct syscall_trace_func_args *raw_args)
 	}
 
 	/* Phase 4: Run exit handlers, potentially denormalizing results. */
-	if(NULL != handler->exit) {
+	if(NULL != handler && NULL != handler->exit 
+	   && !(dispatch & DISPATCH_SKIP)) {
 		handler->exit(&env, handler, dispatch, &actual, &canonical,
 		              &handler_scratch_space);
 	}
@@ -268,6 +271,11 @@ void __attribute__((constructor)) init()
 	long untraced_syscalls[] = { };
 	const long n_untraced_syscalls = sizeof(untraced_syscalls)
 	                               / sizeof(untraced_syscalls[0]);
+
+	// Sanity check
+	Z_TRY_EXCEPT(monmod_syscall_trusted_addr 
+	             != monmod_syscall_untrusted_addr,
+		     exit(1));
 
 	// Read environment variables.
 	if(NULL == (own_id_str = getenv("MONMOD_ID"))) {
@@ -381,5 +389,5 @@ void __attribute__((destructor)) destruct()
 	/* Nothing may run after our monitor is destroyed. Without this,
 	   exit code may flush buffers etc without us monitoring this.
 	   FIXME always exits with zero exit code */
-	monmod_syscall(__NR_exit, 0, 0, 0, 0, 0, 0);
+	monmod_trusted_syscall(__NR_exit, 0, 0, 0, 0, 0, 0);
 }

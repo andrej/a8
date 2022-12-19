@@ -88,7 +88,7 @@ enum deserialize_approach {
 	DESERIALIZE_OVERWRITE
 };
 
-#define IGNORE_TYPE() (struct type){IGNORE}
+#define IGNORE_TYPE() (struct type){IGNORE, .immediate = {sizeof(long)}}
 #define IMMEDIATE_TYPE(typ) (struct type){IMMEDIATE, .immediate = {sizeof(typ)}}
 #define POINTER_TYPE(pointee_typ) (struct type)\
 	{POINTER, .pointer = {pointee_typ}}

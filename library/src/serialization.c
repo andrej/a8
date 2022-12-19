@@ -6,7 +6,7 @@ size_t get_serialized_size(const void *buf, const struct type *type)
 {
 	switch(type->kind) {
 		case IGNORE: {
-			return sizeof(uint32_t);
+			return type->immediate.size;
 		}
 		case IMMEDIATE: {
 			return type->immediate.size;
@@ -43,8 +43,8 @@ ssize_t serialize_into(const void *inp, const struct type *type, void *buf)
 {
 	switch(type->kind) {
 		case IGNORE: {
-			*((uint32_t *)buf) = 0;
-			return sizeof(uint32_t);
+			memset(buf, 0, type->immediate.size);
+			return type->immediate.size;
 		}
 		case IMMEDIATE:
 		case DESCRIPTOR: 
@@ -116,11 +116,7 @@ ssize_t deserialize(void *buf, const struct type *type, void *dest,
 	switch(type->kind) {
 		case IGNORE:
 		{
-			/* Write 0 to deserialize_into. */
-			if(NULL != dest) {
-				*((uint32_t *)dest) = 0;
-			}
-			return sizeof(uint32_t);
+			return type->immediate.size;
 		}
 		case IMMEDIATE: 
 		case DESCRIPTOR:

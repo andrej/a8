@@ -16,13 +16,14 @@
       Result propagation
 */
 
-#define DISPATCH_ERROR              0x0
-#define DISPATCH_EVERYONE           0x1
-#define DISPATCH_LEADER             0x2
-#define DISPATCH_UNCHECKED          0x4
-#define DISPATCH_CHECKED            0x8
-#define DISPATCH_DEFERRED_CHECK    0x10
-#define DISPATCH_NEEDS_REPLICATION 0x20
+#define DISPATCH_ERROR              0x1
+#define DISPATCH_EVERYONE           0x2
+#define DISPATCH_LEADER             0x4
+#define DISPATCH_UNCHECKED          0x8
+#define DISPATCH_CHECKED           0x10
+#define DISPATCH_DEFERRED_CHECK    0x20
+#define DISPATCH_NEEDS_REPLICATION 0x40
+#define DISPATCH_SKIP              0x80
 
 #define ARG_FLAG_NONE        0x0
 /* This flag indicates that a system call will interpret this argument as a 

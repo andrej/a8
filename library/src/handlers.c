@@ -63,6 +63,11 @@
 #define is_monitor_fd(fd) \
 	0
 
+#define post_call_error() { \
+	actual->ret = -1; \
+	return; \
+}
+
 struct syscall_handler const *get_handler(long no)
 {
 	const size_t n_handlers =
@@ -89,6 +94,11 @@ SYSCALL_ENTER_PROT(default_unchecked)
 	return DISPATCH_EVERYONE | DISPATCH_UNCHECKED;
 }
 
+SYSCALL_ENTER_PROT(default_checked_arg1) {
+	canonical->arg_types[0] = IMMEDIATE_TYPE(long);
+	return DISPATCH_EVERYONE | DISPATCH_CHECKED;
+}
+
 SYSCALL_ENTER_PROT(default_arg1_fd)
 {
 	struct descriptor_info *di = get_di(0);
@@ -99,6 +109,30 @@ SYSCALL_ENTER_PROT(default_arg1_fd)
 	return dispatch_leader_if_needed(di, DISPATCH_CHECKED);
 }
 
+SYSCALL_EXIT_PROT(default_creates_fd_exit)
+{
+	struct descriptor_info *di;
+	if(0 > actual->ret) {
+		return;
+	}
+	if(dispatch & DISPATCH_EVERYONE) {
+		di = env_add_local_descriptor(env, actual->ret, 
+		                             DI_OPENED_LOCALLY);
+	} else if(env->is_leader) {
+		di = env_add_local_descriptor(env, actual->ret, 
+		                             DI_OPENED_ON_LEADER);
+	} else {
+		di = env_add_local_descriptor(env, -1, DI_OPENED_ON_LEADER);
+	}
+	actual->ret = di->canonical_fd;
+	free_scratch();
+	return;
+}
+
+SYSCALL_EXIT_PROT(default_free_scratch)
+{
+	free_scratch();
+}
 
 /* ************************************************************************** *
  * brk                                                                        *
@@ -106,12 +140,11 @@ SYSCALL_ENTER_PROT(default_arg1_fd)
 
 SYSCALL_ENTER_PROT(brk)
 {
-	/* We cannot compare pointer values since they are architecture-
-	   dependent, but we will check whether brk was called with a NULL
-	   argument on all platforms. */
-	canonical->args[0] = ((void *)canonical->args[0] == NULL ? 0 : 1);
-	canonical->arg_types[0] = IMMEDIATE_TYPE(char);
-	return DISPATCH_EVERYONE | DISPATCH_DEFERRED_CHECK;
+	/* The brk system call should remain unmonitored (for performance
+	   reasons best in the kernel module settings). libc calloc uses
+	   locking, and when our monitor intercepts brk and tries to allocate
+	   memory itself, this can lead to a deadlock. */
+	return DISPATCH_ERROR;
 }
 
 
@@ -192,24 +225,6 @@ SYSCALL_ENTER_PROT(openat)
 	}
 
 	return DISPATCH_EVERYONE | DISPATCH_CHECKED;
-}
-
-SYSCALL_EXIT_PROT(openat)
-{
-	struct descriptor_info *di;
-	int canonical_fd = -1;
-	if(dispatch & DISPATCH_EVERYONE) {
-		di = env_add_local_descriptor(env, actual->ret, 
-		                             DI_OPENED_LOCALLY);
-	} else if(env->is_leader) {
-		di = env_add_local_descriptor(env, actual->ret, 
-		                             DI_OPENED_ON_LEADER);
-	} else {
-		di = env_add_local_descriptor(env, -1, DI_OPENED_ON_LEADER);
-	}
-	actual->ret = di->canonical_fd;
-	free_scratch();
-	return;
 }
 
 
@@ -488,8 +503,8 @@ SYSCALL_EXIT_PROT(writev)
 /* ************************************************************************** *
  * stat                                                                       * 
  *                                                                            *
- * int fstat(cons char *restrict pathname,                                    *
- *           struct stat *restrict statbuf);                                  * 
+ * int stat(cons char *restrict pathname,                                     *
+ *          struct stat *restrict statbuf);                                   * 
  * ************************************************************************** */
 
 SYSCALL_ENTER_PROT(stat)
@@ -632,7 +647,7 @@ SYSCALL_EXIT_PROT(gettimeofday)
 /* ************************************************************************** *
  * dup2                                                                       * 
  *                                                                            *
- * int dup3(int oldfd, int newfd);                                            *
+ * int dup2(int oldfd, int newfd);                                            *
  * ************************************************************************** */
 
 SYSCALL_ENTER_PROT(dup2)
@@ -741,24 +756,6 @@ SYSCALL_ENTER_PROT(socket)
 		| DISPATCH_NEEDS_REPLICATION;
 }
 
-SYSCALL_EXIT_PROT(socket)
-{
-	size_t i = 0;
-	struct descriptor_info *di = NULL;
-	if(env->is_leader) {
-		di = env_add_local_descriptor(env, actual->ret, 
-		                             DI_OPENED_ON_LEADER);
-	} else {
-		di = env_add_local_descriptor(env, -1, DI_OPENED_ON_LEADER);
-	}
-	if(NULL == di) {
-		actual->ret = -1;
-		return;
-	}
-	actual->ret = di->canonical_fd;
-	return;
-}
-
 
 /* ************************************************************************** *
  * epoll_create                                                               *
@@ -766,40 +763,93 @@ SYSCALL_EXIT_PROT(socket)
  * int epoll_create(int size);                                                *
  * ************************************************************************** */
 
-SYSCALL_EXIT_PROT(epoll_create)
+/* epolls require a little more special handling on our end.
+
+   The general workflow that a variant expects is as follows:
+   
+   1. Variant creates an epollfd using epoll_create.
+   2. Variant associates (epfd, fd, events) triple with some arbitrary data.
+   3. Upon any epoll_wait(epfd ...), when any of the `events` happens on `fd`, 
+      the previously registered arbitrary data must be returned.
+
+   This poses the following challenges:
+   A. If an `epfd` becomes associated with an `fd` that is only opened on the
+      leader (e.g. a socket), the entire `epfd` becomes 'contaminated': any
+      call to `epoll_wait` must got to the leader and be replicated.
+   B. Any data associated with the (epfd, fd, events) triple must be returned
+      exactly as previously registered by `epoll_ctl` upon an `epoll_wait`. We
+      cannot 'blindly' replicate the returned data -- the data that was
+      previously registered on each variant must be returned, and this data
+      might vary from variant to variant.
+
+   We solve this as follows:
+
+   epoll_create(): We assume all epfds will be contaminated and hence only
+   create them on the leader.
+
+   epoll_ctl(epfd, EPOLL_CTL_ADD, fd, event): 
+     1. Check that event->data matches up across all calls, except for the
+        `data` field, which may contain arbitrary data, including pointers,
+	and hence cannot be cross-checked
+     2. Store a mapping (epfd, fd, event->events) -> event->data. This stores
+        the data that we must return upon a subsequent epoll_wait for this fd
+	and event->events.
+     3. Overwrite the fourth argument (event pointer) to our own 
+        (struct epoll_event) with custom data, but same events:
+		{.events = copied from original,
+		.data = {.fd = fd}}
+     4. Remap epfd and fd to kernel values (only in leader, call is not
+        excectued on other variants)
+
+   epoll_wait(epfd, events, maxevents, timeout):
+     1. Dispatch only on leader and replicate return value and events buffer
+     2. Iterate through events buffer. For each event:
+        a. Find x = (epfd, fd, event->events) in our map. Copy x->data to
+	   events[i].data.
+	   This overwrites our custom data and restores the original data that
+	   was associated with this event in epoll_ctl(). 
+   
+   Note:
+   - The kernel returns our custom data for all epoll_waits() which we must
+     overwrite.
+   - Our mappings use canonical file descriptors for everything. The remapping
+     happens in the last step, before exit. Canonical file descriptors should
+     always match up across variants.
+*/
+
+SYSCALL_ENTER_PROT(epoll_create)
 {
-	struct descriptor_info *di =
-		env_add_local_descriptor(env, actual->ret, DI_OPENED_LOCALLY);
-	if(NULL == di) {
-		actual->ret = -1;
-		return;
-	}
-	actual->ret = di->canonical_fd;
+	canonical->ret_type = IMMEDIATE_TYPE(long);
+	canonical->ret_flags = ARG_FLAG_REPLICATE;
+	return DISPATCH_LEADER | DISPATCH_NEEDS_REPLICATION | DISPATCH_CHECKED;
 }
 
 
-/* ************************************************************************** * * epoll_ctl                                                                  *
+/* ************************************************************************** * 
+ * epoll_ctl                                                                  *
  *                                                                            *
  * int epoll_ctl(int epfd, int op, int fd, struct epoll_event *event);        *
  * ************************************************************************** */
  
+/* See epoll_create documentation above to see how we handle these calls. */
+
 SYSCALL_ENTER_PROT(epoll_ctl)
 {
 	struct scratch {
 		struct type ref_types[2];
 		struct buffer_reference buf_refs[1];
-		struct descriptor_info *di[2];
+		struct descriptor_info *epfd_di;
+		struct descriptor_info *fd_di;
+		struct epoll_event custom_event;
 	};
 	alloc_scratch(sizeof(struct scratch));
 	struct scratch *s = (struct scratch *)*scratch;
-
+	int epfd = canonical->args[0];
 	int op = canonical->args[1];
+	int fd = canonical->args[2];
 	struct epoll_event *event = (struct epoll_event *)canonical->args[3];
 
-	s->di[0] = get_di(0);
-	s->di[1] = get_di(2);
-
-	/* Argument serialization */
+	/* Define arguemnt types */
 	canonical->arg_types[0] = DESCRIPTOR_TYPE();
 	canonical->arg_types[1] = IMMEDIATE_TYPE(int);
 	canonical->arg_types[2] = DESCRIPTOR_TYPE();
@@ -810,90 +860,100 @@ SYSCALL_ENTER_PROT(epoll_ctl)
 	                          {.offset = 
 				     ((void *)&event->data.ptr)-((void*)&event),
 	                           .type = &s->ref_types[1]};
+	/* (struct epoll_event).data buffer is ignored; it may contain pointers
+	   and other data that varies between variants */
 	s->ref_types[1]         = IGNORE_TYPE();
 	canonical->ret_type = IMMEDIATE_TYPE(long);
 	canonical->ret_flags = ARG_FLAG_REPLICATE;
 
-	/* File descriptor remapping */
-	remap_fd(s->di[0], 0);
-	remap_fd(s->di[1], 2);
-
-	/* If epfd is only open on the leader, only dispatch there.
-	   If epfd is open everywhere, but fd is only on the leader, then this
-	   means that epfd it is about to become associated with a leader-only
-	   file. This association can only happen on the leader. The exit 
-	   handler will then also "taint" epfd to be a leader-only handle. */
-	if(s->di[0]->flags & DI_OPENED_ON_LEADER
-	   || s->di[1]->flags & DI_OPENED_ON_LEADER) {
-		return DISPATCH_LEADER | DISPATCH_CHECKED
-		       | DISPATCH_NEEDS_REPLICATION;
+	/* Handle different operations -- note that we need to undo anything
+	   done here if the actual call on the leader fails in the post-call
+	   handler! */
+	switch(op) {
+		case EPOLL_CTL_ADD: {
+			/* Store original (epfd, fd, events) --> data mapping,
+			   to be returned upon epoll_wait(). */
+			struct epoll_data_info event_info = 
+				(struct epoll_data_info) {
+					.epfd = epfd,
+					.fd = fd,
+					.data = *event
+				};
+			append_epoll_data_info(env, event_info);
+			s->custom_event.events = event->events;
+			s->custom_event.data.fd = fd;
+			actual->args[3] = (long)&s->custom_event;
+			break;
+		}
+		case EPOLL_CTL_MOD: {
+			struct epoll_data_info *event_info =
+				get_epoll_data_info_for(env, epfd, fd, ~0U);
+			if(NULL == event_info) {
+				return DISPATCH_ERROR;
+			}
+			s->custom_event.events = event_info->data.events;
+			s->custom_event.data.fd = fd;
+			actual->args[3] = (long)&s->custom_event;
+			break;
+		}
 	}
 
-	/* TODO might just always do leader-only dispatch instead... Cannot
-	   currently think of a time where this makes sense. */
-	return DISPATCH_EVERYONE | DISPATCH_CHECKED;
+	/* File descriptor remapping */
+	s->epfd_di = get_di(0);
+	s->fd_di = get_di(2);
+	remap_fd(s->epfd_di, 0);
+	remap_fd(s->fd_di, 2);
 
+	return DISPATCH_LEADER | DISPATCH_CHECKED | DISPATCH_NEEDS_REPLICATION;
 }
 
 SYSCALL_EXIT_PROT(epoll_ctl)
 {
+	struct scratch {
+		struct type ref_types[2];
+		struct buffer_reference buf_refs[1];
+		struct descriptor_info *epfd_di;
+		struct descriptor_info *fd_di;
+		struct epoll_event custom_event;
+	};
+	struct scratch *s = (struct scratch *)*scratch;
 	int epfd = canonical->args[0];
 	int op = canonical->args[1];
 	int fd = canonical->args[2];
 	struct epoll_event *event = (struct epoll_event *)canonical->args[3];
-	struct epoll_data_info info;
-	info.epfd = epfd;
-	info.fd = fd;
-	if(NULL != event) {
-		info.data = *event;
-	}
 
-	struct scratch {
-		struct type ref_types[2];
-		struct buffer_reference buf_refs[1];
-		struct descriptor_info *di[2];
-	};
-	struct scratch *s = (struct scratch *)*scratch;	
-
-	if(dispatch & DISPATCH_LEADER
-	   && s->di[0]->flags & DI_OPENED_LOCALLY) {
-		if(!env->is_leader) {
-			close(s->di[0]->local_fd);
-		}
-		s->di[0]->flags &= ~DI_OPENED_LOCALLY;
-		s->di[0]->flags |= DI_OPENED_ON_LEADER;
-	}
-
+	struct epoll_data_info *event_info = 
+		get_epoll_data_info_for(env, epfd, fd, ~0U);
 
 	switch(op) {
 		case EPOLL_CTL_ADD: {
-			if(NULL == event) {
-				actual->ret = -1;
-				return;
+			if(0 > actual->ret) {
+				if(NULL != event_info) {
+					remove_epoll_data_info(env, event_info);
+				}
+			} else {
+				if(NULL == event_info) {
+					post_call_error();
+				}
 			}
-			append_epoll_data_info(env, info);
 			break;
 		}
 		case EPOLL_CTL_MOD: {
-			struct epoll_data_info *existing_info =
-				get_epoll_data_info_for(env, epfd, fd, ~0U);
-			if(NULL == event
-			   || NULL == existing_info) {
-				actual->ret = -1;
-				return;
+			if(0 > actual->ret) {
+				/* This is currently unhandled since we cannot 
+				   restore the previous state correctly. (Would 
+				   need to save in entry-handler.) */
+				post_call_error();
 			}
-			memcpy(&existing_info->data, event,
-			       sizeof(struct epoll_event));
 			break;
 		}
 		case EPOLL_CTL_DEL: {
-			struct epoll_data_info *existing_info =
-				get_epoll_data_info_for(env, epfd, fd, ~0U);
-			if(NULL == existing_info) {
-				actual->ret = -1;
-				return;
+			if(0 == actual->ret) {
+				if(NULL == event_info) {
+					post_call_error();
+				}
+				remove_epoll_data_info(env, event_info);
 			}
-			remove_epoll_data_info(env, existing_info);
 			break;
 		}
 	}
@@ -902,12 +962,203 @@ SYSCALL_EXIT_PROT(epoll_ctl)
 }
 
 
+/* ************************************************************************** * 
+ * epoll_wait                                                                 *
+ *                                                                            *
+ * int epoll_wait(int epfd, struct epoll_event *events,                       *
+ *                int maxevents, int timeout);                                *
+ * ************************************************************************** */
+
+/* See epoll_create documentation above to see how we handle these calls. */
+
 SYSCALL_ENTER_PROT(epoll_wait)
 {
-	return DISPATCH_CHECKED;
+	int maxevents = actual->args[2];
+	if(maxevents <= 0) {
+		return DISPATCH_ERROR;
+	}
+
+	struct descriptor_info *di = get_di(0);
+	alloc_scratch(sizeof(struct type));
+	struct type *epoll_events_type = (struct type *)*scratch;
+
+	canonical->arg_types[0] = DESCRIPTOR_TYPE();
+	remap_fd(di, 0); // only dispatched on leader, will remap there
+
+	canonical->arg_types[1] = POINTER_TYPE(epoll_events_type);
+	*epoll_events_type = BUFFER_TYPE(maxevents 
+	                                 * sizeof(struct epoll_event));
+	canonical->arg_flags[1] = ARG_FLAG_WRITE_ONLY | ARG_FLAG_REPLICATE;
+	canonical->arg_types[2] = IMMEDIATE_TYPE(int);
+	canonical->arg_types[3] = IMMEDIATE_TYPE(int);
+
+	canonical->ret_type = IMMEDIATE_TYPE(long);
+	canonical->ret_flags = ARG_FLAG_REPLICATE;
+
+	// Just in case we ever implement non-leader dispatch types for epolls.
+	return dispatch_leader_if_needed(di, DISPATCH_CHECKED);
 }
 
 SYSCALL_EXIT_PROT(epoll_wait)
 {
+	/* epoll_wait returns the `struct epoll_event` that was previously
+	   registered with `epoll_ctl`.
+	   
+	   Here, we return exactly the previously registered 
+	   `struct epoll_event` to make sure `epoll_wait` behaves correctly and
+	   as expected by the variant. */
+	
+	if(dispatch & DISPATCH_EVERYONE) {
+		// Just in case we ever implement this dispatch type for epolls.
+		return;
+	}
 
+	int epfd = canonical->args[0];
+	struct epoll_event *events = (struct epoll_event *)actual->args[1];  
+	int maxevents = actual->args[2];
+	int n_events = actual->ret;
+
+	if(0 > n_events || n_events > maxevents) {
+		post_call_error();
+	}
+
+	struct epoll_event *custom_event = NULL;
+	struct epoll_data_info *own_event = NULL;
+	for(int i = 0; i < n_events; i++) {
+		custom_event = &events[i];
+		own_event = get_epoll_data_info_for(
+			env, epfd, custom_event->data.fd, custom_event->events);
+		if(NULL == own_event) {
+			post_call_error();
+		}
+		memcpy(&events[i].data, &own_event->data.data, 
+		       sizeof(own_event->data.data));
+	}
+}
+
+
+/* ************************************************************************** * 
+ * sendfile                                                                   *
+ *                                                                            *
+ * ssize_t sendfile(int out_fd, int in_fd, off_t *offset, size_t count);      *
+ * ************************************************************************** */
+
+SYSCALL_ENTER_PROT(sendfile)
+{
+	struct descriptor_info *out_fd_di = get_di(0);
+	struct descriptor_info *in_fd_di = get_di(1);
+
+	canonical->arg_types[0] = DESCRIPTOR_TYPE();
+	remap_fd(out_fd_di, 0);
+	canonical->arg_types[1] = DESCRIPTOR_TYPE();
+	remap_fd(in_fd_di, 1);
+
+	canonical->ret_type = IMMEDIATE_TYPE(long);
+	canonical->ret_flags = ARG_FLAG_REPLICATE;
+
+	if(out_fd_di->flags & DI_OPENED_ON_LEADER ||
+	   in_fd_di->flags & DI_OPENED_ON_LEADER) {
+		return DISPATCH_CHECKED | DISPATCH_LEADER 
+		       | DISPATCH_NEEDS_REPLICATION;
+	}
+
+	return DISPATCH_CHECKED | DISPATCH_EVERYONE;
+}
+
+
+/* ************************************************************************** *
+ * getgroups                                                                  * 
+ *                                                                            *
+ * int getgroups(int size, gid_t list[]);                                     *
+ * ************************************************************************** */ 
+
+SYSCALL_ENTER_PROT(getgroups)
+{
+	int size = actual->args[0];
+	if(0 > size) {
+		return DISPATCH_ERROR;
+	}
+
+	alloc_scratch(sizeof(struct type));
+	struct type *ref_type = (struct type *)*scratch;
+	canonical->arg_types[0] = IMMEDIATE_TYPE(int);
+	canonical->arg_types[1] = POINTER_TYPE(ref_type);
+	*ref_type               = BUFFER_TYPE(sizeof(gid_t) * size);
+	return DISPATCH_CHECKED | DISPATCH_EVERYONE;
+}
+
+
+/* ************************************************************************** *
+ * setgroups                                                                  * 
+ *                                                                            *
+ * int setgroups(size_t size, const gid_t *list);                             *
+ * ************************************************************************** */ 
+
+SYSCALL_ENTER_PROT(setgroups)
+{
+	size_t size = actual->args[0];
+	alloc_scratch(sizeof(struct type));
+	struct type *ref_type = (struct type *)*scratch;
+	canonical->arg_types[0] = IMMEDIATE_TYPE(size_t);
+	canonical->arg_types[1] = POINTER_TYPE(ref_type);
+	*ref_type               = BUFFER_TYPE(sizeof(gid_t) * size);
+	canonical->arg_flags[1] = ARG_FLAG_WRITE_ONLY;
+	return DISPATCH_CHECKED | DISPATCH_EVERYONE;
+}
+
+
+/* ************************************************************************** *
+ * getsockopt                                                                 * 
+ *                                                                            *
+ * int getsockopt(int sockfd, int level, int optname,                         *
+ *                void *restrict optval, socklen_t *restrict optlen);         * 
+ * ************************************************************************** */ 
+
+SYSCALL_ENTER_PROT(getsockopt)
+{
+	socklen_t *optlen = (socklen_t *)canonical->args[4];
+	alloc_scratch(2 * sizeof(struct type));
+	struct type *optval_type = (struct type *)*scratch;
+	struct type *optlen_type = (struct type *)(*scratch 
+	                                           + sizeof(struct type));
+	struct descriptor_info *di = get_di(0);
+	canonical->arg_types[0] = DESCRIPTOR_TYPE();
+	remap_fd(di, 0);
+	canonical->arg_types[1] = IMMEDIATE_TYPE(int);
+	canonical->arg_types[2] = IMMEDIATE_TYPE(int);
+	canonical->arg_types[3] = POINTER_TYPE(optval_type);
+	*optval_type            = BUFFER_TYPE(*optlen);
+	canonical->arg_flags[3] = ARG_FLAG_REPLICATE | ARG_FLAG_WRITE_ONLY;
+	canonical->arg_types[4] = POINTER_TYPE(optlen_type);
+	*optlen_type            = BUFFER_TYPE(sizeof(socklen_t));
+	canonical->arg_flags[4] = ARG_FLAG_REPLICATE;
+	canonical->ret_type     = IMMEDIATE_TYPE(long);
+	canonical->ret_flags    = ARG_FLAG_REPLICATE;
+
+	return dispatch_leader_if_needed(di, DISPATCH_CHECKED);
+}
+
+/* ************************************************************************** *
+ * setsockopt                                                                 * 
+ *                                                                            *
+ * int setsockopt(int sockfd, int level, int optname,                         *
+ *                const void *optval, socklen_t optlen);                      * 
+ * ************************************************************************** */ 
+
+SYSCALL_ENTER_PROT(setsockopt) {
+	socklen_t optlen = (socklen_t)canonical->args[4];
+	alloc_scratch(sizeof(struct type));
+	struct type *optval_type = (struct type *)*scratch;
+	struct descriptor_info *di = get_di(0);
+	canonical->arg_types[0] = DESCRIPTOR_TYPE();
+	remap_fd(di, 0);
+	canonical->arg_types[1] = IMMEDIATE_TYPE(int);
+	canonical->arg_types[2] = IMMEDIATE_TYPE(int);
+	canonical->arg_types[3] = POINTER_TYPE(optval_type);
+	*optval_type            = BUFFER_TYPE(optlen);
+	canonical->arg_types[4] = IMMEDIATE_TYPE(socklen_t);
+	canonical->ret_type     = IMMEDIATE_TYPE(long);
+	canonical->ret_flags    = ARG_FLAG_REPLICATE;
+
+	return dispatch_leader_if_needed(di, DISPATCH_CHECKED);
 }

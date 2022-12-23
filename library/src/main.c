@@ -80,7 +80,7 @@ long monmod_syscall_handle(struct syscall_trace_func_args *raw_args)
 	struct syscall_handler const *handler = NULL;
 	struct syscall_info actual = {};
 	struct syscall_info canonical = {};
-	void *handler_scratch_space;
+	void *handler_scratch_space = NULL;
 	int dispatch = 0;
 
 	/* Find syscall handlers handler. */
@@ -268,7 +268,13 @@ void __attribute__((constructor)) init()
 
 	own_pid = getpid();
 	
-	long untraced_syscalls[] = { };
+	long untraced_syscalls[] = { 
+		/* Locking mechanisms in libc calloc can make a deadlock occur
+		   when we monitor __NR_brk and try to allocate memory ourselves
+		   in the monitor, also using calloc. We disable monitoring of
+		   brk for this reason. */
+		__NR_brk
+	};
 	const long n_untraced_syscalls = sizeof(untraced_syscalls)
 	                               / sizeof(untraced_syscalls[0]);
 

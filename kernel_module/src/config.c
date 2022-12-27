@@ -116,6 +116,47 @@ void monmod_config_free()
     memset(&monmod_global_config, 0, sizeof(monmod_global_config));
 }
 
+int monmod_add_tracee_config(pid_t pid)
+{
+    size_t idx = 0;
+
+    if(monmod_global_config.n_tracees >= MONMOD_MAX_N_TRACEES) {
+        MONMOD_WARN("Adding tracee config, exhausted capacity.\n");
+        return 1;
+    }
+    idx = 0;
+    // Find free slot to put this tracee config
+    for(; idx < MONMOD_MAX_N_TRACEES; idx++) {
+        if(0 == monmod_global_config.tracee_pids[idx]) {
+            break;
+        }
+    }
+    if(idx > MONMOD_MAX_N_TRACEES) {
+        MONMOD_WARN("Adding tracee config, sanity check failed!\n");
+        return 1;
+    }
+    // Reset tracee configuration, make sure we start from a clean slate
+    memset(&monmod_global_config.tracees[idx], 0, 
+           sizeof(monmod_global_config.tracees[0]));
+    monmod_global_config.tracee_pids[idx] = pid;
+    monmod_tracee_config_init(idx);
+    monmod_global_config.n_tracees++;
+    return 0;
+}
+
+int monmod_del_tracee_config(size_t idx)
+{
+    // Sanity checks
+    if(0 >= monmod_global_config.n_tracees
+       || monmod_global_config.n_tracees > MONMOD_MAX_N_TRACEES) {
+        return 1;
+    }
+    monmod_tracee_config_free(idx);
+    monmod_global_config.tracee_pids[idx] = 0;
+    monmod_global_config.n_tracees--;
+    return 0;
+}
+
 struct monmod_tracee_config *monmod_get_tracee_config(pid_t pid)
 {
     int i = 0;
@@ -179,47 +220,6 @@ int monmod_syscall_deactivate(u64 syscall_no)
  * Internal Functions                                                         *
  * ************************************************************************** */
 
-int monmod_add_tracee_config(pid_t pid)
-{
-    size_t idx = 0;
-
-    if(monmod_global_config.n_tracees >= MONMOD_MAX_N_TRACEES) {
-        MONMOD_WARN("Adding tracee config, exhausted capacity.\n");
-        return 1;
-    }
-    idx = 0;
-    // Find free slot to put this tracee config
-    for(; idx < MONMOD_MAX_N_TRACEES; idx++) {
-        if(0 == monmod_global_config.tracee_pids[idx]) {
-            break;
-        }
-    }
-    if(idx > MONMOD_MAX_N_TRACEES) {
-        MONMOD_WARN("Adding tracee config, sanity check failed!\n");
-        return 1;
-    }
-    // Reset tracee configuration, make sure we start from a clean slate
-    memset(&monmod_global_config.tracees[idx], 0, 
-           sizeof(monmod_global_config.tracees[0]));
-    monmod_global_config.tracee_pids[idx] = pid;
-    monmod_global_config.tracees[idx].last_syscall = MONMOD_NO_SYSCALL;
-    monmod_tracee_config_init(idx);
-    monmod_global_config.n_tracees++;
-    return 0;
-}
-
-int monmod_del_tracee_config(size_t idx)
-{
-    // Sanity checks
-    if(0 >= monmod_global_config.n_tracees
-       || monmod_global_config.n_tracees > MONMOD_MAX_N_TRACEES) {
-        return 1;
-    }
-    monmod_tracee_config_free(idx);
-    monmod_global_config.tracee_pids[idx] = 0;
-    monmod_global_config.n_tracees--;
-    return 0;
-}
 
 int monmod_tracee_config_init(size_t idx)
 {

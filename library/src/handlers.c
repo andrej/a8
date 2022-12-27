@@ -64,7 +64,9 @@
 	0
 
 #define post_call_error() { \
-	actual->ret = -1; \
+	if(actual->ret >= 0) { \
+		actual->ret = -ENOSYS; \
+	} \
 	return; \
 }
 
@@ -1145,7 +1147,8 @@ SYSCALL_ENTER_PROT(getsockopt)
  *                const void *optval, socklen_t optlen);                      * 
  * ************************************************************************** */ 
 
-SYSCALL_ENTER_PROT(setsockopt) {
+SYSCALL_ENTER_PROT(setsockopt)
+{
 	socklen_t optlen = (socklen_t)canonical->args[4];
 	alloc_scratch(sizeof(struct type));
 	struct type *optval_type = (struct type *)*scratch;
@@ -1161,4 +1164,38 @@ SYSCALL_ENTER_PROT(setsockopt) {
 	canonical->ret_flags    = ARG_FLAG_REPLICATE;
 
 	return dispatch_leader_if_needed(di, DISPATCH_CHECKED);
+}
+
+
+/* ************************************************************************** *
+ * accept4                                                                    *
+ *                                                                            *
+ *  int accept4(int sockfd, struct sockaddr *restrict addr,                   *
+ *              socklen_t *restrict addrlen, int flags);                      *
+ * ************************************************************************** */
+
+SYSCALL_ENTER_PROT(accept4)
+{
+	alloc_scratch(2 * sizeof(struct type));
+	struct type *addr_type = (struct type *)*scratch;
+	struct type *addrlen_type = (struct type *)(*scratch 
+	                                            + sizeof(struct type));
+	socklen_t *addrlen = (socklen_t *)canonical->args[2];
+	if(0 >= *addrlen) {
+		return DISPATCH_ERROR;
+	}
+	struct descriptor_info *di = get_di(0);
+	canonical->arg_types[0] = DESCRIPTOR_TYPE();
+	remap_fd(di, 0);
+	canonical->arg_types[1] = POINTER_TYPE(addr_type);
+	*addr_type              = BUFFER_TYPE(*addrlen);
+	canonical->arg_flags[1] = ARG_FLAG_REPLICATE | ARG_FLAG_WRITE_ONLY;
+	canonical->arg_types[2] = POINTER_TYPE(addrlen_type);
+	*addrlen_type           = BUFFER_TYPE(sizeof(socklen_t));
+	canonical->arg_flags[2] = ARG_FLAG_REPLICATE;
+	canonical->arg_types[3] = IMMEDIATE_TYPE(int);
+	canonical->ret_type     = IMMEDIATE_TYPE(long);
+	canonical->ret_flags    = ARG_FLAG_REPLICATE;
+
+	return DISPATCH_CHECKED | DISPATCH_LEADER | DISPATCH_NEEDS_REPLICATION;
 }

@@ -6,6 +6,7 @@
 #include <linux/ptrace.h>
 #include <linux/uaccess.h>
 #include <trace/events/syscalls.h>
+#include <linux/mman.h>
 
 #include "build_config.h"
 #include "util.h"
@@ -13,9 +14,8 @@
 #include "ptrace.h"
 #include "tracepoint_helpers.h"
 #include "syscall_trace_func.h"
+#include "custom_syscalls.h"
 
-// Macros
-#define __NR_monmod_toggle (MAX_SYSCALL_NO+2)
 
 // Global Variables
 static struct tracepoint *tp_sys_enter = NULL;
@@ -34,7 +34,11 @@ static int redirect_to_user_trace_func(void __user *target,
 	   from high address to low addres. In other words, the first element 
 	   in this array will be at the bottom (top element of stack). */
 	struct syscall_trace_func_stack stack = {
-		.syscall_no = SYSCALL_NO_REG(regs),
+		.orig_syscall_no = SYSCALL_NO_REG(regs),
+		.orig_arg_0 = SYSCALL_ARG0_REG(regs),
+		.orig_arg_1 = SYSCALL_ARG1_REG(regs),
+		.orig_arg_2 = SYSCALL_ARG2_REG(regs),
+		.orig_arg_3 = SYSCALL_ARG3_REG(regs),
 		.ret_addr = ret_addr
 	};
 	/* The new stack pointer puts some information past the red zone.
@@ -49,39 +53,38 @@ static int redirect_to_user_trace_func(void __user *target,
 	return 0;
 }
 
-static int sys_monmod_toggle(struct pt_regs *regs,
-                             struct monmod_tracee_config *tracee_conf)
+static void set_syscall_unprotect_monitor(
+		struct monmod_tracee_config *tracee_conf,
+		struct pt_regs *regs)
 {
-	const pid_t pid = current->pid;
-	if(tracee_conf->trusted_addr == (void *)PC_REG(regs)) {
-		long arg0 = SYSCALL_ARG0_REG(regs);
-		if(0 != arg0 && 1 != arg0) {
-			printk(KERN_WARNING "monmod: <%d> invalid toggle call "
-			       "with argument %ld.\n", pid,
-			       arg0);
-			return 2;
-		}
-		tracee_conf->active = (bool)arg0;
-#if MONMOD_LOG_INFO
-		if(tracee_conf->active) {
-			printk(KERN_INFO "monmod: <%d> monitoring activated.\n",
-				pid);
-		} else {
-			printk(KERN_INFO "monmod: <%d> monitoring "
-				"deactivated.\n", pid);
-		}
-#endif
-		return 1 | (tracee_conf->active << 1);
-	}
-#if MONMOD_LOG_INFO
-	printk(KERN_INFO "monmod: <%d> attempt to toggle monmod monitoring "
-	       "from non authorized address %p (authorized: %p)\n",
-		pid, (void *)PC_REG(regs), 
-		(void *)tracee_conf->trusted_addr);
-#endif
-	return 2;
+	SYSCALL_ARG0_REG(regs) = __NR_mprotect;
+	SYSCALL_ARG1_REG(regs) = (long)tracee_conf->monitor_start;
+	SYSCALL_ARG2_REG(regs) = (long)tracee_conf->monitor_len;
+	SYSCALL_ARG3_REG(regs) = PROT_READ | PROT_EXEC;
 }
 
+static inline bool syscall_breaks_protection(
+		struct monmod_tracee_config *tracee_conf,
+		struct pt_regs *regs, long id)
+{
+	switch(id) {
+		case __NR_mmap:
+		case __NR_munmap:
+		case __NR_mprotect: {
+			void __user *addr = (void __user *)
+			                    SYSCALL_ARG0_REG(regs);
+			size_t len = (size_t)SYSCALL_ARG1_REG(regs);
+			void __user *monitor_start = tracee_conf->monitor_start;
+			void __user *monitor_end = monitor_start
+			                           + tracee_conf->monitor_len;
+			if(BETWEEN(addr, monitor_start, monitor_end)
+			   || BETWEEN(addr + len, monitor_start, monitor_end)) {
+				return true;
+			}
+		}
+	}
+	return false;
+}
 
 // Probes
 
@@ -108,10 +111,10 @@ static void sys_enter_probe(void *__data, struct pt_regs *regs, long id)
 {
 	const pid_t pid = current->pid;
 	struct monmod_tracee_config *tracee_conf = NULL;
-	if(0 != probe_prelude(__data, regs)) {
-		return;
+	if(is_monmod_syscall(id)) {
+		return custom_syscall_enter(__data, regs, id);
 	}
-	if(__NR_monmod_toggle != id && !monmod_syscall_is_active(id)) {
+	if(0 != probe_prelude(__data, regs)) {
 		return;
 	}
 	if(NULL == (tracee_conf = monmod_get_tracee_config(current->pid))) {
@@ -119,12 +122,19 @@ static void sys_enter_probe(void *__data, struct pt_regs *regs, long id)
 		       "tracee although it is traced.\n", pid);
 		return;
 	}
-	tracee_conf->inject_return = 0;
-	tracee_conf->last_syscall = id;
-
-	if(__NR_monmod_toggle == id) {
-		tracee_conf->inject_return = 
-			sys_monmod_toggle(regs, tracee_conf);
+	if(syscall_breaks_protection(tracee_conf, regs, id)) {
+		printk(KERN_WARNING "monmod: <%d> system call attempted to "
+		       "alter memory protection of monitor area.\n", pid);
+		/* The following should cause a -ENOSYS return on both x86_64 
+		and aarch64. If we use -1, aarch64 will go through the
+		__sys_trace_return_skipped path (entry.S:719), which will also 
+		report trace_sys_exit(). For consistency with x86_64, which does 
+		not do that, we choose -2, which sould be well out of range as 
+		well and return -ENOSYS on both architectures. */
+		SYSCALL_NO_REG(regs) = (unsigned long)-2;
+		return;
+	}
+	if(!monmod_syscall_is_active(id)) {
 		return;
 	}
 
@@ -146,15 +156,13 @@ static void sys_enter_probe(void *__data, struct pt_regs *regs, long id)
 	       pid, id);
 #endif
 
+	/* Set up the registers and stack so we will continue in the monitoring 
+	   function upon kernel exit. */
 	redirect_to_user_trace_func(tracee_conf->trace_func_addr, regs);
-	/* The following should cause a -ENOSYS return on both x86_64 and
-	   aarch64. If we use -1, aarch64 will go through the
-	   __sys_trace_return_skipped path (entry.S:719), which will also report
-	   trace_sys_exit(). For consistency with x86_64, which does not do
-	   that, we choose -2, which sould be well out of range as well and
-	   return -ENOSYS on both architectures. */
-	SYSCALL_NO_REG(regs) = (unsigned long)-2;
-	
+
+	/* Change system call arguments to actually issue an mprotect call that
+	   allows execution of the otherwise protected region of monitor code.*/
+	set_syscall_unprotect_monitor(tracee_conf, regs);
 }
 
 static void sys_exit_probe(void *__data, struct pt_regs *regs, 
@@ -162,24 +170,15 @@ static void sys_exit_probe(void *__data, struct pt_regs *regs,
 {
 	struct monmod_tracee_config *tracee_conf = NULL;
 	const pid_t pid = current->pid;
-	long no = 0;
 	if(0 != probe_prelude(__data, regs)) {
 		return;
 	}
+	// TODO document why whe can do this after probe_prelude here
+	// (it is because pid will be registered as traced by here)
+	custom_syscall_exit(__data, regs, return_value);
 	if(NULL == (tracee_conf = monmod_get_tracee_config(current->pid))) {
 		printk(KERN_WARNING "monmod: <%d> cannot get config for "
 		       "tracee although it is traced.\n", pid);
-		return;
-	}
-	no = tracee_conf->last_syscall;
-	tracee_conf->last_syscall = MONMOD_NO_SYSCALL;
-	if(MONMOD_NO_SYSCALL == no) {
-		return;
-	}
-
-	if(__NR_monmod_toggle == no) {
-		return_value = tracee_conf->inject_return;
-		SYSCALL_RET_REG(regs) = tracee_conf->inject_return;
 		return;
 	}
 

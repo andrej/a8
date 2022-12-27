@@ -67,7 +67,7 @@ SYSCALL_EXIT_PROT(default_creates_fd_exit);
  X( __NR_epoll_ctl,epoll_ctl,  SYSCALL_ENTER(epoll_ctl),SYSCALL_EXIT(epoll_ctl) ) \
  X( __NR_epoll_wait,epoll_wait,SYSCALL_ENTER(epoll_wait), \
                                SYSCALL_EXIT(epoll_wait)) \
- X( __NR_accept4,  accept4,    SYSCALL_ENTER(default_arg1_fd), \
+ X( __NR_accept4,  accept4,    SYSCALL_ENTER(accept4), \
                                SYSCALL_EXIT(default_creates_fd_exit)) /*TODO*/ \
  X( __NR_shutdown, shutdown,   SYSCALL_ENTER(default_arg1_fd), NULL) /*TODO*/ \
  X( __NR_rt_sigaction, rt_sigaction, SYSCALL_ENTER(default_checked_arg1), NULL) /*TODO*/ \

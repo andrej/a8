@@ -32,6 +32,9 @@
 	} \
 })
 
+#define BETWEEN(a, min, max) \
+	(min <= (a) && (a) < max)
+
 size_t line_length(const char *buf, size_t count);
 
 /**

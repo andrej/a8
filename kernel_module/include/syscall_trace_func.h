@@ -6,7 +6,14 @@
 struct syscall_trace_func_stack
 {
 // low addr, top of stack
-    unsigned long syscall_no;
+    unsigned long orig_syscall_no;
+    /* We overwrite the original system call with an mprotect system call;
+       we store the original arguments on the stack. */
+    unsigned long orig_arg_0;
+    unsigned long orig_arg_1;
+    unsigned long orig_arg_2;
+    unsigned long orig_arg_3;
+    /* Original call site before we redirected to the monitor. */
 	void *ret_addr;
 // high addr, bottom of stack
 };

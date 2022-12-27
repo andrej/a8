@@ -42,15 +42,17 @@
 struct monmod_tracee_config {
         struct kobject kobj;
         #ifndef TEST_H
+                void __user *monitor_start;
+                size_t monitor_len;
                 void __user *trusted_addr;
                 void __user *trace_func_addr;
         #else
+                void __user *monitor_start;
+                size_t monitor_len;
                 void *trusted_addr;
                 void *trace_func_addr;
         #endif
         bool active;
-        long inject_return;
-        long last_syscall;
 };
 
 struct monmod_config {
@@ -71,6 +73,9 @@ extern struct monmod_config monmod_global_config;
 
 int monmod_config_init(void);
 void monmod_config_free(void);
+
+int monmod_add_tracee_config(pid_t pid);
+int monmod_del_tracee_config(size_t idx);
 
 static inline __attribute__((__always_inline__))
 bool monmod_is_pid_traced(pid_t pid)
@@ -98,8 +103,6 @@ int monmod_syscall_deactivate(u64 syscall_no);
 int _monmod_syscall_mask_index(u64 syscall_no);
 int _monmod_syscall_mask_offset(u64 syscall_no);
 
-int monmod_add_tracee_config(pid_t pid);
-int monmod_del_tracee_config(size_t idx);
 int monmod_tracee_config_init(size_t idx);
 void monmod_tracee_config_free(size_t idx);
 

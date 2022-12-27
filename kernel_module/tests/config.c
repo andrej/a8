@@ -137,8 +137,8 @@ TEST(_config_show_traced_syscalls)
 	struct kobject kobj_a = {};
 	char buf[PAGE_SIZE] = "";
 	monmod_global_config = (struct monmod_config){};
-	ASSERT(_monmod_config_traced_syscalls_show(NULL, NULL, NULL) < 0);
-	ASSERT(_monmod_config_traced_syscalls_show(&kobj_a, NULL, NULL) < 0);
+	ASSERT(_monmod_config_untraced_syscalls_show(NULL, NULL, NULL) < 0);
+	ASSERT(_monmod_config_untraced_syscalls_show(&kobj_a, NULL, NULL) < 0);
 	return 0;
 }
 
@@ -173,7 +173,7 @@ TEST(config_traced_syscalls_store)
 	monmod_global_config.kobj.name = "monmod";
 	attr.name = "traced_syscalls";
 
-	ASSERT_EQ(sizeof(buf1), _monmod_config_traced_syscalls_store(
+	ASSERT_EQ(sizeof(buf1), _monmod_config_untraced_syscalls_store(
 		kobj, &attr, buf1, sizeof(buf1)));
 	ASSERT_EQ(0, monmod_syscall_is_active(1));
 	ASSERT_EQ(0, monmod_syscall_is_active(99));
@@ -182,7 +182,7 @@ TEST(config_traced_syscalls_store)
 	ASSERT_EQ(1, monmod_syscall_is_active(45));
 	ASSERT_EQ(1, monmod_syscall_is_active(6));
 
-	ASSERT_EQ(-1, _monmod_config_traced_syscalls_store(
+	ASSERT_EQ(-1, _monmod_config_untraced_syscalls_store(
 		kobj, &attr, buf2, sizeof(buf2)));
 	ASSERT_EQ(0, monmod_syscall_is_active(1));
 	ASSERT_EQ(0, monmod_syscall_is_active(123));
@@ -192,7 +192,7 @@ TEST(config_traced_syscalls_store)
 	ASSERT_EQ(1, monmod_syscall_is_active(5));
 	ASSERT_EQ(0, monmod_syscall_is_active(2));
 
-	ASSERT_EQ(sizeof(buf3), _monmod_config_traced_syscalls_store(
+	ASSERT_EQ(sizeof(buf3), _monmod_config_untraced_syscalls_store(
 		kobj, &attr, buf3, sizeof(buf3)));
 	ASSERT_EQ(0, monmod_syscall_is_active(1));
 	ASSERT_EQ(0, monmod_syscall_is_active(123));
@@ -247,7 +247,7 @@ TEST(config_store_tracee_pids)
 	const char buf3[] = { '\n' };
 	monmod_global_config = (struct monmod_config){};
 	kobj->name = "monmod";
-	attr.name = "traced_syscalls";
+	attr.name = "untraced_syscalls";
 
 	ASSERT_EQ(sizeof(buf1), _monmod_config_tracee_pids_store(
 		kobj, &attr, buf1, sizeof(buf1)));

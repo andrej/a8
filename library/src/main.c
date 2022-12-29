@@ -22,6 +22,7 @@
 #include "serialization.h"
 #include "replication.h"
 #include "custom_syscalls.h"
+#include "init.h"
 
 #define SAFE_LOGF_LEN(n, log_fd, msg, ...) { \
 	char log[n]; \
@@ -65,39 +66,13 @@ int monmod_init(pid_t pid, void *monitor_start, size_t monitor_len,
 	return ret;
 }
 
-int monmod_reprotect(void *return_addr)
-{
-	// TODO: export the following into a header common between kernel module
-	// and library.
-	struct syscall_trace_func_stack
-	{
-		// low addr, top of stack
-		unsigned long orig_syscall_no;
-		unsigned long orig_arg_0;
-		unsigned long orig_arg_1;
-		unsigned long orig_arg_2;
-		unsigned long orig_arg_3;
-		void *ret_addr;
-		// high addr, bottom of stack
-	}; 
-	struct syscall_trace_func_stack s = {
-		0, 0, 0, 0, 0, return_addr
-	};
-	int ret = monmod_trusted_syscall(__NR_monmod_reprotect, 
-	                                 (long)&s,
-	                                 0, 0, 0, 0, 0);
-	/* This should be unreachable -- the system call should jump to the
-	   given address upon return. */
-	SAFE_LOGF(log_fd, "Reprotection failed.%s", "\n");
-	while(1);
-	return 1;
-}
-
-long monmod_syscall_handle(struct syscall_trace_func_args *raw_args)
+long monmod_syscall_handle(struct syscall_trace_func_stack *stack)
 {
 
 	int s = 0;
-	struct user_regs_struct *regs = &(raw_args->regs);
+	struct pt_regs *regs = &(stack->regs);
+	const long syscall_no = SYSCALL_NO_REG(regs);
+	const void *ret_addr = (void *)PC_REG(regs);
 	struct syscall_handler const *handler = NULL;
 	struct syscall_info actual = {};
 	struct syscall_info canonical = {};
@@ -105,14 +80,13 @@ long monmod_syscall_handle(struct syscall_trace_func_args *raw_args)
 	int dispatch = 0;
 
 	/* Find syscall handlers handler. */
-	handler = get_handler(raw_args->syscall_no);
+	handler = get_handler(syscall_no);
 	if(NULL == handler) {
-		SAFE_LOGF(log_fd, "%ld -- no handler!\n",
-		          raw_args->syscall_no);
+		SAFE_LOGF(log_fd, "%ld -- no handler!\n", syscall_no);
 	}
 
 	/* Preparation: Initialize data. */
-	actual.no = raw_args->syscall_no;
+	actual.no = syscall_no;
 	SYSCALL_ARGS_TO_ARRAY(regs, actual.args);
 	actual.ret = -ENOSYS;
 	if(NULL != handler) {
@@ -126,7 +100,7 @@ long monmod_syscall_handle(struct syscall_trace_func_args *raw_args)
 #if VERBOSITY >= 2
 	if(NULL != handler) {
 		SAFE_LOGF(log_fd, "%s (%ld) -- enter from %p.\n",
-			  handler->name, actual.no, raw_args->ret_addr);
+			  handler->name, actual.no, ret_addr);
 	}
 #endif
 	if(NULL != handler && NULL != handler->enter) {
@@ -225,7 +199,7 @@ long monmod_syscall_handle(struct syscall_trace_func_args *raw_args)
 }
 
 struct _find_mapped_region_bounds_data {
-	const void *search_addr;
+	void * const search_addr;
 	void *start;
 	size_t len;
 };
@@ -259,7 +233,7 @@ static int _find_mapped_region_bounds_cb(struct dl_phdr_info *info, size_t size,
  * is a part of in `start` and `end`. Returns 1 if this functions address is not
  * within the range of any loaded library (0 on success).
  */
-static int find_mapped_region_bounds(const void *needle, 
+static int find_mapped_region_bounds(void * const needle, 
                                   void **start, size_t *len)
 {
 	int ret = 0;
@@ -270,56 +244,7 @@ static int find_mapped_region_bounds(const void *needle,
 	return ret;
 }
 
-static int write_monmod_config(const char *path, const char *val, 
-                                      size_t len)
-{
-	int f = open(path, O_WRONLY);
-	if(-1 == f) {
-		return 1;
-	}
-	if(len != write(f, val, len)) {
-		close(f);
-		return 1;
-	}
-	return 0;
-}
-
-static int write_monmod_config_long(const char *path, long val)
-{
-	char valstr[24];
-	int valstr_len = snprintf(valstr, sizeof(valstr), "%ld\n", val);
-	if(0 > valstr_len || valstr_len >= sizeof(valstr)) {
-		return 1;
-	}
-	return write_monmod_config(path, valstr, valstr_len);
-}
-
-static int write_monmod_config_longs(const char *path, size_t n_longs,
-                                     long *vals)
-{
-	const int max_val_len = 24;  // longmax takes 20 digits
-	size_t valstr_max_len = max_val_len * n_longs;
-	char valstr[valstr_max_len];
-	int valstr_len = 0;
-	for(size_t i = 0; i < n_longs; i++) {
-		size_t this_valstr_max_len = max_val_len;
-		if(8 > valstr_max_len - valstr_len) {
-			this_valstr_max_len = valstr_max_len - valstr_len;
-		}
-		int this_valstr_len = 0;
-		this_valstr_len = snprintf(valstr + valstr_len, 
-		                           this_valstr_max_len,
-		                           "%ld\n", vals[i]);
-		if(0 > this_valstr_len 
-		   || this_valstr_len >= this_valstr_max_len) {
-			return 1;
-		}
-		valstr_len += this_valstr_len;
-	}
-	return write_monmod_config(path, valstr, valstr_len);
-}
-
-void __attribute__((constructor)) init()
+void monmod_library_init()
 {
 	pid_t own_pid = 0;
 	const char *config_path, *own_id_str;
@@ -330,7 +255,7 @@ void __attribute__((constructor)) init()
 	size_t monitor_len = 0;
 	void *return_addr = NULL;
 
-	asm("popq %0" 
+	asm("movq 8(%%rbp), %0" 
 	  : "=rm" (return_addr) );
 
 	own_pid = getpid();
@@ -338,22 +263,16 @@ void __attribute__((constructor)) init()
 	/* Find the pages this module is loaded on. These pages will be 
 	   protected by the kernel to remain inaccessible for other parts of
 	   the program. */
-	find_mapped_region_bounds((void *)&init, &monitor_start, &monitor_len);
+	find_mapped_region_bounds(&monmod_library_init, 
+	                          &monitor_start, &monitor_len);
+	// Round up to next whole page
+	monitor_len = (monitor_len + PAGE_SIZE-1) & (~(PAGE_SIZE-1));
 
 	NZ_TRY_EXCEPT(monmod_init(own_pid, monitor_start, monitor_len,
 	                          &monmod_syscall_trusted_addr,
 				  &monmod_syscall_trace_enter),
 	              exit(1));
 
-	long untraced_syscalls[] = { 
-		/* Locking mechanisms in libc calloc can make a deadlock occur
-		   when we monitor __NR_brk and try to allocate memory ourselves
-		   in the monitor, also using calloc. We disable monitoring of
-		   brk for this reason. */
-		__NR_brk
-	};
-	const long n_untraced_syscalls = sizeof(untraced_syscalls)
-	                               / sizeof(untraced_syscalls[0]);
 
 	// Sanity check
 	Z_TRY_EXCEPT(monmod_syscall_trusted_addr 
@@ -407,24 +326,15 @@ void __attribute__((constructor)) init()
 			      exit(1));
 	}
 
-	if(n_untraced_syscalls > 0) {
-		if(0 != write_monmod_config_longs(MONMOD_SYSFS_PATH
-					MONMOD_SYSFS_UNTRACED_SYSCALLS_FILE,
-					n_untraced_syscalls,
-					untraced_syscalls)) {
-			WARN("unable to write traced syscalls.\n");
-			exit(1);
-		}
-	}
-
 	env_init(&env, &comm, &conf, own_id);
-
-	monmod_reprotect(return_addr);
-	exit(1); // something went wrong, this should be unreachable
 }
 
 void __attribute__((destructor)) destruct()
 {
+	/* TODO: Disable monitor beforehand and tear down correctly here.
+	   Currently, the destructor is called while the monitor's pages are
+	   protected, so all programs exit with a segfault. */
+
 	close(log_fd);
 
 	// Close shared memory area.

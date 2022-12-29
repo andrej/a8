@@ -1,7 +1,7 @@
 #include <time.h>
 #include <sys/time.h>
+#include <unistd.h>
 #include <sys/syscall.h>
-#include "syscall.h"
 
 /**
  * Certain system calls never enter kernel space through a mechanism called
@@ -28,8 +28,7 @@ __attribute__((visibility("default")))
 gettimeofday(struct timeval *restrict tv, struct timezone *restrict tz)
 {
 
-	return monmod_untrusted_syscall(__NR_gettimeofday, (long)tv, (long)tz,
-	                                0, 0, 0, 0);
+	return syscall(__NR_gettimeofday, (long)tv, (long)tz, 0, 0, 0, 0);
 }
 void *vdso_gettimeofday = (void *)gettimeofday;
 
@@ -38,5 +37,5 @@ __attribute__((visibility("default")))
 time(time_t *tloc)
 {
 
-	return monmod_untrusted_syscall(__NR_time, (long)tloc, 0, 0, 0, 0, 0);
+	return syscall(__NR_time, (long)tloc, 0, 0, 0, 0, 0);
 }

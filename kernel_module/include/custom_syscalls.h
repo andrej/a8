@@ -4,9 +4,8 @@
 #include "arch.h"
 #include "map.h"
 
-//#define __NR_monmod_toggle  (MAX_SYSCALL_NO+2)
-#define __NR_monmod_init      (MAX_SYSCALL_NO+3)
-#define __NR_monmod_reprotect (MAX_SYSCALL_NO+4)
+#define __NR_monmod_init        (MAX_SYSCALL_NO+3)
+#define __NR_monmod_reprotect   (MAX_SYSCALL_NO+4)
 // TODO: Put these + function signatures into a common kernel/userspace header
 
 #define MAX_N_INTERCEPTS 8
@@ -37,8 +36,8 @@ static inline struct intercepted_syscall *get_intercepted_syscall(pid_t pid)
 
 static inline int pop_intercepted_syscall(struct intercepted_syscall *del)
 {
-	int k = (struct intercepted_syscall *)&intercepts.values - del;
-	if(0 != map_del(intercepts, k)) {
+	int k = (del - (struct intercepted_syscall *)&intercepts.values);
+	if(0 != map_del_idx(intercepts, k)) {
 		printk(KERN_WARNING "monmod <%d>: Unable to remove intercepted "
 		       "syscall info at index %d.\n", current->pid, k);
 		return 1;
@@ -52,6 +51,6 @@ static inline bool is_monmod_syscall(long nr)
 }
 
 void custom_syscall_enter(void *__data, struct pt_regs *regs, long id);
-void custom_syscall_exit(void *__data, struct pt_regs *regs, long return_value);
+int custom_syscall_exit(void *__data, struct pt_regs *regs, long return_value);
 
 #endif

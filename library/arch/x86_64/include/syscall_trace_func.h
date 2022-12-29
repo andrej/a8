@@ -1,12 +1,10 @@
 #ifndef SYSCALL_TRACE_FUNC_H
 #define SYSCALL_TRACE_FUNC_H
 
-#include <sys/user.h>
+#include <asm/ptrace.h>
 
-struct syscall_trace_func_args {
-	struct user_regs_struct regs;
-	unsigned long syscall_no;
-	void *ret_addr;
+struct syscall_trace_func_stack {
+	struct pt_regs regs;
 };
 
 void monmod_syscall_trace_enter();

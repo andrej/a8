@@ -11,7 +11,6 @@
 #include "build_config.h"
 #include "util.h"
 #include "config.h"
-#include "ptrace.h"
 #include "tracepoint_helpers.h"
 #include "syscall_trace_func.h"
 #include "custom_syscalls.h"
@@ -28,24 +27,9 @@ static int redirect_to_user_trace_func(void __user *target,
                                        struct pt_regs *regs)
 {
 	void __user *old_sp = (void __user *)STACK_PTR_REG(regs);
-	void __user *ret_addr = (void __user *)PC_REG(regs);
-	/* This stack looks "upside down" because copy_to_user() will write
-	   contiguously from low address to high address, but the stack grows
-	   from high address to low addres. In other words, the first element 
-	   in this array will be at the bottom (top element of stack). */
-	struct syscall_trace_func_stack stack = {
-		.orig_syscall_no = SYSCALL_NO_REG(regs),
-		.orig_arg_0 = SYSCALL_ARG0_REG(regs),
-		.orig_arg_1 = SYSCALL_ARG1_REG(regs),
-		.orig_arg_2 = SYSCALL_ARG2_REG(regs),
-		.orig_arg_3 = SYSCALL_ARG3_REG(regs),
-		.ret_addr = ret_addr
-	};
-	/* The new stack pointer puts some information past the red zone.
-	   The called callback function is responsible for resetting the 
-	   stack pointer and properly returning to the original code that
-	   invoked the syscall. */
+	struct syscall_trace_func_stack stack = {};
 	void __user *new_sp = old_sp - sizeof(stack) - 128;
+	memcpy(&stack.regs, regs, sizeof(stack.regs));
 	TRY(copy_to_user(new_sp, (void *)&stack, sizeof(stack)),
 	    return 1);
 	STACK_PTR_REG(regs) = (unsigned long)new_sp;
@@ -57,10 +41,20 @@ static void set_syscall_unprotect_monitor(
 		struct monmod_tracee_config *tracee_conf,
 		struct pt_regs *regs)
 {
-	SYSCALL_ARG0_REG(regs) = __NR_mprotect;
-	SYSCALL_ARG1_REG(regs) = (long)tracee_conf->monitor_start;
-	SYSCALL_ARG2_REG(regs) = (long)tracee_conf->monitor_len;
-	SYSCALL_ARG3_REG(regs) = PROT_READ | PROT_EXEC;
+	SYSCALL_NO_REG(regs) = __NR_mprotect;
+	SYSCALL_ARG0_REG(regs) = (long)tracee_conf->monitor_start;
+	SYSCALL_ARG1_REG(regs) = (long)tracee_conf->monitor_len;
+	SYSCALL_ARG2_REG(regs) = PROT_READ | PROT_EXEC;
+	SYSCALL_ARG3_REG(regs) = 0;
+	SYSCALL_ARG4_REG(regs) = 0;
+	SYSCALL_ARG5_REG(regs) = 0;
+#if MONMOD_LOG_INFO
+	printk(KERN_INFO "monmod: <%d> Unprotecting pages with "
+	       "mprotect(%p, %lx, %x)\n", current->pid, 
+	       tracee_conf->monitor_start,
+	       tracee_conf->monitor_len,
+	       PROT_READ | PROT_EXEC);
+#endif
 }
 
 static inline bool syscall_breaks_protection(
@@ -107,11 +101,14 @@ static inline int probe_prelude(void *__data, struct pt_regs *regs)
 	return 0;
 }
 
+static bool in_unprotect_call = false;
+
 static void sys_enter_probe(void *__data, struct pt_regs *regs, long id)
 {
 	const pid_t pid = current->pid;
 	struct monmod_tracee_config *tracee_conf = NULL;
-	if(is_monmod_syscall(id)) {
+	//const void __user *pc = (void __user *)PC_REG(regs);
+	if(0 != monmod_global_config.active && is_monmod_syscall(id)) {
 		return custom_syscall_enter(__data, regs, id);
 	}
 	if(0 != probe_prelude(__data, regs)) {
@@ -140,7 +137,7 @@ static void sys_enter_probe(void *__data, struct pt_regs *regs, long id)
 
 	if(!tracee_conf->active) {
 #if MONMOD_LOG_INFO
-		printk(KERN_INFO "monmod: <%d> entering trusted system call "
+		printk(KERN_INFO "monmod: <%d> Entering trusted system call "
 		       "%lu at PC %p\n", pid,
 		       (unsigned long)SYSCALL_NO_REG(regs),
 		       (void *)PC_REG(regs));
@@ -152,7 +149,8 @@ static void sys_enter_probe(void *__data, struct pt_regs *regs, long id)
 	}
 
 #if MONMOD_LOG_INFO
-	printk(KERN_INFO "monmod: <%d> forwarding system call %lu entry\n", 
+	printk(KERN_INFO "monmod: <%d> Forwarding untrusted system call %lu "
+	                 "entry\n", 
 	       pid, id);
 #endif
 
@@ -163,29 +161,35 @@ static void sys_enter_probe(void *__data, struct pt_regs *regs, long id)
 	/* Change system call arguments to actually issue an mprotect call that
 	   allows execution of the otherwise protected region of monitor code.*/
 	set_syscall_unprotect_monitor(tracee_conf, regs);
+	in_unprotect_call = true;
+	tracee_conf->active = false;
 }
 
 static void sys_exit_probe(void *__data, struct pt_regs *regs, 
                            unsigned long return_value)
 {
 	struct monmod_tracee_config *tracee_conf = NULL;
-	const pid_t pid = current->pid;
 	if(0 != probe_prelude(__data, regs)) {
 		return;
 	}
 	// TODO document why whe can do this after probe_prelude here
 	// (it is because pid will be registered as traced by here)
-	custom_syscall_exit(__data, regs, return_value);
-	if(NULL == (tracee_conf = monmod_get_tracee_config(current->pid))) {
-		printk(KERN_WARNING "monmod: <%d> cannot get config for "
-		       "tracee although it is traced.\n", pid);
+	if(1 == custom_syscall_exit(__data, regs, return_value)) {
 		return;
 	}
-
-#if MONMOD_LOG_INFO
-	printk(KERN_INFO "monmod: <%d> forwarding system call %ld exit value "
-	       " %ld/%lu\n", pid, no, (long)return_value);
-#endif
+	if(NULL == (tracee_conf = monmod_get_tracee_config(current->pid))) {
+		printk(KERN_WARNING "monmod: <%d> cannot get config for "
+		       "tracee although it is traced.\n", current->pid);
+		return;
+	}
+	if(in_unprotect_call) {
+		if(0 != SYSCALL_RET_REG(regs)) {
+			printk(KERN_WARNING "monmod: <%d> mprotect failed with "
+			"return value %ld.\n", current->pid, 
+			SYSCALL_RET_REG(regs));
+		}
+		in_unprotect_call = false;
+	}
 }
 
 

@@ -106,6 +106,17 @@ int _monmod_syscall_mask_offset(u64 syscall_no);
 int monmod_tracee_config_init(size_t idx);
 void monmod_tracee_config_free(size_t idx);
 
+#define GLOBAL_ATTRIBUTES(X) \
+    X(tracee_pids) \
+    X(active) \
+    X(untraced_syscalls)
+
+#define TRACEE_ATTRIBUTES(X) \
+    X(monitor_start) \
+    X(monitor_len) \
+    X(trusted_addr) \
+    X(trace_func_addr) 
+
 #define CONFIG_SHOW_PROT(name) \
         ssize_t _monmod_config_ ## name ## _show(struct kobject *kobject, \
                                                  struct kobj_attribute *attr, \
@@ -116,22 +127,9 @@ void monmod_tracee_config_free(size_t idx);
                                                   const char *buf, \
                                                   size_t count);
 
-CONFIG_SHOW_PROT(tracee_pids)
-CONFIG_STORE_PROT(tracee_pids)
-
-CONFIG_SHOW_PROT(tracee_pids_add)
-CONFIG_STORE_PROT(tracee_pids_add)
-
-CONFIG_SHOW_PROT(active)
-CONFIG_STORE_PROT(active)
-
-CONFIG_SHOW_PROT(untraced_syscalls)
-CONFIG_STORE_PROT(untraced_syscalls)
-
-CONFIG_SHOW_PROT(trusted_addr)
-CONFIG_STORE_PROT(trusted_addr)
-
-CONFIG_SHOW_PROT(trace_func_addr)
-CONFIG_STORE_PROT(trace_func_addr)
+GLOBAL_ATTRIBUTES(CONFIG_SHOW_PROT)
+TRACEE_ATTRIBUTES(CONFIG_SHOW_PROT)
+GLOBAL_ATTRIBUTES(CONFIG_STORE_PROT)
+TRACEE_ATTRIBUTES(CONFIG_STORE_PROT)
 
 #endif

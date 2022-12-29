@@ -26,43 +26,28 @@ struct monmod_config monmod_global_config = {};
  * Internal Variables                                                         *
  * ************************************************************************** */
 
-// FIXME In the following two, set more reasonable file permissions
-// (probably 0664)
-static struct kobj_attribute tracee_pids_attribute = 
-    __ATTR(tracee_pids, 0664, _monmod_config_tracee_pids_show, 
-           _monmod_config_tracee_pids_store);
-static struct kobj_attribute tracee_pids_add_attribute = 
-    __ATTR(tracee_pids_add, 0664, _monmod_config_tracee_pids_add_show, 
-           _monmod_config_tracee_pids_add_store);
-static struct kobj_attribute trusted_addr_attribute = 
-    __ATTR(trusted_addr, 0664, _monmod_config_trusted_addr_show, 
-           _monmod_config_trusted_addr_store);
-static struct kobj_attribute trace_func_addr_attribute = 
-    __ATTR(trace_func_addr, 0664, _monmod_config_trace_func_addr_show, 
-           _monmod_config_trace_func_addr_store);
-static struct kobj_attribute active_attribute = 
-    __ATTR(active, 0664, _monmod_config_active_show, 
-           _monmod_config_active_store);
-static struct kobj_attribute untraced_syscalls_attribute = 
-    __ATTR(untraced_syscalls, 0664, _monmod_config_untraced_syscalls_show, 
-           _monmod_config_untraced_syscalls_store);
+#define ATTRIBUTE_DEF(name) \
+    static struct kobj_attribute name ## _attribute =  \
+        __ATTR(name, 0664, _monmod_config_ ## name ## _show, \
+            _monmod_config_ ## name ## _store);
+GLOBAL_ATTRIBUTES(ATTRIBUTE_DEF)
+TRACEE_ATTRIBUTES(ATTRIBUTE_DEF)
+#undef ATTRIBUTE_DEF
 
+#define ATTRIBUTE_REF(name) \
+    &name ## _attribute.attr,
 static struct attribute *attrs[] = {
-    &tracee_pids_attribute.attr,
-    &tracee_pids_add_attribute.attr,
-    &active_attribute.attr,
-    &untraced_syscalls_attribute.attr,
+    GLOBAL_ATTRIBUTES(ATTRIBUTE_REF)
     NULL
 };
-
-static struct attribute_group attr_group = {
-    .attrs = attrs,
-};
-
 static struct attribute *tracee_attrs[] = {
-    &trusted_addr_attribute.attr,
-    &trace_func_addr_attribute.attr,
+    TRACEE_ATTRIBUTES(ATTRIBUTE_REF)
     NULL
+};
+#undef ATTRIBUTE_REF
+
+static struct attribute_group global_attr_group = {
+    .attrs = attrs,
 };
 
 static struct attribute_group tracee_attr_group = {
@@ -98,7 +83,8 @@ int monmod_config_init()
     if(0 != s) {
         return 1;
     }
-    if(0 != sysfs_create_group(&monmod_global_config.kobj, &attr_group)) {
+    if(0 != sysfs_create_group(&monmod_global_config.kobj, &global_attr_group))
+    {
         kobject_put(&monmod_global_config.kobj);
         return 1;
     }
@@ -370,9 +356,16 @@ ssize_t _monmod_config_int_or_long_store(struct kobject *kobj,
 
 // Specific setting callbacks
 
-
 CONFIG_LONG_SHOW_FUN(trusted_addr, struct monmod_tracee_config, trusted_addr)
 CONFIG_LONG_STORE_FUN(trusted_addr, struct monmod_tracee_config, trusted_addr, 
+                      true)
+
+CONFIG_LONG_SHOW_FUN(monitor_start, struct monmod_tracee_config, monitor_start)
+CONFIG_LONG_STORE_FUN(monitor_start, struct monmod_tracee_config, monitor_start, 
+                      true)
+
+CONFIG_LONG_SHOW_FUN(monitor_len, struct monmod_tracee_config, monitor_len)
+CONFIG_LONG_STORE_FUN(monitor_len, struct monmod_tracee_config, monitor_len, 
                       true)
 
 CONFIG_LONG_SHOW_FUN(trace_func_addr, struct monmod_tracee_config, 
@@ -496,48 +489,6 @@ ssize_t _monmod_config_tracee_pids_store(struct kobject *kobj,
     return consumed;
 
 #undef array_contains
-}
-
-ssize_t _monmod_config_tracee_pids_add_show(struct kobject *kobject, 
-                                        struct kobj_attribute *attr,
-                                        char *buf)
-{
-    const char msg[] = "Refer to /sys/kernel/monmod/tracee_pids.\n"
-                       "Writing to this file will add a single PID.\n";
-    memcpy(buf, msg, sizeof(msg));
-    return sizeof(msg);
-}
-
-ssize_t _monmod_config_tracee_pids_add_store(struct kobject *kobject, 
-                                             struct kobj_attribute *attr,
-                                             const char *buf,
-                                             size_t count)
-{
-    pid_t pid = 0;
-    size_t line_len = 0;
-    if(0 != _config_callback_sanity_checks(kobject, attr, buf)) {
-        return -1;
-    }
-    if(monmod_global_config.n_tracees >= MONMOD_MAX_N_TRACEES) {
-        return -1;
-    }
-    line_len = next_int_line(buf, count, &pid);
-    if(line_len < 0) {
-        printk(KERN_INFO "monmod: Invalid input, or more than one line.\n");
-        return -1;
-    }
-    if(monmod_is_pid_traced(pid)) {
-        printk(KERN_INFO "monmod: PID %d is already being traced.\n", pid);
-        return -1;
-    }
-    if(0 == monmod_add_tracee_config(pid)) {
-        printk(KERN_INFO "monmod: Added tracing for PID %d.\n", pid);
-    } else {
-        printk(KERN_INFO "monmod: Failed to add tracing for PID %d.\n",
-                pid);
-        return -1;
-    }
-    return count;
 }
 
 ssize_t _monmod_config_untraced_syscalls_show(struct kobject *kobj, 

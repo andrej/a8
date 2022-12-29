@@ -6,9 +6,7 @@
 struct syscall_trace_func_stack
 {
 // low addr, top of stack
-    long unused; /* for alignment purposes */
-	long ret_addr;
-	struct pt_regs saved_regs;
+	struct pt_regs regs;
 // high addr, bottom of stack
 };
 

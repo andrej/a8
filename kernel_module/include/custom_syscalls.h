@@ -4,9 +4,11 @@
 #include "arch.h"
 #include "map.h"
 
-#define __NR_monmod_init        (MAX_SYSCALL_NO+3)
-#define __NR_monmod_reprotect   (MAX_SYSCALL_NO+4)
+//#define __NR_monmod_init        (MAX_SYSCALL_NO+3)
+//#define __NR_monmod_reprotect   (MAX_SYSCALL_NO+4)
 // TODO: Put these + function signatures into a common kernel/userspace header
+#define __NR_monmod_init        328
+#define __NR_monmod_reprotect   329
 
 #define MAX_N_INTERCEPTS 8
 

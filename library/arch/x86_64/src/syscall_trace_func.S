@@ -9,9 +9,7 @@ monmod_syscall_trace_enter:
 	   syscall_trace_func_stack on top of the stack and 128 bytes of 
 	   padding to previous stack pointer. */
 
-	
 	movq %rsp, %rdi
-
 	callq monmod_syscall_handle
 
 	/* Return to the original system call site via the reprotect system

@@ -253,10 +253,7 @@ void monmod_library_init()
 	struct variant_config *own_variant_config;
 	void *monitor_start = NULL;
 	size_t monitor_len = 0;
-	void *return_addr = NULL;
-
-	asm("movq 8(%%rbp), %0" 
-	  : "=rm" (return_addr) );
+	const size_t page_size = sysconf(_SC_PAGE_SIZE);
 
 	own_pid = getpid();
 	
@@ -266,18 +263,12 @@ void monmod_library_init()
 	find_mapped_region_bounds(&monmod_library_init, 
 	                          &monitor_start, &monitor_len);
 	// Round up to next whole page
-	monitor_len = (monitor_len + PAGE_SIZE-1) & (~(PAGE_SIZE-1));
+	monitor_len = (monitor_len + page_size-1) & (~(page_size-1));
 
 	NZ_TRY_EXCEPT(monmod_init(own_pid, monitor_start, monitor_len,
 	                          &monmod_syscall_trusted_addr,
 				  &monmod_syscall_trace_enter),
 	              exit(1));
-
-
-	// Sanity check
-	Z_TRY_EXCEPT(monmod_syscall_trusted_addr 
-	             != monmod_syscall_untrusted_addr,
-	             exit(1));
 
 	// Read environment variables.
 	if(NULL == (own_id_str = getenv("MONMOD_ID"))) {

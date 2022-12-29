@@ -2,6 +2,7 @@
 #define HANDLER_TABLE_H
 
 #include <sys/syscall.h> // syscall numbers
+#include "unknown_syscalls.h"
 #include "handlers.h"
 
 SYSCALL_ENTER_PROT(default_checked);
@@ -10,7 +11,6 @@ SYSCALL_ENTER_PROT(default_arg1_fd);
 SYSCALL_ENTER_PROT(default_unchecked);
 SYSCALL_EXIT_PROT(default_free_scratch);
 SYSCALL_EXIT_PROT(default_creates_fd_exit);
-
 
 #define SYSCALLS(X) \
 /* ************************************************************************* *\

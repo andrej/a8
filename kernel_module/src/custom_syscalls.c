@@ -142,6 +142,7 @@ int sys_monmod_reprotect(struct pt_regs *regs)
 
 void sys_monmod_reprotect_exit(struct pt_regs *regs)
 {
+	unsigned long mprotect_return_value = 0;
 	if(!is_in_reprotect_call) {
 		printk(KERN_WARNING "monmod: <%d> reprotect_exit called even "
 		       "though system call enter was never observed.\n", 
@@ -149,20 +150,25 @@ void sys_monmod_reprotect_exit(struct pt_regs *regs)
 		return;
 	}
 	is_in_reprotect_call = false;
-	if(0 != SYSCALL_RET_REG(regs)) {
+	mprotect_return_value = (unsigned long)SYSCALL_RET_REG(regs);
+	if(0 != mprotect_return_value) {
 		printk(KERN_WARNING "monmod: <%d> mprotect failed with return "
-		       "value %ld.\n", current->pid, SYSCALL_RET_REG(regs));
+		       "value %ld.\n", current->pid, mprotect_return_value);
 		return;
 	}
 	/* Restore the registers as given in the entry arguments. */
 	if(write_back_regs) {
+		/* The redirected program counter was already written on system 
+		   call entry.
+		   This also overwrites the system call return register. */
 		memcpy(regs, &reprotect_stack.regs, sizeof(*regs));
 	}
 
 #if MONMOD_LOG_INFO
-	printk(KERN_INFO "monmod: <%d> Reprotected monitor, returning to "
-	       "address %p with return value %ld.\n", current->pid, ret_addr,
-	       SYSCALL_RET_REG(regs));
+	printk(KERN_INFO "monmod: <%d> mprotect returned with %ld, returning "
+	       "to address %p with return value %lld.\n", current->pid, 
+	       mprotect_return_value, ret_addr, 
+	       (long long int)SYSCALL_RET_REG(regs));
 #endif
 }
 
@@ -182,6 +188,12 @@ void custom_syscall_enter(void *__data, struct pt_regs *regs, long id)
 		case __NR_monmod_reprotect: {
 			ret = sys_monmod_reprotect(regs);
 			break;
+		}
+		default: {
+			/* Not one of our known custom system calls. 
+			   This should never happen, since is_monmod_syscall()
+			   is queried before this function is called. */
+			return;
 		}
 	}
 	if(-1 == put_intercepted_syscall((struct intercepted_syscall)

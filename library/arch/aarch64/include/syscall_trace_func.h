@@ -14,11 +14,10 @@ struct pt_regs {
 	uint64_t unused;	// maintain 16 byte alignment
 };
 
-struct syscall_trace_func_args {
-	void *call_site;
+struct syscall_trace_func_stack {
 	struct pt_regs regs;
 };
 
-void syscall_trace_func();
+void monmod_syscall_trace_enter();
 
 #endif

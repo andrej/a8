@@ -24,6 +24,8 @@
 
 #define PAGE_SIZE 4096
 
+#define __user
+
 typedef uint64_t u64;
 
 typedef unsigned short umode_t;

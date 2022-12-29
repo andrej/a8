@@ -41,17 +41,10 @@
 
 struct monmod_tracee_config {
         struct kobject kobj;
-        #ifndef TEST_H
-                void __user *monitor_start;
-                size_t monitor_len;
-                void __user *trusted_addr;
-                void __user *trace_func_addr;
-        #else
-                void __user *monitor_start;
-                size_t monitor_len;
-                void *trusted_addr;
-                void *trace_func_addr;
-        #endif
+        void __user *monitor_start;
+        size_t monitor_len;
+        void __user *trusted_addr;
+        void __user *trace_func_addr;
         bool active;
 };
 

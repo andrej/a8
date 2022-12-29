@@ -11,8 +11,8 @@ MOCK(int, printk, const char *fmt, ...)
 
 TEST(try) 
 {
-	printed = NULL;
 	int y = 0;
+	printed = NULL;
 	TRY(0, y = 2);
 	ASSERT(y == 0);
 	ASSERT(printed == NULL);

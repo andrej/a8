@@ -9,7 +9,7 @@
 	name:
 
 	.text
-ENTRY(monmod_syscall)
+ENTRY(monmod_trusted_syscall)
 	uxtw x8, w0  /* Sign-extend w0 (src) into x8 (dest) */
 	mov x0, x1   /* move x1 (src) into x0 (dest) */
 	mov x1, x2

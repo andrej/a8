@@ -107,7 +107,6 @@ static void sys_enter_probe(void *__data, struct pt_regs *regs, long id)
 {
 	const pid_t pid = current->pid;
 	struct monmod_tracee_config *tracee_conf = NULL;
-	//const void __user *pc = (void __user *)PC_REG(regs);
 	if(0 != monmod_global_config.active && is_monmod_syscall(id)) {
 		return custom_syscall_enter(__data, regs, id);
 	}
@@ -185,8 +184,8 @@ static void sys_exit_probe(void *__data, struct pt_regs *regs,
 	if(in_unprotect_call) {
 		if(0 != SYSCALL_RET_REG(regs)) {
 			printk(KERN_WARNING "monmod: <%d> mprotect failed with "
-			"return value %ld.\n", current->pid, 
-			SYSCALL_RET_REG(regs));
+			"return value %lld.\n", current->pid, 
+			(long long int)SYSCALL_RET_REG(regs));
 		}
 		in_unprotect_call = false;
 	}

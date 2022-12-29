@@ -123,8 +123,8 @@ struct kobject *kernel_kobj = (struct kobject *)0xFF;
 TEST(monmod_config_init)
 {
 	// reset config object from any previous tests
-	monmod_global_config = (struct monmod_config){};
 	int prev_calls = mocked_kobject_init_and_add_calls;
+	monmod_global_config = (struct monmod_config){};
 	ASSERT(monmod_config_init() == 0);
 	ASSERT(mocked_kobject_init_and_add_calls == prev_calls + 1);
 	ASSERT(monmod_global_config.kobj.parent == kernel_kobj);
@@ -135,7 +135,6 @@ TEST(monmod_config_init)
 TEST(_config_show_traced_syscalls)
 {
 	struct kobject kobj_a = {};
-	char buf[PAGE_SIZE] = "";
 	monmod_global_config = (struct monmod_config){};
 	ASSERT(_monmod_config_untraced_syscalls_show(NULL, NULL, NULL) < 0);
 	ASSERT(_monmod_config_untraced_syscalls_show(&kobj_a, NULL, NULL) < 0);
@@ -156,7 +155,7 @@ TEST(monmod_config_free)
 	return 0;
 }
 
-TEST(config_traced_syscalls_store)
+TEST(config_untraced_syscalls_store)
 {
 	struct kobject *kobj = &monmod_global_config.kobj;
 	struct kobj_attribute attr = {};
@@ -175,32 +174,32 @@ TEST(config_traced_syscalls_store)
 
 	ASSERT_EQ(sizeof(buf1), _monmod_config_untraced_syscalls_store(
 		kobj, &attr, buf1, sizeof(buf1)));
-	ASSERT_EQ(0, monmod_syscall_is_active(1));
-	ASSERT_EQ(0, monmod_syscall_is_active(99));
-	ASSERT_EQ(0, monmod_syscall_is_active(5));
-	ASSERT_EQ(1, monmod_syscall_is_active(123));
-	ASSERT_EQ(1, monmod_syscall_is_active(45));
-	ASSERT_EQ(1, monmod_syscall_is_active(6));
+	ASSERT_EQ(1, monmod_syscall_is_active(1));
+	ASSERT_EQ(1, monmod_syscall_is_active(99));
+	ASSERT_EQ(1, monmod_syscall_is_active(5));
+	ASSERT_EQ(0, monmod_syscall_is_active(123));
+	ASSERT_EQ(0, monmod_syscall_is_active(45));
+	ASSERT_EQ(0, monmod_syscall_is_active(6));
 
 	ASSERT_EQ(-1, _monmod_config_untraced_syscalls_store(
 		kobj, &attr, buf2, sizeof(buf2)));
-	ASSERT_EQ(0, monmod_syscall_is_active(1));
-	ASSERT_EQ(0, monmod_syscall_is_active(123));
-	ASSERT_EQ(0, monmod_syscall_is_active(45));
-	ASSERT_EQ(0, monmod_syscall_is_active(6));
-	ASSERT_EQ(1, monmod_syscall_is_active(99));
-	ASSERT_EQ(1, monmod_syscall_is_active(5));
-	ASSERT_EQ(0, monmod_syscall_is_active(2));
+	ASSERT_EQ(1, monmod_syscall_is_active(1));
+	ASSERT_EQ(1, monmod_syscall_is_active(123));
+	ASSERT_EQ(1, monmod_syscall_is_active(45));
+	ASSERT_EQ(1, monmod_syscall_is_active(6));
+	ASSERT_EQ(0, monmod_syscall_is_active(99));
+	ASSERT_EQ(0, monmod_syscall_is_active(5));
+	ASSERT_EQ(1, monmod_syscall_is_active(2));
 
 	ASSERT_EQ(sizeof(buf3), _monmod_config_untraced_syscalls_store(
 		kobj, &attr, buf3, sizeof(buf3)));
-	ASSERT_EQ(0, monmod_syscall_is_active(1));
-	ASSERT_EQ(0, monmod_syscall_is_active(123));
-	ASSERT_EQ(0, monmod_syscall_is_active(45));
-	ASSERT_EQ(0, monmod_syscall_is_active(6));
-	ASSERT_EQ(0, monmod_syscall_is_active(99));
-	ASSERT_EQ(0, monmod_syscall_is_active(5));
-	ASSERT_EQ(0, monmod_syscall_is_active(2));
+	ASSERT_EQ(1, monmod_syscall_is_active(1));
+	ASSERT_EQ(1, monmod_syscall_is_active(123));
+	ASSERT_EQ(1, monmod_syscall_is_active(45));
+	ASSERT_EQ(1, monmod_syscall_is_active(6));
+	ASSERT_EQ(1, monmod_syscall_is_active(99));
+	ASSERT_EQ(1, monmod_syscall_is_active(5));
+	ASSERT_EQ(1, monmod_syscall_is_active(2));
 	return 0;
 }
 

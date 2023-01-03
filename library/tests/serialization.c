@@ -44,7 +44,7 @@ TEST(serialize_deserialize_string)
 	ASSERT_NEQ(serialized, NULL);
 	ASSERT(serialized_len > 0);
 	ASSERT_EQ(deserialize_in_place(serialized, &test1_type),
-	          len+1);
+	          sizeof(uint64_t)+len+1);
 	ASSERT_EQ(strcmp(str, serialized), 0);
 	return 0;
 }
@@ -113,14 +113,16 @@ TEST(serialize_simple_buffer_ptr)
 	};
 
 	/* This should get serialized as:
-	   0          8  16   24                32         33  34
-	   <BUFFER 29 0  888> <POINTER NON_NULL <BUFFER h  i   \0>>
+	   0       8          16 24   32                40     48         49  50 
+	   <SZ 24> <BUFFER 29 0  888> <POINTER NON_NULL <SZ 3> <BUFFER h  i   \0>>
 	*/
 	char expected[] = {
+		24, 0, 0, 0, 0, 0, 0, 0, // buffer size
 		29, 0, 0, 0, 0, 0, 0, 0, // long imm1
 		0, 0, 0, 0, 0, 0, 0, 0, // char *ptr
 		0x78, 0x3, 0, 0, 0, 0, 0, 0, // long imm2
 		0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, // non-null ptr
+		3, 0, 0, 0, 0, 0, 0, 0, // buffer size
 		104, 105, 0, // h i \0
 	};
 
@@ -186,43 +188,49 @@ TEST(serialize_structs_with_ptrs)
 	struct test_struct_1 ts1 = { buf1, &ts2 };
 
 	/* This should be serialized as follows:
-	   0x0   0  BUFFER (sz 16)
-	            0
+	   0x0   0  BUFFER SIZE 16
 	   0x8   8  0
-	   0x10  16     |- PTR NON-NULL (sz 8)     30
-	   0x18  24     |    |- BUFFER (sz 8) 
-	                |       1234567\0       
-	   0x20  32     |- PTR NON-NULL (sz 8)     40
-	   0x28  40     |- BUFFER (sz 16)
-	                   0         
-	   0x30  48        0
-	   0x38  56        |- PTR NON-NULL (sz 8)   58
-	   0x40  64        |  |- BUFFER (sz 8)
-	                   |     8912345\0
-	   0x48  72        |- PTR NON-NULL (sz 8)   68
-	   0x50  80           |- BUFFER (sz 16)
-	                         0
-	   0x58  88              0
-	   0x60  96              |- PTR NON-NULL (sz 8) 80
-	   0x68  104             |  |- BUFFER 
-	                         |     abcdefg\0
-	   0x70  112             |- PTR NULL (sz 8)     90
-	   0x78  120
+	   0x10  16 0
+	   0x18  24     |- PTR NON-NULL (sz 8)     30
+	   0x20  32     |    |- BUFFER SIZE 8 
+	   0x28  40     |       1234567\0       
+	   0x30  48     |- PTR NON-NULL (sz 8)     40
+	   0x38  56     |- BUFFER SIZE 16
+	   0x40  64        0         
+	   0x48  72        0
+	   0x50  80        |- PTR NON-NULL (sz 8)   58
+	   0x58  88        |  |- BUFFER SIZE 8
+	   0x60  96           |     8912345\0
+	   0x68  104       |- PTR NON-NULL (sz 8)   68
+	   0x70  112          |- BUFFER SIZE 16
+	   0x78  120             0
+	   0x80  128             0
+	   0x88  136              |- PTR NON-NULL (sz 8) 80
+	   0x90  144                 |- BUFFER SZ 8
+	   0x98  152                 |     abcdefg\0
+	   0x100 160             |- PTR NULL (sz 8)     90
+	   0x108 168
 	*/
 	const char expected[] = {
+		16, 0, 0, 0, 0, 0, 0, 0, // BUFFER ts1 sz
 		0, 0, 0, 0, 0, 0, 0, 0,  // BUFFER[0] ts1
 		0, 0, 0, 0, 0, 0, 0, 0,  // BUFFER[1] ts1
 		0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, // POINTER ts1.bufptr
+		8, 0, 0, 0, 0, 0, 0, 0, // BUFFER buf1 sz,
 		49, 50, 51, 52, 53, 54, 55, 0, // BUFFER[0] buf1,
 		0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, // POINTER ts1.sptr
+		16, 0, 0, 0, 0, 0, 0, 0, // BUFFER ts2 sz
 		0, 0, 0, 0, 0, 0, 0, 0,  // BUFFER[0] ts2
 		0, 0, 0, 0, 0, 0, 0, 0,  // BUFFER[1] ts2
 		0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, // POINTER ts2.bufptr
+		8, 0, 0, 0, 0, 0, 0, 0,  // BUFFER buf2 sz
 		56, 57, 49, 50, 51, 52, 53, 0, // BUFFER[0] buf2,
 		0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, // POINTER ts2.sptr
+		16, 0, 0, 0, 0, 0, 0, 0, // BUFFER ts3 sz
 		0, 0, 0, 0, 0, 0, 0, 0,  // BUFFER[0] ts3
 		0, 0, 0, 0, 0, 0, 0, 0,  // BUFFER[1] ts3
 		0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, // POINTER ts3.bufptr
+		8, 0, 0, 0, 0, 0, 0, 0, // BUFFER buf3 sz
 		97, 98, 99, 100, 101, 102, 103, 0, // BUFFER[0] buf3
 		0, 0, 0, 0, 0, 0, 0, 0 // POINTER ts3.sptr NULL
 	};
@@ -301,11 +309,11 @@ TEST(log_str_of)
 	*(short **)(buf1 + 36) = &imm;
 	*(const char **)(buf1 + 50) = str;
 	const char expected[] = 
-		"POINTER to BUFFER [Hello, <ADDR OF REF 0> World "
+		"POINTER to BUFFER (59) [Hello, <ADDR OF REF 0> World "
 		"<ADDR OF REF 1> Imm: <ADDR OF REF 2> Str: <ADDR OF REF 3>\\0]"
-		" with <REF 0: POINTER to BUFFER [\\1\\ba]> <REF 1: IGNORE> "
-		"<REF 2: POINTER to IMMEDIATE 1789> "
-		"<REF 3: POINTER to STRING \"Foo? "
+		" with <REF 0: POINTER to BUFFER (2) [\\1\\ba]> <REF 1: IGNORE>"
+		" <REF 2: POINTER to IMMEDIATE 1789> "
+		"<REF 3: POINTER to STRING (9) \"Foo? "
 		"Bar!\">";
 	char outbuf[2*sizeof(expected)] = {};
 	struct type t5 = {STRING};
@@ -344,7 +352,7 @@ TEST(serialize_deserialize_str)
 
 	serialized = serialize(str, &t, &serialized_len);
 	ASSERT_NEQ(serialized, NULL);
-	ASSERT_EQ(serialized_len, sizeof(str));
+	ASSERT_EQ(serialized_len, sizeof(str) + sizeof(uint64_t));
 
 	deserialize_overwrite(serialized, &t, des_str);
 	ASSERT_EQ(strcmp(des_str, str), 0);

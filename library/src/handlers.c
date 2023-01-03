@@ -11,6 +11,7 @@
 #include "handlers.h"
 #include "handler_table.h"
 #include "serialization.h"
+#include "handler_data_types.h"
 
 #include "handler_table_definitions.h"
 
@@ -18,7 +19,7 @@
 
 #define get_di(arg_i) ({ \
 	struct descriptor_info *di = env_get_canonical_descriptor_info( \
-		env, actual->args[arg_i]); \
+		env, canonical->args[arg_i]); \
 	if(NULL == di) { \
 		return DISPATCH_ERROR; \
 	} \
@@ -44,7 +45,7 @@
 
 #define dispatch_leader_if_needed(di, addl_flags) ({ \
 	int flags = addl_flags; \
-	if((di)->flags & DI_OPENED_ON_LEADER) { \
+	if(NULL != (di) && (di)->flags & DI_OPENED_ON_LEADER) { \
 		flags |= DISPATCH_LEADER | DISPATCH_NEEDS_REPLICATION; \
 	} else { \
 		flags |= DISPATCH_EVERYONE; \
@@ -183,6 +184,7 @@ SYSCALL_EXIT_PROT(access)
 SYSCALL_ENTER_PROT(open)
 {
 	/* Move arguments to canonical form: openat */
+	canonical->no = SYSCALL_openat_CANONICAL;
 	canonical->args[3] = canonical->args[2];  // mode
 	canonical->args[2] = canonical->args[1];  // flags 
 	canonical->args[1] = canonical->args[0];  // pathname
@@ -199,6 +201,12 @@ SYSCALL_ENTER_PROT(open)
 
 SYSCALL_ENTER_PROT(openat)
 {
+	struct descriptor_info *di = NULL;
+	if(AT_FDCWD != canonical->args[0]) {
+		get_di(0);
+		remap_fd(di, 0);
+	}
+
 	alloc_scratch(sizeof(struct type));
 	struct type *string_type = (struct type *)*scratch;
 
@@ -279,6 +287,7 @@ SYSCALL_ENTER_PROT(mmap)
 
 	canonical->args[0] = ((void *)canonical->args[0] == NULL ? 0 : 1);
 	canonical->arg_types[0] = IMMEDIATE_TYPE(int);
+	canonical->args[1] = (canonical->args[1] == 0 ? 0 : 1);
 	canonical->arg_types[1] = IMMEDIATE_TYPE(size_t);
 	canonical->arg_types[2] = IMMEDIATE_TYPE(int);
 	canonical->arg_types[3] = IMMEDIATE_TYPE(int);
@@ -288,6 +297,7 @@ SYSCALL_ENTER_PROT(mmap)
 	}
 
 	canonical->arg_types[5] = IMMEDIATE_TYPE(off_t);
+	canonical->args[5] = (canonical->args[5] == 0 ? 0 : 1);
 
 	return DISPATCH_EVERYONE | DISPATCH_CHECKED;
 }
@@ -303,6 +313,7 @@ SYSCALL_ENTER_PROT(munmap)
 {
 	canonical->args[0] = ((void *)canonical->args[0] == NULL ? 0 : 1);
 	canonical->arg_types[0] = IMMEDIATE_TYPE(int);
+	canonical->args[1] = (canonical->args[1] == 0 ? 0 : 1);
 	canonical->arg_types[1] = IMMEDIATE_TYPE(size_t);
 	return DISPATCH_EVERYONE | DISPATCH_CHECKED;
 }
@@ -502,33 +513,39 @@ SYSCALL_EXIT_PROT(writev)
 	free_scratch();
 }
 
+
 /* ************************************************************************** *
  * stat                                                                       * 
  *                                                                            *
- * int stat(cons char *restrict pathname,                                     *
+ * int stat(const char *restrict pathname,                                     *
  *          struct stat *restrict statbuf);                                   * 
  * ************************************************************************** */
 
 SYSCALL_ENTER_PROT(stat)
 {
-	alloc_scratch(sizeof(struct type) * 2);
-	struct type *ref_types = (struct type *)*scratch;
-
-	canonical->arg_types[0] = POINTER_TYPE(&ref_types[0]);
-	ref_types[0]            = STRING_TYPE();
-	canonical->arg_types[1] = POINTER_TYPE(&ref_types[1]);
-	ref_types[1]            = BUFFER_TYPE(sizeof(struct stat));
-	canonical->arg_flags[1] = ARG_FLAG_WRITE_ONLY | ARG_FLAG_REPLICATE;
-	canonical->ret_type = IMMEDIATE_TYPE(long);
-	canonical->ret_flags = ARG_FLAG_REPLICATE;
-	// TODO check if it is a leader-only file
-	return DISPATCH_EVERYONE | DISPATCH_CHECKED;
+	// Forward to fstatat
+	canonical->no = SYSCALL_fstatat_CANONICAL;
+	canonical->args[3] = 0; // flags
+	canonical->args[2] = canonical->args[1]; // statbuf
+	canonical->args[1] = canonical->args[0]; // path
+	canonical->args[0] = AT_FDCWD;
+	actual->no = __NR_newfstatat;
+	actual->args[3] = 0; // flags
+	actual->args[2] = actual->args[1]; // statbuf
+	actual->args[1] = actual->args[0]; // path
+	actual->args[0] = AT_FDCWD;
+	return SYSCALL_ENTER(fstatat)(env, handler, actual, canonical, scratch);
 }
 
 SYSCALL_EXIT_PROT(stat)
 {
-	free_scratch();
+	SYSCALL_EXIT(fstatat)(env, handler, dispatch, actual,
+	             canonical, scratch);
+	actual->args[0] = actual->args[1];
+	actual->args[1] = actual->args[2];
+	actual->args[1] = actual->args[2];
 }
+
 
 /* ************************************************************************** *
  * fstat                                                                      * 
@@ -539,21 +556,117 @@ SYSCALL_EXIT_PROT(stat)
 SYSCALL_ENTER_PROT(fstat)
 {
 	struct descriptor_info *di = get_di(0);
+	int dispatch = dispatch_leader_if_needed(di, DISPATCH_CHECKED);
+
 	alloc_scratch(sizeof(struct type));
 	struct type *stat_buf_type = (struct type *)*scratch;
 
+	char *normalized_stat = NULL;
+	if(dispatch & DISPATCH_NEEDS_REPLICATION) {
+		normalized_stat = calloc(1, NORMALIZED_STAT_STRUCT_SIZE);
+		if(NULL == normalized_stat) {
+			return DISPATCH_ERROR;
+		}
+	}
+
 	canonical->arg_types[0] = DESCRIPTOR_TYPE();
 	remap_fd(di, 0);
+	canonical->args[1]      = (long)normalized_stat;
 	canonical->arg_types[1] = POINTER_TYPE(stat_buf_type);
-	*stat_buf_type          = BUFFER_TYPE(sizeof(struct stat));
+	*stat_buf_type          = BUFFER_TYPE(NORMALIZED_STAT_STRUCT_SIZE);
 	canonical->arg_flags[1] = ARG_FLAG_WRITE_ONLY | ARG_FLAG_REPLICATE;
 	canonical->ret_type = IMMEDIATE_TYPE(long);
 	canonical->ret_flags = ARG_FLAG_REPLICATE;
-	return dispatch_leader_if_needed(di, DISPATCH_CHECKED);
+	return dispatch;
+}
+
+SYSCALL_POST_CALL_PROT(fstat)
+{
+	char *normalized_stat = (char *)canonical->args[1];
+	if(!(dispatch & DISPATCH_NEEDS_REPLICATION)) {
+		return;
+	}
+	normalize_stat_struct_into((struct stat *)actual->args[1],
+	                           normalized_stat);
 }
 
 SYSCALL_EXIT_PROT(fstat)
 {
+	char *normalized_stat = (char *)canonical->args[1];
+	denormalize_stat_struct_into(normalized_stat,
+	                             (struct stat *)actual->args[1]);
+	if(NULL != normalized_stat) {
+		free(normalized_stat);
+	}
+	free_scratch();
+}
+
+/* ************************************************************************** *
+ * fstatat                                                                 * 
+ *                                                                            *
+ * int fstatat(int fd, const char *restrict path,                             *
+ *             struct stat *restrict buf, int flag);                          *
+ * ************************************************************************** */
+
+SYSCALL_ENTER_PROT(fstatat)
+{
+	struct descriptor_info *di = NULL;
+	if(AT_FDCWD != actual->args[0]) {
+		get_di(0);
+		remap_fd(di, 0);
+	}
+	alloc_scratch(2 * sizeof(struct type));
+	struct type *stat_buf_type = (struct type *)*scratch;
+	struct type *str_type = ((struct type *)*scratch) + 1;
+	int dispatch = dispatch_leader_if_needed(di, DISPATCH_CHECKED);
+	// TODO check path to inform whether we should do it everywhere or
+	// leader-only
+	dispatch = DISPATCH_LEADER | DISPATCH_NEEDS_REPLICATION | DISPATCH_CHECKED;
+	if(NULL == (char *)actual->args[2]) {
+		return DISPATCH_ERROR;
+	}
+
+	char *normalized_stat = NULL;
+	if(dispatch & DISPATCH_NEEDS_REPLICATION) {
+		normalized_stat = calloc(1, NORMALIZED_STAT_STRUCT_SIZE);
+		if(NULL == normalized_stat) {
+			return DISPATCH_ERROR;
+		}
+	}
+
+	canonical->arg_types[0] = DESCRIPTOR_TYPE();
+	canonical->arg_types[1] = POINTER_TYPE(str_type);
+	*str_type               = STRING_TYPE();
+	canonical->args[2]      = (long)normalized_stat;
+	canonical->arg_types[2] = POINTER_TYPE(stat_buf_type);
+	*stat_buf_type          = BUFFER_TYPE(NORMALIZED_STAT_STRUCT_SIZE);
+	canonical->arg_flags[2] = ARG_FLAG_WRITE_ONLY | ARG_FLAG_REPLICATE;
+	canonical->arg_types[3] = IMMEDIATE_TYPE(int);
+	canonical->ret_type = IMMEDIATE_TYPE(long);
+	canonical->ret_flags = ARG_FLAG_REPLICATE;
+	return dispatch;
+}
+
+SYSCALL_POST_CALL_PROT(fstatat)
+{
+	char *normalized_stat = (char *)canonical->args[2];
+	if(!(dispatch & DISPATCH_NEEDS_REPLICATION)) {
+		return;
+	}
+	normalize_stat_struct_into((struct stat *)actual->args[2],
+	                           normalized_stat);
+}
+
+SYSCALL_EXIT_PROT(fstatat)
+{
+	char *normalized_stat = (char *)canonical->args[2];
+	if(dispatch & DISPATCH_NEEDS_REPLICATION) {
+		denormalize_stat_struct_into(normalized_stat, 
+					(struct stat *)actual->args[2]);
+	}
+	if(NULL != normalized_stat) {
+		free(normalized_stat);
+	}
 	free_scratch();
 }
 
@@ -654,6 +767,39 @@ SYSCALL_EXIT_PROT(gettimeofday)
 
 SYSCALL_ENTER_PROT(dup2)
 {
+	int oldfd = canonical->args[0];
+	int newfd = canonical->args[1];
+	if(oldfd == newfd) {
+		// dup3 returns an error value in this case, dup2 allows it
+		actual->ret = oldfd;
+		return DISPATCH_SKIP | DISPATCH_CHECKED;
+	}
+
+	// Redirect to dup3 handlers
+	canonical->no = SYSCALL_dup3_CANONICAL;
+	canonical->args[2] = 0; // flags
+	
+	return SYSCALL_ENTER(dup3)(env, handler, actual, canonical, scratch);
+}
+
+SYSCALL_EXIT_PROT(dup2)
+{
+	if(dispatch & DISPATCH_SKIP) {
+		return;
+	}
+	return SYSCALL_EXIT(dup3)(env, handler, dispatch, actual, canonical, 
+	                          scratch);
+}
+
+
+/* ************************************************************************** *
+ * dup3                                                                       * 
+ *                                                                            *
+ * int dup2(int oldfd, int newfd, int flags);                                            *
+ * ************************************************************************** */
+
+SYSCALL_ENTER_PROT(dup3)
+{
 	alloc_scratch(sizeof(struct descriptor_info *) * 2);
 	struct descriptor_info **di = (struct descriptor_info **)*scratch;
 	int oldfd = canonical->args[0];
@@ -681,19 +827,14 @@ SYSCALL_ENTER_PROT(dup2)
 
 	canonical->arg_types[0] = DESCRIPTOR_TYPE();
 	canonical->arg_types[1] = DESCRIPTOR_TYPE();
+	canonical->arg_types[2] = IMMEDIATE_TYPE(int);
 	canonical->ret_type = DESCRIPTOR_TYPE();
 	canonical->ret_flags = ARG_FLAG_REPLICATE;
-
-	if(oldfd == newfd) {
-		// dup3 returns an error value in this case
-		actual->ret = oldfd;
-		return DISPATCH_SKIP | DISPATCH_CHECKED;
-	}
 
 	return dispatch_leader_if_needed(di[0], DISPATCH_CHECKED);
 }
 
-SYSCALL_EXIT_PROT(dup2)
+SYSCALL_EXIT_PROT(dup3)
 {
 	int newfd = canonical->args[1];
 
@@ -821,6 +962,22 @@ SYSCALL_ENTER_PROT(socket)
 
 SYSCALL_ENTER_PROT(epoll_create)
 {
+	canonical->no = SYSCALL_epoll_create1_CANONICAL;
+	canonical->args[0] = 0;
+	return SYSCALL_ENTER(epoll_create1)(env, handler, actual, canonical, 
+	                                    scratch);
+}
+
+
+/* ************************************************************************** *
+ * epoll_create1                                                              *
+ *                                                                            *
+ * int epoll_create(int flags);                                               *
+ * ************************************************************************** */
+
+SYSCALL_ENTER_PROT(epoll_create1)
+{
+	canonical->arg_types[0] = IMMEDIATE_TYPE(int);
 	canonical->ret_type = IMMEDIATE_TYPE(long);
 	canonical->ret_flags = ARG_FLAG_REPLICATE;
 	return DISPATCH_LEADER | DISPATCH_NEEDS_REPLICATION | DISPATCH_CHECKED;
@@ -849,18 +1006,25 @@ SYSCALL_ENTER_PROT(epoll_ctl)
 	int epfd = canonical->args[0];
 	int op = canonical->args[1];
 	int fd = canonical->args[2];
-	struct epoll_event *event = (struct epoll_event *)canonical->args[3];
+	struct epoll_event *event = (struct epoll_event *)actual->args[3];
+	char *normalized_event = calloc(1, NORMALIZED_EPOLL_EVENT_SIZE);
+	if(NULL == normalized_event) {
+		return DISPATCH_ERROR;
+	}
 
-	/* Define arguemnt types */
+	/* Define arguement types */
 	canonical->arg_types[0] = DESCRIPTOR_TYPE();
 	canonical->arg_types[1] = IMMEDIATE_TYPE(int);
 	canonical->arg_types[2] = DESCRIPTOR_TYPE();
 	canonical->arg_types[3] = POINTER_TYPE(&s->ref_types[0]);
-	s->ref_types[0]         = BUFFER_TYPE(sizeof(struct epoll_event),
+	canonical->args[3] = (long)normalized_event;
+	normalize_epoll_event_structs_into(
+				1, (struct epoll_event *)canonical->args[3],
+				normalized_event);
+	s->ref_types[0]         = BUFFER_TYPE(NORMALIZED_EPOLL_EVENT_SIZE,
 	                                      1, s->buf_refs);
 	s->buf_refs[0]          = (struct buffer_reference)
-	                          {.offset = 
-				     ((void *)&event->data.ptr)-((void*)&event),
+	                          {.offset = NORMALIZED_EPOLL_EVENT_DATA_OFFSET,
 	                           .type = &s->ref_types[1]};
 	/* (struct epoll_event).data buffer is ignored; it may contain pointers
 	   and other data that varies between variants */
@@ -922,7 +1086,7 @@ SYSCALL_EXIT_PROT(epoll_ctl)
 	int epfd = canonical->args[0];
 	int op = canonical->args[1];
 	int fd = canonical->args[2];
-	struct epoll_event *event = (struct epoll_event *)canonical->args[3];
+	char *normalized_event = (char *)canonical->args[3];
 
 	struct epoll_data_info *event_info = 
 		get_epoll_data_info_for(env, epfd, fd, ~0U);
@@ -960,6 +1124,9 @@ SYSCALL_EXIT_PROT(epoll_ctl)
 		}
 	}
 
+	if(NULL != normalized_event) {
+		free(normalized_event);
+	}
 	free_scratch();
 }
 
@@ -971,9 +1138,25 @@ SYSCALL_EXIT_PROT(epoll_ctl)
  *                int maxevents, int timeout);                                *
  * ************************************************************************** */
 
+SYSCALL_ENTER_PROT(epoll_wait)
+{
+	// Forward to epoll_pwait
+	canonical->no = SYSCALL_epoll_pwait_CANONICAL;
+	canonical->args[4] = 0;
+	return SYSCALL_ENTER(epoll_pwait)(env, handler, actual, canonical, 
+	                                  scratch);
+}
+
+
+/* ************************************************************************** *
+ * epoll_pwait                                                                *
+ *     int epoll_pwait(int epfd, struct epoll_event *events,                  *
+ *                    int maxevents, int timeout,                             *
+ *                    const sigset_t *sigmask);                               *
+ * ************************************************************************** */
 /* See epoll_create documentation above to see how we handle these calls. */
 
-SYSCALL_ENTER_PROT(epoll_wait)
+SYSCALL_ENTER_PROT(epoll_pwait)
 {
 	int maxevents = actual->args[2];
 	if(maxevents <= 0) {
@@ -981,18 +1164,31 @@ SYSCALL_ENTER_PROT(epoll_wait)
 	}
 
 	struct descriptor_info *di = get_di(0);
-	alloc_scratch(sizeof(struct type));
+	alloc_scratch(2 * sizeof(struct type));
 	struct type *epoll_events_type = (struct type *)*scratch;
+	struct type *sigset_type = ((struct type *)*scratch) + 1;
+	char *normalized_events = calloc(maxevents, 
+	                                 NORMALIZED_EPOLL_EVENT_SIZE);
+	if(NULL == normalized_events) {
+		return DISPATCH_ERROR;
+	}
 
 	canonical->arg_types[0] = DESCRIPTOR_TYPE();
 	remap_fd(di, 0); // only dispatched on leader, will remap there
 
 	canonical->arg_types[1] = POINTER_TYPE(epoll_events_type);
+	// The epoll_event buffer will get normalized in post call handler if it
+	// needs to be replicated across architectures that have differently-
+	// sized struct epoll_event sizes. This may change the size of this
+	// buffer.
 	*epoll_events_type = BUFFER_TYPE(maxevents 
-	                                 * sizeof(struct epoll_event));
+	                                 * NORMALIZED_EPOLL_EVENT_SIZE);
+	canonical->args[1] = (long)normalized_events;
 	canonical->arg_flags[1] = ARG_FLAG_WRITE_ONLY | ARG_FLAG_REPLICATE;
 	canonical->arg_types[2] = IMMEDIATE_TYPE(int);
 	canonical->arg_types[3] = IMMEDIATE_TYPE(int);
+	canonical->arg_types[4] = POINTER_TYPE(sigset_type);
+	*sigset_type            = IMMEDIATE_TYPE(unsigned long);
 
 	canonical->ret_type = IMMEDIATE_TYPE(long);
 	canonical->ret_flags = ARG_FLAG_REPLICATE;
@@ -1001,7 +1197,22 @@ SYSCALL_ENTER_PROT(epoll_wait)
 	return dispatch_leader_if_needed(di, DISPATCH_CHECKED);
 }
 
-SYSCALL_EXIT_PROT(epoll_wait)
+SYSCALL_POST_CALL_PROT(epoll_pwait)
+{
+	if(0 > actual->ret || !(dispatch & DISPATCH_NEEDS_REPLICATION)) {
+		return;
+	}
+	struct type *epoll_events_type = (struct type *)*scratch;
+	char *normalized_events = (char *)canonical->args[1];
+	size_t sz = 0;
+	sz = (long)normalize_epoll_event_structs_into(
+				actual->ret,
+				(struct epoll_event *)actual->args[1],
+				normalized_events);
+	epoll_events_type->buffer.length = sz;
+}
+
+SYSCALL_EXIT_PROT(epoll_pwait)
 {
 	/* epoll_wait returns the `struct epoll_event` that was previously
 	   registered with `epoll_ctl`.
@@ -1010,15 +1221,18 @@ SYSCALL_EXIT_PROT(epoll_wait)
 	   `struct epoll_event` to make sure `epoll_wait` behaves correctly and
 	   as expected by the variant. */
 	
-	if(dispatch & DISPATCH_EVERYONE) {
+	if(!(dispatch & DISPATCH_NEEDS_REPLICATION)) {
 		// Just in case we ever implement this dispatch type for epolls.
 		return;
 	}
 
 	int epfd = canonical->args[0];
-	struct epoll_event *events = (struct epoll_event *)actual->args[1];  
 	int maxevents = actual->args[2];
 	int n_events = actual->ret;
+	char *normalized_events = (char *)canonical->args[1];  
+	struct epoll_event *events = (struct epoll_event *)actual->args[1];
+	denormalize_epoll_event_structs_into(n_events, normalized_events, 
+	                                     events);
 
 	if(0 > n_events || n_events > maxevents) {
 		post_call_error();
@@ -1035,6 +1249,11 @@ SYSCALL_EXIT_PROT(epoll_wait)
 		}
 		memcpy(&events[i].data, &own_event->data.data, 
 		       sizeof(own_event->data.data));
+	}
+
+	if(NULL != normalized_events) {
+		// Allocated by normalization routine
+		free(normalized_events);
 	}
 }
 

@@ -20,10 +20,14 @@ size_t get_serialized_size(const void *buf, const struct type *type)
 			                           type->pointer.type);
 		}
 		case STRING: {
-			return strlen(buf) + 1;
+			return sizeof(uint64_t) + strlen(buf) + 1;
 		}
 		case BUFFER: {
-			size_t n = type->buffer.length;
+			size_t n = sizeof(uint64_t); // buffer length encoding
+			if(0 >= type->buffer.length) {
+				return n;
+			}
+			n += type->buffer.length;
 			for(int i = 0; i < type->buffer.n_references; i++) {
 				const struct buffer_reference *reference = 
 					&type->buffer.references[i];
@@ -66,28 +70,38 @@ ssize_t serialize_into(const void *inp, const struct type *type, void *buf)
 		}
 		case STRING: {
 			size_t len = strlen(inp);
-			strncpy(buf, inp, len);
-			return len + 1;
+			*(uint64_t *)buf = len + 1;
+			strncpy(buf + sizeof(uint64_t), inp, len);
+			return sizeof(uint64_t) + len + 1;
 		}
 		case BUFFER: {
 			const struct buffer_reference *reference;
-			size_t len = 0;
-			memcpy(buf, inp, type->buffer.length);
-			len += type->buffer.length;
+			size_t produced = 0;
+			// encode actual buffer length -- receiving end may have
+			// different length in they buffer.length
+			*(uint64_t *)buf = type->buffer.length;
+			produced += sizeof(uint64_t);
+			if(type->buffer.length <= 0) {
+				return produced;
+			}
+			char *copied_buf = buf + produced;
+			memcpy(copied_buf, inp, 
+			       type->buffer.length);
+			produced += type->buffer.length;
 			for(int i = 0; i < type->buffer.n_references; i++) {
 				size_t n = 0;
 				reference = &type->buffer.references[i];
-				n = serialize_into(buf + reference->offset,
+				n = serialize_into(inp + reference->offset,
 					           reference->type,
-					           buf + len);
-				memset(buf + reference->offset, 0,
+					           buf + produced);
+				memset(copied_buf + reference->offset, 0,
 				       type_size(reference->type));
 				if(n < 0) {
 					return -1;
 				}
-				len += n;
+				produced += n;
 			}
-			return len;
+			return produced;
 		}
 	}
 	return -1; /* unreachable */
@@ -147,12 +161,12 @@ ssize_t deserialize(void *buf, const struct type *type, void *dest,
 			if(*(uint64_t *)buf != 0UL) {
 				if(DESERIALIZE_IN_PLACE == approach) {
 					recursive_dest = buf + sizeof(void *);
+					*(void **)dest = recursive_dest;
 				} else if(DESERIALIZE_OVERWRITE == approach) {
 					recursive_dest = *(void **)dest;
 				}
-			}
-			if(NULL != dest) {
-				*(void **)dest = recursive_dest;
+			} else {
+				*(void **)dest = NULL;
 			}
 
 			/* Recursively deserialize pointee. */
@@ -168,16 +182,21 @@ ssize_t deserialize(void *buf, const struct type *type, void *dest,
 		}
 		case STRING: {
 			/* Copy string into deserialize_into. */
+			uint64_t actual_strlen = *(uint64_t *)buf - 1;
+			buf += sizeof(uint64_t);
+			size_t observed_strlen = strlen(buf);
+			assert(observed_strlen == actual_strlen);
 			if(NULL != dest && buf != dest) {
-				strcpy(dest, buf);
+				memmove(dest, buf, actual_strlen);
+				((char *)dest)[actual_strlen] = '\0';
 			}
-			return strlen(buf) + 1;
+			return sizeof(uint64_t) + actual_strlen + 1;
 		}
 		case BUFFER: {
-			/* Serialized:   <BUFFER> <SER. REF 1> <SER. REF 2> ...
-			                   x  x
-			                   |  |
-			               refs redacted 
+			/* Serialized:   <LEN> <BUFFER> <REF 1> <REF 2> ...
+			                         x  x
+			                         |  |
+			                     refs redacted 
 
 			   Deserialized: <BUFFER> <DESER. REF 1> ...
 			                   x  x    |             |
@@ -193,6 +212,12 @@ ssize_t deserialize(void *buf, const struct type *type, void *dest,
 			   buffer before deserialization are retained and not
 			   overwritten -- recursive reference are deserialized
 			   into the locations given there.  */
+			size_t consumed = 0;
+			uint64_t actual_len = *(uint64_t *)buf;
+			consumed += sizeof(uint64_t);
+			if(0 == actual_len) {
+				return consumed;
+			}
 			
 			/* Remember pointers present in `dest` buffer, because
 			   we will use them to recursively deserialize 
@@ -207,31 +232,31 @@ ssize_t deserialize(void *buf, const struct type *type, void *dest,
 			}
 
 			/* Deserialize buffer itself. */
-			if(NULL != dest && buf != dest) {
-				memcpy(dest, buf, type->buffer.length);
+			if(NULL != dest && buf + consumed != dest) {
+				memmove(dest, buf + consumed, actual_len);
 			}
 
 			/* Recursively deserialize references. */
-			size_t offset = type->buffer.length;
+			consumed += actual_len;
 			for(int i = 0; i < type->buffer.n_references; i++) {
 				const struct buffer_reference *reference = 
 					&type->buffer.references[i];
 				size_t s = 0;
 				void *recursive_dest = NULL;
 				if(approach == DESERIALIZE_IN_PLACE) {
-					recursive_dest = buf + offset;
+					recursive_dest = buf + consumed;
 				} else if(approach == DESERIALIZE_OVERWRITE) {
 					*(void **)(dest + reference->offset) =
 						ptrs[i];
 					recursive_dest = 
 						dest + reference->offset;
 				}
-				s = deserialize(buf + offset, reference->type,
+				s = deserialize(buf + consumed, reference->type,
 				                recursive_dest, approach);
 				if(0 > s) {
 					return s;
 				}
-				offset += s;
+				consumed += s;
 				/* Update pointers in buffer. Note that for
 				   DESERIALIZE_OVERWRITE, the pointers in the 
 				   buffer should remain the same as passed-in
@@ -243,7 +268,7 @@ ssize_t deserialize(void *buf, const struct type *type, void *dest,
 					       type_size(reference->type));
 				}
 			}
-			return offset;
+			return consumed;
 		}
 	}
 	return -1; /* unreachable*/
@@ -294,7 +319,7 @@ size_t log_str_of(const void *inp, const struct type *type,
 			} \
 		} \
 	}
-	size_t offset = 0;
+	size_t offset = 0; // number of characters printed
 	switch(type->kind) {
 		case IGNORE:
 			append("IGNORE");
@@ -311,6 +336,10 @@ size_t log_str_of(const void *inp, const struct type *type,
 			break;
 		}
 		case POINTER: {
+			if(NULL == *(const char **)inp) {
+				append("POINTER to NULL");
+				break;
+			}
 			append("POINTER to ");
 			if(offset >= max_len - 1) {
 				break;
@@ -321,30 +350,33 @@ size_t log_str_of(const void *inp, const struct type *type,
 			break;
 		}
 		case STRING: {
-			append("STRING \"%s\"", (const char *)inp);
+			size_t actual_sz = strlen((const char *)inp);
+			append("STRING (%lu) \"%s\"", 
+			       actual_sz, (const char *)inp);
 			break;
 		}
 		case BUFFER: {
-			size_t printed = 0;
+			size_t consumed = 0;
 			struct buffer_reference *reference = NULL;
-			append("BUFFER [");
+			uint64_t actual_sz = type->buffer.length;
+			append("BUFFER (%lu) [", actual_sz);
 			for(int i = 0; i < type->buffer.n_references; i++) {
 				reference = &type->buffer.references[i];
 				if(offset >= max_len - 1) {
 					break;
 				}
 				offset += write_printable_bytes(
-						inp + printed,
-						reference->offset - printed,
+						inp + consumed,
+						reference->offset - consumed,
 						buf + offset, max_len - offset);
-				printed = reference->offset + sizeof(void *);
+				consumed = reference->offset + sizeof(void *);
 				append("<ADDR OF REF %d>", i);
 			}
 			if(offset >= max_len - 1) {
 				break;
 			}
-			offset += write_printable_bytes(inp + printed, 
-						type->buffer.length - printed,
+			offset += write_printable_bytes(inp + consumed, 
+						type->buffer.length - consumed,
 						buf + offset, max_len - offset);
 			append("]");
 

@@ -70,6 +70,7 @@ char *serialize_args(size_t *len, struct syscall_info *canonical)
 }
 
 void log_args(char *log_buf, size_t max_len, 
+              struct syscall_info *actual,
               struct syscall_info *canonical)
 {
 	#define append(...) { \
@@ -80,12 +81,13 @@ void log_args(char *log_buf, size_t max_len,
 		                    __VA_ARGS__); \
 	}
 	size_t written = 0;
-	append("Canonical no. %ld args:\n", canonical->no);
+	append("Canonical no. %ld (actual no. %ld) args:\n", canonical->no, 
+	       actual->no);
 	for(int i = 0; i < N_SYSCALL_ARGS; i++) {
 		if(IGNORE == canonical->arg_types[i].kind) {
 			continue;
 		}
-		append("  Argument %d:\n    ", i);
+		append("  Argument %d: (%ld) \n    ", i, actual->args[i]);
 		if(canonical->arg_flags[i] & ARG_FLAG_WRITE_ONLY) {
 			append("(write only)");
 		} else {
@@ -100,7 +102,6 @@ void log_args(char *log_buf, size_t max_len,
 }
 
 int replicate_results(struct environment *env,
-	              struct syscall_info *actual,
 	              struct syscall_info *canonical)
 {
 	size_t replication_buf_len = 0;
@@ -108,7 +109,6 @@ int replicate_results(struct environment *env,
 
 	if(env->is_leader) {
 		replication_buf = get_replication_buffer(
-			actual,
 			canonical,
 			&replication_buf_len);
 		if(NULL == replication_buf) {
@@ -120,9 +120,8 @@ int replicate_results(struct environment *env,
 	} else {
 		NZ_TRY(comm_receive_dynamic(env->comm, env->leader_id, 
 		                            &replication_buf_len, 
-					    &replication_buf));
+		                            &replication_buf));
 		NZ_TRY_EXCEPT(write_back_replication_buffer(
-					actual,
 					canonical,
 					replication_buf,
 					replication_buf_len),
@@ -138,8 +137,7 @@ abort1:
 	return 1;
 }
 
-char *get_replication_buffer(struct syscall_info *actual,
-	                     struct syscall_info *canonical,
+char *get_replication_buffer(struct syscall_info *canonical,
 			     size_t *replication_buf_len)
 {
 	size_t n = 0;
@@ -151,11 +149,11 @@ char *get_replication_buffer(struct syscall_info *actual,
 		if(!(ARG_FLAG_REPLICATE & canonical->arg_flags[i])) {
 			continue;
 		}
-		n += get_serialized_size(&actual->args[i], 
+		n += get_serialized_size(&canonical->args[i], 
 		                         &canonical->arg_types[i]);
 	}
 	if(canonical->ret_flags & ARG_FLAG_REPLICATE) {
-		n += get_serialized_size(&actual->ret, &canonical->ret_type);
+		n += get_serialized_size(&canonical->ret, &canonical->ret_type);
 	}
 	if(0 == n) {
 		return NULL;
@@ -169,14 +167,14 @@ char *get_replication_buffer(struct syscall_info *actual,
 		if(!(ARG_FLAG_REPLICATE & canonical->arg_flags[i])) {
 			continue;
 		}
-		LZ_TRY_EXCEPT(s = serialize_into(&actual->args[i], 
+		LZ_TRY_EXCEPT(s = serialize_into(&canonical->args[i], 
 		                          &canonical->arg_types[i],
 				          replication_buf + written),
 			      return NULL);
 		written += s;
 	}
 	if(canonical->ret_flags & ARG_FLAG_REPLICATE) {
-		LZ_TRY_EXCEPT(s = serialize_into(&actual->ret,
+		LZ_TRY_EXCEPT(s = serialize_into(&canonical->ret,
 				          &canonical->ret_type,
 				          replication_buf + written),
 			      return NULL);
@@ -187,8 +185,7 @@ char *get_replication_buffer(struct syscall_info *actual,
 	return replication_buf;
 }
 
-int write_back_replication_buffer(struct syscall_info *actual,
-                                  struct syscall_info *canonical,
+int write_back_replication_buffer(struct syscall_info *canonical,
 				  char *replication_buf,
 				  size_t replication_buf_len)
 {
@@ -202,14 +199,14 @@ int write_back_replication_buffer(struct syscall_info *actual,
 		LZ_TRY(s = deserialize_overwrite(
 				replication_buf + consumed,
 		                &canonical->arg_types[i],
-				&actual->args[i]));
+				&canonical->args[i]));
 		consumed += s;
 	}
 	if(canonical->ret_flags & ARG_FLAG_REPLICATE) {
 		LZ_TRY(s = deserialize_overwrite(
 				replication_buf + consumed,
 		                &canonical->ret_type,
-				&actual->ret));
+				&canonical->ret));
 		consumed += s;
 	}
 

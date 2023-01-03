@@ -54,12 +54,16 @@ struct syscall_handler {
 	long arch_no;
 	int (*enter)(struct environment *, const struct syscall_handler *,
 	             struct syscall_info *, struct syscall_info *, void **);
+	void (*post_call)(struct environment *, const struct syscall_handler *,
+			  int, struct syscall_info *, struct syscall_info *,
+			   void **);
 	void (*exit)(struct environment *, const struct syscall_handler *, int,
 	             struct syscall_info *, struct syscall_info *, void **);
 	const char *name;
 };
 
 #define SYSCALL_ENTER(name) __ ## name ## _enter 
+#define SYSCALL_POST_CALL(name) __ ## name ## _post_call
 #define SYSCALL_EXIT(name) __ ## name ## _exit
 #define SYSCALL_ENTER_PROT(name) \
 	int __ ## name ## _enter (struct environment *env, \
@@ -67,6 +71,13 @@ struct syscall_handler {
 	                          struct syscall_info *actual, \
 	                          struct syscall_info *canonical, \
 	                          void **scratch)
+#define SYSCALL_POST_CALL_PROT(name) \
+	void __ ## name ## _post_call (struct environment *env, \
+	                               const struct syscall_handler *handler, \
+	                               int dispatch, \
+	                               struct syscall_info *actual, \
+	                               struct syscall_info *canonical, \
+	                               void **scratch)
 #define SYSCALL_EXIT_PROT(name) \
 	void __ ## name ## _exit (struct environment *env, \
 	                          const struct syscall_handler *handler, \

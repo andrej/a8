@@ -77,12 +77,10 @@ TEST(replicate_write_back)
 	canonical.ret_flags = ARG_FLAG_REPLICATE;
 
 	size_t buf_len = 0;
-	char *buf = get_replication_buffer(&actual_leader, &canonical, 
-	                                   &buf_len);
+	char *buf = get_replication_buffer(&canonical, &buf_len);
 	ASSERT_NEQ(buf, NULL);
 
-	ASSERT_EQ(write_back_replication_buffer(&actual_follower, &canonical,
-	                                        buf, buf_len),
+	ASSERT_EQ(write_back_replication_buffer(&canonical, buf, buf_len),
 		  0);
 	
 	// Arg 1 and 2

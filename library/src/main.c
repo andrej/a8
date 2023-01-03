@@ -114,7 +114,7 @@ long monmod_syscall_handle(struct syscall_trace_func_stack *stack)
 	if(NULL != handler) {
 		char log_buf[1024];
 		log_buf[0] = '\0';
-		log_args(log_buf, sizeof(log_buf), &canonical);
+		log_args(log_buf, sizeof(log_buf), &actual, &canonical);
 		SAFE_LOGF_LEN(sizeof(log_buf), log_fd, "%s", log_buf);
 	}
 #endif
@@ -151,6 +151,16 @@ long monmod_syscall_handle(struct syscall_trace_func_stack *stack)
 		                                    actual.args[3],
 		                                    actual.args[4], 
 		                                    actual.args[5]);
+		canonical.ret = actual.ret;  // Default to the same
+		if(NULL != handler && NULL != handler->post_call) {
+			/* This callback gets called whenever a system call has
+			   actually been issued locally. It can be used to
+			   normalize results in a canonical form before 
+			   replication, from actual into canonical. */
+			handler->post_call(&env, handler, dispatch, &actual, 
+			                   &canonical, &handler_scratch_space);
+		}
+
 #if VERBOSITY >= 4
 		SAFE_LOGF(log_fd, "Returned: %ld\n", actual.ret);
 #endif
@@ -177,8 +187,14 @@ long monmod_syscall_handle(struct syscall_trace_func_stack *stack)
 #if VERBOSITY >= 4
 		SAFE_LOGF(log_fd, "Replicating results.%s", "\n");
 #endif
-		NZ_TRY_EXCEPT(replicate_results(&env, &actual, &canonical),
+		/* Replicates contents of canonical.ret and canonical.args to 
+		   be the same across all nodes. It is the exit handler's 
+		   responsibility to copy this back to the actual results as
+		   approriate. By default, actual.ret = canonical.ret will be
+		   copied. */
+		NZ_TRY_EXCEPT(replicate_results(&env, &canonical),
 			      monmod_exit(1));
+		actual.ret = canonical.ret;
 	}
 
 	/* Phase 4: Run exit handlers, potentially denormalizing results. */

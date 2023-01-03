@@ -18,18 +18,16 @@ int cross_check_args(struct environment *env,
 
 char *serialize_args(size_t *len, struct syscall_info *canonical);
 void log_args(char *buf, size_t max_len, 
+              struct syscall_info *actual,
               struct syscall_info *canonical);
 
 int replicate_results(struct environment *env,
-                      struct syscall_info *actual,
                       struct syscall_info *canonical);
 
-char *get_replication_buffer(struct syscall_info *actual,
-                             struct syscall_info *canonical,
+char *get_replication_buffer(struct syscall_info *canonical,
 			     size_t *replication_buf_len);
 
-int write_back_replication_buffer(struct syscall_info *actual,
-                                  struct syscall_info *canonical,
+int write_back_replication_buffer(struct syscall_info *canonical,
 				  char *replication_buf,
 				  size_t replication_buf_len);
 

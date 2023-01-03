@@ -26,6 +26,7 @@ TEST_SUITE_DIR := ../test_suite
 TEST_SOURCES   := $(shell find $(TESTS_DIR) -maxdepth 1 -name \*.c)
 TEST_OBJECTS   := $(TEST_SOURCES:%.c=$(BUILD_DIR)/%.o)
 TEST_DEP_OBJS  := $(filter-out $(SOURCE_DIRS:%=$(BUILD_DIR)/%/main.o) \
+                               $(SOURCE_DIRS:%=$(BUILD_DIR)/%/init.o) \
                                $(SOURCE_DIRS:%=$(BUILD_DIR)/%/vsyscall_override.o),\
                                $(C_OBJECTS))
 TEST_DEPS      := $(TEST_OBJECTS:%.o=%.d)

@@ -42,6 +42,7 @@
 
 char *normalize_stat_struct_into(struct stat *d, char *n)
 {
+	memset(n, 0, NORMALIZED_STAT_STRUCT_SIZE);
 	// TODO Handle endianness
 	memcpy(n +   0, &d->st_dev,      8);
 	memcpy(n +   8, &d->st_ino,      8);
@@ -64,6 +65,7 @@ char *normalize_stat_struct_into(struct stat *d, char *n)
 
 void denormalize_stat_struct_into(char *n, struct stat *d)
 {
+	memset(d, 0, sizeof(struct stat));
 	// TODO Handle endianness
 	// We assume little endian here, so that narrowing conversions (kind of)
 	// work, i.e. small enough values should remain the same when we chop
@@ -91,6 +93,7 @@ void denormalize_stat_struct_into(char *n, struct stat *d)
 size_t normalize_epoll_event_structs_into(size_t num, struct epoll_event *d, 
                                           char *n)
 {
+	memset(n, 0, NORMALIZED_EPOLL_EVENT_SIZE);
 	for(size_t i = 0; i < num; i ++) {
 		*(uint32_t *)    &n[16*i + 0] = d[i].events;
 		*(epoll_data_t *)&n[16*i + 8] = d[i].data;
@@ -102,6 +105,7 @@ void denormalize_epoll_event_structs_into(size_t num,
                                           const char *n,
                                           struct epoll_event *d)
 {
+	memset(d, 0, sizeof(struct epoll_event));
 	for(size_t i = 0; i < num; i++) {
 		d[i].events = *(uint32_t *)    &n[16*i + 0];
 		d[i].data   = *(epoll_data_t *)&n[16*i + 8];

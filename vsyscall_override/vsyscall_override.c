@@ -36,6 +36,16 @@ time_t
 __attribute__((visibility("default")))
 time(time_t *tloc)
 {
+#ifdef __NR_time
 
 	return syscall(__NR_time, (long)tloc, 0, 0, 0, 0, 0);
+#else
+	struct timeval tv;
+	syscall(__NR_gettimeofday, (long)&tv, 0, 0, 0, 0, 0);
+	if(NULL != tloc) {
+		*tloc = tv.tv_sec;
+	}
+	return tv.tv_sec;
+#endif
 }
+

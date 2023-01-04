@@ -65,8 +65,8 @@ SYSCALL_EXIT_PROT(default_creates_fd_exit);
                                 SYSCALL_POST_CALL(fstatat), \
                                 SYSCALL_EXIT(stat)) \
  X( __NR_fstat,    fstat,       SYSCALL_ENTER(fstat), \
-                                NULL, \
-                                SYSCALL_EXIT(default_free_scratch)) \
+                                SYSCALL_POST_CALL(fstat), \
+                                SYSCALL_EXIT(fstat)) \
  X( __NR_newfstatat, fstatat,   SYSCALL_ENTER(fstatat), \
                                 SYSCALL_POST_CALL(fstatat), \
                                 SYSCALL_EXIT(fstatat)) \
@@ -160,6 +160,9 @@ SYSCALL_EXIT_PROT(default_creates_fd_exit);
  X( __NR_rt_sigaction, rt_sigaction, SYSCALL_ENTER(default_checked_arg1), \
                                 NULL, \
                                 NULL) /*TODO*/ \
+ X( __NR_rt_sigprocmask, rt_sigprocmask, SYSCALL_ENTER(rt_sigprocmask), \
+                                NULL, \
+                                SYSCALL_EXIT(default_free_scratch)) \
  X( __NR_ioctl,    ioctl,       SYSCALL_ENTER(default_arg1_fd), \
                                 NULL, \
                                 NULL) /*TODO*/\
@@ -169,6 +172,12 @@ SYSCALL_EXIT_PROT(default_creates_fd_exit);
  X( __NR_sendfile, sendfile,    SYSCALL_ENTER(sendfile), \
                                 NULL, \
                                 NULL) \
+ X( __NR_getrlimit, getrlimit,  SYSCALL_ENTER(getrlimit), \
+                                NULL, \
+                                SYSCALL_EXIT(default_free_scratch) ) \
+ X( __NR_setrlimit, setrlimit,  SYSCALL_ENTER(setrlimit), \
+                                NULL, \
+                                SYSCALL_EXIT(default_free_scratch) )
 
 #include "handler_table_prototypes.h"
 

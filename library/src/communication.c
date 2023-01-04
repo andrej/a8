@@ -112,9 +112,8 @@ static inline int flush_fd(int fd, size_t n)
 	const size_t tmp_buf_size = 128;
 	char tmp[tmp_buf_size];
 	size_t bytes_read = 0;
-	size_t to_read = sizeof(tmp);
 	while(n > 0) {
-		to_read = (n > sizeof(tmp) ? sizeof(tmp) : n);
+		const size_t to_read = (n > sizeof(tmp) ? sizeof(tmp) : n);
 		LZ_TRY(bytes_read = read(fd, tmp, to_read));
 		n -= bytes_read;
 	}

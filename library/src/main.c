@@ -24,29 +24,18 @@
 #include "custom_syscalls.h"
 #include "init.h"
 
-#define SAFE_LOGF_LEN(n, log_fd, msg, ...) { \
-	char log[n]; \
-	int len = 0; \
-	len = snprintf(log, sizeof(log), \
-	              msg, __VA_ARGS__); \
-	if(0 < len && len < sizeof(log)) { \
-		monmod_trusted_syscall(__NR_write, log_fd, (long)log, \
-		                       (long)len, 0, 0, 0); \
-	} \
-}
-#define SAFE_LOGF(log_fd, msg, ...) SAFE_LOGF_LEN(128, log_fd, msg, __VA_ARGS__)
 
 struct config conf;
 int own_id;
 struct communicator comm;
 struct environment env;
-int log_fd = 0;
 
 /* The following two are for convenience but do not add any information beyond
    what is in the above global vars. */
 struct variant_config *own_variant_conf;
 int is_leader;
 bool kernel_monmod_active = false;
+int log_fd = 0;
 
 int monmod_exit(int code)
 {
@@ -83,6 +72,7 @@ long monmod_syscall_handle(struct syscall_trace_func_stack *stack)
 	handler = get_handler(syscall_no);
 	if(NULL == handler) {
 		SAFE_LOGF(log_fd, "%ld -- no handler!\n", syscall_no);
+		//exit(1);
 	}
 
 	/* Preparation: Initialize data. */
@@ -107,7 +97,7 @@ long monmod_syscall_handle(struct syscall_trace_func_stack *stack)
 		dispatch = handler->enter(&env, handler, &actual, &canonical,
 		                          &handler_scratch_space);
 	} else {
-		dispatch = DISPATCH_CHECKED | DISPATCH_EVERYONE;	
+		dispatch = DISPATCH_UNCHECKED | DISPATCH_EVERYONE;	
 	}
 
 #if VERBOSITY >= 3
@@ -126,6 +116,20 @@ long monmod_syscall_handle(struct syscall_trace_func_stack *stack)
 		s = cross_check_args(&env, &canonical);
 		if(0 == s) {
 			SAFE_LOGF(log_fd, "Divergence -- abort!%s", "\n");
+#if VERBOSITY < 3
+			// Print divergence information if we have not before.
+			if(NULL != handler) {
+				SAFE_LOGF(log_fd, "%s (%ld) -- enter from "
+				          "%p.\n", handler->name, actual.no, 
+					  ret_addr);
+				char log_buf[1024];
+				log_buf[0] = '\0';
+				log_args(log_buf, sizeof(log_buf), &actual, 
+				         &canonical);
+				SAFE_LOGF_LEN(sizeof(log_buf), log_fd, "%s", 
+				              log_buf);
+			}
+#endif
 			monmod_exit(1);
 		} else if(0 > s) {
 			SAFE_LOGF(log_fd, "Argument cross-checking failed%s",
@@ -260,6 +264,8 @@ static int find_mapped_region_bounds(void * const needle,
 	return ret;
 }
 
+#pragma GCC push_options // Save current options
+#pragma GCC optimize ("no-optimize-sibling-calls")
 void monmod_library_init()
 {
 	pid_t own_pid = 0;
@@ -335,6 +341,7 @@ void monmod_library_init()
 
 	env_init(&env, &comm, &conf, own_id);
 }
+#pragma GCC pop_options
 
 void __attribute__((destructor)) destruct()
 {

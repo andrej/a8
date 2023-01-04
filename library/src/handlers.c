@@ -6,6 +6,7 @@
 #include <sys/mman.h>
 #include <sys/time.h>
 #include <sys/epoll.h>
+#include <sys/resource.h>
 
 #include "util.h"
 #include "handlers.h"
@@ -118,6 +119,9 @@ SYSCALL_EXIT_PROT(default_creates_fd_exit)
 	if(0 > actual->ret) {
 		return;
 	}
+#if VERBOSITY > 3
+	SAFE_LOGF(log_fd, "%s adding descriptor.\n", handler->name);
+#endif
 	if(dispatch & DISPATCH_EVERYONE) {
 		di = env_add_local_descriptor(env, actual->ret, 
 		                             DI_OPENED_LOCALLY);
@@ -127,7 +131,7 @@ SYSCALL_EXIT_PROT(default_creates_fd_exit)
 	} else {
 		di = env_add_local_descriptor(env, -1, DI_OPENED_ON_LEADER);
 	}
-	actual->ret = di->canonical_fd;
+	actual->ret = canonical_fd_for(env, di);
 	free_scratch();
 	return;
 }
@@ -259,6 +263,9 @@ SYSCALL_EXIT_PROT(close)
 {
 	struct descriptor_info *di = (struct descriptor_info *)*scratch;
 	if(0 == *(int *)&actual->ret) {
+#if VERBOSITY > 3
+		SAFE_LOGF(log_fd, "close removing descriptor.%s", "\n");
+#endif
 		env_del_descriptor(env, di);
 	}
 }
@@ -557,6 +564,8 @@ SYSCALL_ENTER_PROT(fstat)
 {
 	struct descriptor_info *di = get_di(0);
 	int dispatch = dispatch_leader_if_needed(di, DISPATCH_CHECKED);
+	// TODO temporary fix:
+	dispatch = DISPATCH_LEADER | DISPATCH_NEEDS_REPLICATION | DISPATCH_CHECKED;
 
 	alloc_scratch(sizeof(struct type));
 	struct type *stat_buf_type = (struct type *)*scratch;
@@ -847,6 +856,9 @@ SYSCALL_EXIT_PROT(dup3)
 	if(NULL != di[1]) {
 		/* newfd will override a fd previously opened by the variant. 
 		   old local fd was closed by a successful dup2 call. */
+#if VERBOSITY > 3
+		SAFE_LOGF(log_fd, "dup3 removing descriptor.%s", "\n");
+#endif
 		env_del_descriptor(env, di[1]);
 	}
 
@@ -854,6 +866,9 @@ SYSCALL_EXIT_PROT(dup3)
 	if(is_open_locally(env, di[0])) {
 		local_fd = actual->ret;
 	}
+#if VERBOSITY > 3
+	SAFE_LOGF(log_fd, "dup3 adding descriptor.%s", "\n");
+#endif
 	Z_TRY_EXCEPT(env_add_descriptor(env, local_fd, newfd, di[0]->flags),
 	             newfd = -1);
 	
@@ -1231,12 +1246,15 @@ SYSCALL_EXIT_PROT(epoll_pwait)
 	int n_events = actual->ret;
 	char *normalized_events = (char *)canonical->args[1];  
 	struct epoll_event *events = (struct epoll_event *)actual->args[1];
-	denormalize_epoll_event_structs_into(n_events, normalized_events, 
-	                                     events);
 
-	if(0 > n_events || n_events > maxevents) {
+	if(0 > n_events) {
+		return;
+	} else if(n_events > maxevents) {
 		post_call_error();
 	}
+
+	denormalize_epoll_event_structs_into(n_events, normalized_events, 
+	                                     events);
 
 	struct epoll_event *custom_event = NULL;
 	struct epoll_data_info *own_event = NULL;
@@ -1417,4 +1435,63 @@ SYSCALL_ENTER_PROT(accept4)
 	canonical->ret_flags    = ARG_FLAG_REPLICATE;
 
 	return DISPATCH_CHECKED | DISPATCH_LEADER | DISPATCH_NEEDS_REPLICATION;
+}
+
+
+/* ************************************************************************** *
+ * rt_sigprocmask                                                             *
+ *                                                                            *
+ * int syscall(SYS_rt_sigprocmask, int how, const kernel_sigset_t *set,       *
+ *             kernel_sigset_t *oldset, size_t sigsetsize);                   *
+ * ************************************************************************** */
+
+SYSCALL_ENTER_PROT(rt_sigprocmask)
+{
+	alloc_scratch(sizeof(struct type) * 2);
+	struct type *set_type = (struct type*)*scratch;
+	struct type *oldset_type = ((struct type*)*scratch) + 1;
+	canonical->arg_types[0] = IMMEDIATE_TYPE(int);
+	canonical->arg_types[1] = POINTER_TYPE(set_type);
+	*set_type = IMMEDIATE_TYPE(unsigned long);
+	canonical->arg_types[2] = POINTER_TYPE(oldset_type);
+	*oldset_type = IGNORE_TYPE(); // IMMEDIATE_TYPE(unsigned long);
+	canonical->arg_types[3] = IMMEDIATE_TYPE(size_t);
+	canonical->args[3] = (canonical->args[3] == 0 ? 0 : 1);
+	return DISPATCH_EVERYONE | DISPATCH_CHECKED;
+}
+
+
+/* ************************************************************************** *
+ * getrlimit                                                                  *
+ *                                                                            *
+ * int getrlimit(int resource, struct rlimit *rlim);                          *
+ * ************************************************************************** */
+
+SYSCALL_ENTER_PROT(getrlimit)
+{
+	alloc_scratch(sizeof(struct type));
+	struct type *rlim_type = (struct type *)*scratch;
+	canonical->arg_types[0] = IMMEDIATE_TYPE(int);
+	canonical->arg_types[1] = POINTER_TYPE(rlim_type);
+	*rlim_type              = BUFFER_TYPE(sizeof(struct rlimit));
+	// TODO currently assumes struct rlimits are the same size across
+	// architectures, with identical offests
+	canonical->arg_flags[1] = ARG_FLAG_WRITE_ONLY;
+	return DISPATCH_EVERYONE | DISPATCH_CHECKED;
+}
+
+/* ************************************************************************** *
+ * setrlimit                                                                  *
+ *                                                                            *
+ * int getrlimit(int resource, const struct rlimit *rlim);                    *
+ * ************************************************************************** */
+
+SYSCALL_ENTER_PROT(setrlimit)
+{
+	alloc_scratch(sizeof(struct type));
+	struct type *rlim_type = (struct type *)*scratch;
+	canonical->arg_types[0] = IMMEDIATE_TYPE(int);
+	canonical->arg_types[1] = POINTER_TYPE(rlim_type);
+	*rlim_type              = BUFFER_TYPE(sizeof(struct rlimit));
+	return DISPATCH_EVERYONE | DISPATCH_CHECKED;
 }

@@ -6,14 +6,17 @@
 #include <sys/epoll.h>
 #include "config.h"
 #include "communication.h"
+#include "util.h"
 
-#define DI_OPENED_LOCALLY    0x1 
-#define DI_OPENED_ON_LEADER  0x2
-#define DI_IS_SOCKET         0x4
+#define MAX_N_DESCRIPTOR_MAPPINGS 256
+#define DI_FREE              0x0
+#define DI_PRESENT           0x1
+#define DI_OPENED_LOCALLY    0x2 
+#define DI_OPENED_ON_LEADER  0x4
+#define DI_IS_SOCKET         0x8
 
 struct descriptor_info {
 	int flags;
-	int canonical_fd;
 	int local_fd;
 };
 
@@ -35,7 +38,10 @@ struct environment {
 	int leader_id;
 	bool is_leader;
 	size_t n_descriptors;
-	struct descriptor_info descriptors[128];
+	/* Descriptors are mapped in an array where the index into the array
+	   is the canonical file descriptor number, pointing to flags and 
+	   the corresponding locally-opened file descriptor. */
+	struct descriptor_info descriptors[MAX_N_DESCRIPTOR_MAPPINGS];
 	struct epoll_data_infos epoll_data_infos;
 };
 
@@ -51,15 +57,21 @@ static inline struct descriptor_info *
 env_add_descriptor(struct environment *env, 
 		   int local_fd, int canonical_fd, int flags)
 {
-	if(env->n_descriptors >= 
-		sizeof(env->descriptors)/sizeof(env->descriptors[0])) {
+	const int i = canonical_fd;
+	if(DI_FREE != env->descriptors[i].flags) {
+#if VERBOSITY > 3
+		SAFE_LOGF(log_fd, "A descriptor with canonical ID %d already "
+		          "exists.\n", i);
+#endif
 		return NULL;
 	}
-	size_t i = env->n_descriptors;
-	env->descriptors[i].flags = flags;
-	env->descriptors[i].canonical_fd = canonical_fd;
+	env->descriptors[i].flags = DI_PRESENT | flags;
 	env->descriptors[i].local_fd = local_fd;
 	env->n_descriptors++;
+#if VERBOSITY > 3
+	SAFE_LOGF(log_fd, "Added descriptor mapping %d -> %d.\n", canonical_fd, 
+	          local_fd);
+#endif
 	return &env->descriptors[i];
 }
 
@@ -71,17 +83,52 @@ static inline struct descriptor_info *
 env_add_local_descriptor(struct environment *env, 
 			 int fd, int flags)
 {
-	size_t i = env->n_descriptors + 15;
-	return env_add_descriptor(env, fd, i, flags);
+	/* Find the next free canonical ID. 
+	   Programs may assume that IDs 0, 1, 2 are stdin, stdout and stderr,
+	   respectively, so we skip those for safety (even though our 
+	   initialization adding these three default descriptors should already
+	   take care of this). */
+	size_t canonical = 3;
+	for(; canonical < MAX_N_DESCRIPTOR_MAPPINGS; canonical++) {
+		if(DI_FREE == env->descriptors[canonical].flags) {
+			break;
+		}
+	}
+	if(DI_FREE != env->descriptors[canonical].flags) {
+#if VERBOSITY > 3
+		SAFE_LOGF(log_fd, "No more space for descriptor mappings.%s",
+		          "\n");
+#endif
+		return NULL;
+	}
+	return env_add_descriptor(env, fd, canonical, flags);
+}
+
+static inline int canonical_fd_for(struct environment *env,
+                                   struct descriptor_info *di) {
+	size_t i = (di - env->descriptors);
+	if(i > MAX_N_DESCRIPTOR_MAPPINGS || !(DI_PRESENT & di->flags)) {
+#if VERBOSITY > 3
+		SAFE_LOGF(log_fd, "No descriptor mapping with local fd %d "
+		          "registered (%p).\n", di->local_fd, di);
+#endif
+		return -1;
+	}
+	return i;
 }
 
 static inline int 
 env_del_descriptor(struct environment *env, struct descriptor_info *di)
 {
-	size_t i = (di - env->descriptors);
-	memmove(&env->descriptors[i], &env->descriptors[i+1],
-	        (&env->descriptors[env->n_descriptors] - &env->descriptors[i])
-		* sizeof(env->descriptors[0]));
+	const int i = canonical_fd_for(env, di);
+	if(0 > i) {
+		return 1;
+	}
+#if VERBOSITY > 3
+	SAFE_LOGF(log_fd, "Removing descriptor mapping %d -> %d.\n", 
+	          i, env->descriptors[i].local_fd);
+#endif
+	env->descriptors[i].flags = DI_FREE;
 	env->n_descriptors--;
 	return 0;
 }
@@ -89,8 +136,11 @@ env_del_descriptor(struct environment *env, struct descriptor_info *di)
 static inline struct descriptor_info 
 *env_get_local_descriptor_info(struct environment *env, int fd)
 {
-	for(size_t i = 0; i < env->n_descriptors; i++) {
-		if(env->descriptors[i].local_fd == fd) {
+	for(int i = 0; i < MAX_N_DESCRIPTOR_MAPPINGS; i++) {
+		if(DI_FREE == env->descriptors[i].flags) {
+			continue;
+		}
+		if(fd == env->descriptors[i].local_fd) {
 			return &env->descriptors[i];
 		}
 	}
@@ -100,22 +150,14 @@ static inline struct descriptor_info
 static inline struct descriptor_info 
 *env_get_canonical_descriptor_info(struct environment *env, int fd)
 {
-	for(size_t i = 0; i < env->n_descriptors; i++) {
-		if(env->descriptors[i].canonical_fd == fd) {
-			return &env->descriptors[i];
-		}
+	if(0 > fd || fd >= MAX_N_DESCRIPTOR_MAPPINGS
+	   || !(env->descriptors[fd].flags & DI_PRESENT)) {
+#if VERBOSITY > 3
+		SAFE_LOGF(log_fd, "No such canonical descriptor: %d.\n", fd);
+#endif
+		return NULL;
 	}
-	return NULL;
-}
-
-static inline int canonical_to_local_fd(struct environment *env, int fd)
-{
-	struct descriptor_info *di;
-	di = env_get_canonical_descriptor_info(env, fd);
-	if(NULL == di) {
-		return -1;
-	}
-	return di->local_fd;
+	return &env->descriptors[fd];
 }
 
 /**

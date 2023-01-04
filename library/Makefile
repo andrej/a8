@@ -10,10 +10,11 @@ LIB_DIRS     ?= ../dependencies/libconfig-install/lib
 CC      := gcc
 CFLAGS  := -g -fpic $(INCLUDE_DIRS:%=-I%) \
            -fvisibility=hidden \
-           #-O2 -flto
+           -O2 -flto \
+	   -fno-omit-frame-pointer
 LDFLAGS := -g -shared $(LIB_DIRS:%=-L%) $(LIB_DIRS:%=-Wl,-rpath,%) \
            -fvisibility=hidden \
-           #-flto
+           -flto
 LDLIBS  := -lconfig
 
 C_SOURCES := $(shell find $(SOURCE_DIRS) -maxdepth 1 -name \*.c)

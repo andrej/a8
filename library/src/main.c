@@ -30,12 +30,12 @@ int own_id;
 struct communicator comm;
 struct environment env;
 
-/* The following two are for convenience but do not add any information beyond
-   what is in the above global vars. */
 struct variant_config *own_variant_conf;
 int is_leader;
 bool kernel_monmod_active = false;
 int log_fd = 0;
+void *libvma_start = NULL;
+size_t libvma_len = 0;
 
 int monmod_exit(int code)
 {
@@ -86,6 +86,20 @@ long monmod_syscall_handle(struct syscall_trace_func_stack *stack)
 	}
 	memcpy(canonical.args, actual.args, sizeof(actual.args));
 
+	// /* If the system call came from another trusted region, skip checking 
+	//    it.
+	//    FIXME: This is unsafe. A process could write to this trusted region
+	//    or jump into it maliciously. */
+	// if(libvma_start <= ret_addr && ret_addr < libvma_start + libvma_len) {
+	// 	return monmod_trusted_syscall(syscall_no, 
+	// 	                              actual.args[0],
+	// 	                              actual.args[1],
+	// 	                              actual.args[2],
+	// 	                              actual.args[3],
+	// 	                              actual.args[4],
+	// 	                              actual.args[5]);
+	// }
+
 	/* Phase 1: Cross-check arguments. */
 #if VERBOSITY >= 2
 	if(NULL != handler) {
@@ -116,7 +130,7 @@ long monmod_syscall_handle(struct syscall_trace_func_stack *stack)
 		s = cross_check_args(&env, &canonical);
 		if(0 == s) {
 			SAFE_LOGF(log_fd, "Divergence -- abort!%s", "\n");
-#if VERBOSITY < 3
+#if VERBOSITY > 0 && VERBOSITY < 3
 			// Print divergence information if we have not before.
 			if(NULL != handler) {
 				SAFE_LOGF(log_fd, "%s (%ld) -- enter from "
@@ -141,7 +155,7 @@ long monmod_syscall_handle(struct syscall_trace_func_stack *stack)
 	/* Phase 2: Execute system call locally if needed. */
 	if(dispatch & DISPATCH_EVERYONE || 
 	   ((dispatch & DISPATCH_LEADER) && is_leader)) {
-#if VERBOSITY >= 4
+#if VERBOSITY >= 3
 		SAFE_LOGF(log_fd, "Executing syscall no. %ld with ("
 		          "%ld, %ld, %ld, %ld, %ld, %ld)\n",
 			   actual.no, actual.args[0], actual.args[1],
@@ -165,7 +179,7 @@ long monmod_syscall_handle(struct syscall_trace_func_stack *stack)
 			                   &canonical, &handler_scratch_space);
 		}
 
-#if VERBOSITY >= 4
+#if VERBOSITY >= 3
 		SAFE_LOGF(log_fd, "Returned: %ld\n", actual.ret);
 #endif
 	}
@@ -188,7 +202,7 @@ long monmod_syscall_handle(struct syscall_trace_func_stack *stack)
 	}
 #endif
 	if(dispatch & DISPATCH_NEEDS_REPLICATION) {
-#if VERBOSITY >= 4
+#if VERBOSITY >= 3
 		SAFE_LOGF(log_fd, "Replicating results.%s", "\n");
 #endif
 		/* Replicates contents of canonical.ret and canonical.args to 
@@ -258,7 +272,7 @@ static int find_mapped_region_bounds(void * const needle,
 {
 	int ret = 0;
 	struct _find_mapped_region_bounds_data d = { needle, NULL, 0 };
-	ret = (1 == dl_iterate_phdr(_find_mapped_region_bounds_cb, &d));
+	ret = !(1 == dl_iterate_phdr(_find_mapped_region_bounds_cb, &d));
 	*start = d.start;
 	*len = d.len;
 	return ret;
@@ -282,10 +296,15 @@ void monmod_library_init()
 	/* Find the pages this module is loaded on. These pages will be 
 	   protected by the kernel to remain inaccessible for other parts of
 	   the program. */
-	find_mapped_region_bounds(&monmod_library_init, 
-	                          &monitor_start, &monitor_len);
+	NZ_TRY_EXCEPT(find_mapped_region_bounds(&monmod_library_init, 
+	                                        &monitor_start, &monitor_len),
+		      exit(1));
 	// Round up to next whole page
 	monitor_len = (monitor_len + page_size-1) & (~(page_size-1));
+
+	NZ_TRY_EXCEPT(find_mapped_region_bounds(&socket,
+	                                        &libvma_start, &libvma_len),
+		      exit(1));
 
 	NZ_TRY_EXCEPT(monmod_init(own_pid, monitor_start, monitor_len,
 	                          &monmod_syscall_trusted_addr,

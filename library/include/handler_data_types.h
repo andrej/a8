@@ -1,6 +1,13 @@
 #ifndef HANDLER_DATA_TYPES_H
 #define HANDLER_DATA_TYPES_H
 
+/**
+ * The functions in this file normalize data structures that are used by
+ * system calls and vary on different architectures to one shared canonical
+ * format. This allows replication between architectures and cross-checking
+ * without false positives.
+ */
+
 #include <sys/types.h>
 #include <sys/stat.h>
 

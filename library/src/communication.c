@@ -24,17 +24,6 @@ int sanity_checks(struct communicator *comm)
 	return 0;
 }
 
-static inline
-struct peer *get_peer(struct communicator *comm, int peer_id)
-{
-	for(size_t i = 0; i < comm->n_peers; i++) {
-		if(peer_id == comm->peers[i].id) {
-			return &comm->peers[i];
-		}
-	}
-	return NULL;
-}
-
 static int open_tcp_socket()
 {
 	int fd, ov;
@@ -142,7 +131,7 @@ static int delete_peer(struct communicator *comm, int id)
 {
 	struct peer *peer = NULL;
 	struct peer *peer_end = comm->peers + MAX_N_PEERS;
-	if(NULL == (peer = get_peer(comm, id))) {
+	if(NULL == (peer = comm_get_peer(comm, id))) {
 		return 1;
 	}
 	// Everything after the deleted peer moves up
@@ -205,7 +194,7 @@ int comm_connect(struct communicator *comm, int peer_id, struct sockaddr *sa)
 	}
 
 	// Check if we have a pending connection with the target ID.
-	if(NULL != (peer = get_peer(comm, peer_id))) {
+	if(NULL != (peer = comm_get_peer(comm, peer_id))) {
 		if(peer->status != PEER_PENDING) {
 			WARNF("Peer %d already connected.\n", peer_id);
 			return 1;
@@ -260,7 +249,7 @@ int comm_disconnect(struct communicator *comm, int peer_id)
 	if(0 >= comm->n_peers || 0 > peer_id) {
 		return 1;
 	}
-	if(NULL == (peer = get_peer(comm, peer_id))) {
+	if(NULL == (peer = comm_get_peer(comm, peer_id))) {
 		WARNF("No such peer %d.\n", peer_id);
 		return 1;
 	}
@@ -289,7 +278,7 @@ int comm_send(struct communicator *comm, int peer_id, size_t n,
 	struct message *msg = (struct message *)&msg_buf;
 
 	NZ_TRY(sanity_checks(comm));
-	Z_TRY(peer = get_peer(comm, peer_id));
+	Z_TRY(peer = comm_get_peer(comm, peer_id));
 	Z_TRY(peer->status == PEER_CONNECTED);
 	memset(msg_buf, 0, len);
 	msg->length = htonl(n);
@@ -298,9 +287,9 @@ int comm_send(struct communicator *comm, int peer_id, size_t n,
 	return 0;
 }
 
-static inline int comm_receive_header(struct communicator *comm, 
-                                      struct peer *peer,
-                                      struct message *msg)
+int comm_receive_header(struct communicator *comm, 
+                        struct peer *peer,
+                        struct message *msg)
 {
 	// Get peer info
 	Z_TRY(peer->status == PEER_CONNECTED);
@@ -312,10 +301,10 @@ static inline int comm_receive_header(struct communicator *comm,
 	return 0;
 }
 
-static inline int comm_receive_body(struct communicator *comm,
-                                    struct peer *peer,
-				    struct message *msg,
-				    size_t *n, char *buf)
+int comm_receive_body(struct communicator *comm,
+                     struct peer *peer,
+                     struct message *msg,
+                     size_t *n, char *buf)
 {
 	size_t read_n = 0;
 	const size_t msg_length = msg->length;
@@ -341,7 +330,7 @@ int comm_receive_partial(struct communicator *comm, int peer_id, size_t *n,
 
 	// Get peer info
 	NZ_TRY(sanity_checks(comm));
-	Z_TRY(peer = get_peer(comm, peer_id));
+	Z_TRY(peer = comm_get_peer(comm, peer_id));
 	Z_TRY(peer->status == PEER_CONNECTED);
 
 	// Get header
@@ -377,7 +366,7 @@ int comm_receive_dynamic(struct communicator *comm, int peer_id, size_t *n,
 
 	// Get peer info
 	NZ_TRY(sanity_checks(comm));
-	Z_TRY(peer = get_peer(comm, peer_id));
+	Z_TRY(peer = comm_get_peer(comm, peer_id));
 	Z_TRY(peer->status == PEER_CONNECTED);
 
 	comm_receive_header(comm, peer, &msg);

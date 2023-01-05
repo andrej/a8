@@ -55,9 +55,9 @@ int parse_config(const char *path, struct config *dest)
 		}
 		dest->variants[i].id = tmp_int;
 		Z_TRY(config_setting_lookup_string(variant_config, 
-		                                   "dipmon_address",
+		                                   "address",
 					    &tmp_str));
-		Z_TRY(config_setting_lookup_int(variant_config, "dipmon_port",
+		Z_TRY(config_setting_lookup_int(variant_config, "port",
 		                                &tmp_int));
 		sa = (struct sockaddr_in *)&dest->variants[i].addr;
 		sa->sin_family = AF_INET;

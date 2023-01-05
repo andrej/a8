@@ -18,6 +18,9 @@
 
 /* Helpers */
 
+char handler_scratch_buffer[HANDLER_SCRATCH_BUFFER_SZ] = {};
+void *next_preallocated = handler_scratch_buffer;
+
 #define get_di(arg_i) ({ \
 	struct descriptor_info *di = env_get_canonical_descriptor_info( \
 		env, canonical->args[arg_i]); \
@@ -32,15 +35,40 @@
 }
 
 #define alloc_scratch(sz) { \
-	*scratch = calloc(sz, 1); \
-	if(NULL == scratch) { \
-		return DISPATCH_ERROR; \
+	if(sz < handler_scratch_buffer + sizeof(handler_scratch_buffer)  \
+	            - (char *)next_preallocated) { \
+		*scratch = next_preallocated; \
+		*(size_t *)(next_preallocated + sz) = sz; \
+		next_preallocated += sz + sizeof(size_t); \
+	} else { \
+		*scratch = safe_malloc(sz + sizeof(size_t)); \
+		*(size_t *)*scratch = sz + sizeof(size_t); \
+		*scratch = (*scratch) + sizeof(size_t); \
+		if(NULL == scratch) { \
+			return DISPATCH_ERROR; \
+		} \
 	} \
 }
 
+#define prev_preallocated() ({ \
+	void *res =  handler_scratch_buffer; \
+	if(next_preallocated != handler_scratch_buffer) { \
+		size_t prev_sz = *(size_t *)(next_preallocated \
+		                             - sizeof(size_t)); \
+		res = next_preallocated - prev_sz - sizeof(size_t); \
+	} \
+	res; \
+})
+
 #define free_scratch() { \
-	if(NULL != scratch && NULL != *scratch) { \
-		free(*scratch); \
+	void *prev_pa = prev_preallocated(); \
+	if(NULL != scratch && NULL != *scratch \
+	   && prev_pa != *scratch) { \
+	   	*scratch = (*scratch) - sizeof(size_t); \
+	   	size_t sz = *(size_t *)(*scratch); \
+		safe_free(*scratch, sz); \
+	} else if(prev_pa == *scratch) { \
+		next_preallocated = prev_pa; \
 	} \
 }
 
@@ -119,7 +147,7 @@ SYSCALL_EXIT_PROT(default_creates_fd_exit)
 	if(0 > actual->ret) {
 		return;
 	}
-#if VERBOSITY > 3
+#if VERBOSITY >= 3
 	SAFE_LOGF(log_fd, "%s adding descriptor.\n", handler->name);
 #endif
 	if(dispatch & DISPATCH_EVERYONE) {
@@ -263,7 +291,7 @@ SYSCALL_EXIT_PROT(close)
 {
 	struct descriptor_info *di = (struct descriptor_info *)*scratch;
 	if(0 == *(int *)&actual->ret) {
-#if VERBOSITY > 3
+#if VERBOSITY >= 3
 		SAFE_LOGF(log_fd, "close removing descriptor.%s", "\n");
 #endif
 		env_del_descriptor(env, di);
@@ -458,9 +486,7 @@ SYSCALL_ENTER_PROT(write)
 
 SYSCALL_EXIT_PROT(write)
 {
-	if(NULL != *scratch) {
-		free(*scratch);
-	}
+	free_scratch();
 }
 
 
@@ -572,6 +598,7 @@ SYSCALL_ENTER_PROT(fstat)
 
 	char *normalized_stat = NULL;
 	if(dispatch & DISPATCH_NEEDS_REPLICATION) {
+		// fstat is reentrant, so calloc should be fine here
 		normalized_stat = calloc(1, NORMALIZED_STAT_STRUCT_SIZE);
 		if(NULL == normalized_stat) {
 			return DISPATCH_ERROR;
@@ -637,6 +664,7 @@ SYSCALL_ENTER_PROT(fstatat)
 
 	char *normalized_stat = NULL;
 	if(dispatch & DISPATCH_NEEDS_REPLICATION) {
+		// fstatat is reentrant, so calloc should be fine here
 		normalized_stat = calloc(1, NORMALIZED_STAT_STRUCT_SIZE);
 		if(NULL == normalized_stat) {
 			return DISPATCH_ERROR;
@@ -856,7 +884,7 @@ SYSCALL_EXIT_PROT(dup3)
 	if(NULL != di[1]) {
 		/* newfd will override a fd previously opened by the variant. 
 		   old local fd was closed by a successful dup2 call. */
-#if VERBOSITY > 3
+#if VERBOSITY >= 3
 		SAFE_LOGF(log_fd, "dup3 removing descriptor.%s", "\n");
 #endif
 		env_del_descriptor(env, di[1]);
@@ -866,7 +894,7 @@ SYSCALL_EXIT_PROT(dup3)
 	if(is_open_locally(env, di[0])) {
 		local_fd = actual->ret;
 	}
-#if VERBOSITY > 3
+#if VERBOSITY >= 3
 	SAFE_LOGF(log_fd, "dup3 adding descriptor.%s", "\n");
 #endif
 	Z_TRY_EXCEPT(env_add_descriptor(env, local_fd, newfd, di[0]->flags),
@@ -1016,16 +1044,13 @@ SYSCALL_ENTER_PROT(epoll_ctl)
 		struct descriptor_info *fd_di;
 		struct epoll_event custom_event;
 	};
-	alloc_scratch(sizeof(struct scratch));
+	alloc_scratch(sizeof(struct scratch) + NORMALIZED_EPOLL_EVENT_SIZE);
 	struct scratch *s = (struct scratch *)*scratch;
+	char *normalized_event = (char *)((struct scratch *)*scratch + 1);
 	int epfd = canonical->args[0];
 	int op = canonical->args[1];
 	int fd = canonical->args[2];
 	struct epoll_event *event = (struct epoll_event *)actual->args[3];
-	char *normalized_event = calloc(1, NORMALIZED_EPOLL_EVENT_SIZE);
-	if(NULL == normalized_event) {
-		return DISPATCH_ERROR;
-	}
 
 	/* Define arguement types */
 	canonical->arg_types[0] = DESCRIPTOR_TYPE();
@@ -1139,9 +1164,6 @@ SYSCALL_EXIT_PROT(epoll_ctl)
 		}
 	}
 
-	if(NULL != normalized_event) {
-		free(normalized_event);
-	}
 	free_scratch();
 }
 
@@ -1179,14 +1201,11 @@ SYSCALL_ENTER_PROT(epoll_pwait)
 	}
 
 	struct descriptor_info *di = get_di(0);
-	alloc_scratch(2 * sizeof(struct type));
+	alloc_scratch(2 * sizeof(struct type)
+	              + maxevents * NORMALIZED_EPOLL_EVENT_SIZE);
 	struct type *epoll_events_type = (struct type *)*scratch;
 	struct type *sigset_type = ((struct type *)*scratch) + 1;
-	char *normalized_events = calloc(maxevents, 
-	                                 NORMALIZED_EPOLL_EVENT_SIZE);
-	if(NULL == normalized_events) {
-		return DISPATCH_ERROR;
-	}
+	char *normalized_events = (char *)(((struct type*)*scratch) + 2);
 
 	canonical->arg_types[0] = DESCRIPTOR_TYPE();
 	remap_fd(di, 0); // only dispatched on leader, will remap there
@@ -1267,11 +1286,6 @@ SYSCALL_EXIT_PROT(epoll_pwait)
 		}
 		memcpy(&events[i].data, &own_event->data.data, 
 		       sizeof(own_event->data.data));
-	}
-
-	if(NULL != normalized_events) {
-		// Allocated by normalization routine
-		free(normalized_events);
 	}
 }
 

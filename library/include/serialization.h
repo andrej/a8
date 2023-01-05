@@ -17,21 +17,23 @@
  *  left as-is and copied into the serialized buffer
  * 
  * POINTER:
- *  buffer[0 .. 7] = zeroed-out
- *  buffer[8 ..  ] = serialized dereferenced pointer according to pointer.type
+ *  buffer[0 .. 7] = zeroed-out if pointer is null, otherwise all 1s
+ *  buffer[8 ..  ] = recursively serialized dereferenced pointer according to 
+ *                   pointer.type
  * 
  * STRING:
- *  like BUFFER but length is determined by null-terminator
+ *  like BUFFER but length is determined by null-terminator and no references
  * 
  * BUFFER:
- *  buffer[0 .. length - 1] = contents of original buffer copied 1:1, but any
- *                            references are zeroed-out
- *  buffer[length .. length+M-1] = serialized first reference contained within
- *                                 buffer, where M is the number of bytes that
- *                                 serialization requires. the value inside the
- *                                 buffer at references[i].offset will be
+ *  buffer[0 .. 7] = original buffer length
+ *  buffer[8 .. 8+length-1] = contents of original buffer copied 1:1, but any
+ *                            references contained in buffer are zeroed-out
+ *  buffer[8+length .. 8+length+M-1] = serialized first reference contained 
+ *                                 within buffer, where M is the number of bytes 
+ *                                 that serialization requires. the value inside 
+ *                                 the buffer at references[i].offset will be
  *                                 replaced with the deserialized value
- * buffer[length+M .. length+M+N-1] = ...
+ * buffer[8+length+M .. 8+length+M+N-1] = ...
  * 
  */
 
@@ -115,17 +117,19 @@ ssize_t deserialize(void *buf, const struct type *type, void *dest,
  * Deserialize buffer in place s.t. a pointer to this buffer can be
  * interpreted as a pointer to the correct data type.
  * 
- * Sets the number of bytes in buffer consumed to the integer pointed to by
- * consumed. Returns the number of bytes consumed at the top-level recursive
- * call, which is the same for all data types as consumed except for buffers.
- * For buffers, it returns the size of the main buffer, without the length of
- * any deserialized other buffers referenced from within the buffer through 
- * pointers. However, those buffers are also deserialized and pointer addresses
- * appropriately updated -- the total number of bytes consumed for this is
- * stored in consumed.
+ * Returns the number of bytes in the input buffer consumed.
  */
 ssize_t deserialize_in_place(void *buf, struct type *type);
 
+/**
+ * Deserialize the buffer `buf` to overwrite the value at `dest`. Any pointers
+ * in `dest` are left as-is and recursively followed and deserialized into.
+ * For example, if the serialized data type is a buffer, then buffer contents
+ * are copied to `dest`, except for any pointers references (according to
+ * data type) inside the buffer. The references serialized in `buf` are then
+ * deserialized to the destinations pointed to at those offsets in the `dest`
+ * buffer.
+*/
 ssize_t deserialize_overwrite(void *buf, struct type *type, void *dest);
 
 /**

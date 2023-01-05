@@ -1,5 +1,7 @@
 #include "replication.h"
 
+char replication_buffer[REPLICATION_BUFFER_SZ];
+
 int cross_check_args(struct environment *env,
                       struct syscall_info *canonical) 
 {
@@ -14,15 +16,18 @@ int cross_check_args(struct environment *env,
 #if CHECK_HASHES_ONLY
 	const unsigned long hash = sdbm_hash(serialized_args_buf_len,
 					     serialized_args_buf);
-	free_and_null(serialized_args_buf);
-	serialized_args_buf = malloc(sizeof(unsigned long));
-	memcpy(serialized_args_buf, &hash, sizeof(hash));
-	serialized_args_buf_len = sizeof(hash);
+	char * const cross_check_buf = (char * const)&hash;
+	size_t cross_check_buf_len = sizeof(hash);
+#else
+	char * const cross_check_buf = (char * const)serialized_args_buf;
+	size_t cross_check_buf_len = serialized_args_buf_len;
 #endif
 	ret = comm_all_agree(env->comm, env->leader_id,
-	                     serialized_args_buf_len,
-			     serialized_args_buf);
-	free_and_null(serialized_args_buf);
+	                     cross_check_buf_len,
+			     cross_check_buf);
+	if(replication_buffer != serialized_args_buf) {
+		safe_free(serialized_args_buf, serialized_args_buf_len);
+	}
 	if(0 > ret) {
 		return -1;
 	}
@@ -49,7 +54,10 @@ char *serialize_args(size_t *len, struct syscall_info *canonical)
 		n_args++;
 	}
 	n += sizeof(uint64_t); // For syscall no
-	out = calloc(n, 1);
+	out = replication_buffer;
+	if(n > sizeof(replication_buffer)) {
+		out = safe_malloc(n);
+	}
 	if(NULL == out) {
 		return NULL;
 	}
@@ -118,9 +126,37 @@ int replicate_results(struct environment *env,
 		                             replication_buf),
 			      goto abort1);
 	} else {
-		NZ_TRY(comm_receive_dynamic(env->comm, env->leader_id, 
-		                            &replication_buf_len, 
-		                            &replication_buf));
+		/* We cannot safely use comm_receive_dynamic here, as it calls 
+		   non-reentrant malloc(). */
+		struct peer *leader_peer = NULL;
+		Z_TRY_EXCEPT(leader_peer = 
+		                comm_get_peer(env->comm, env->leader_id),
+			goto abort0);
+		struct message msg;
+		size_t receive_buf_len = 0;
+		NZ_TRY_EXCEPT(comm_receive_header(env->comm, leader_peer,
+		                                  &msg),
+			      goto abort0);
+		if(msg.length > sizeof(replication_buffer)) {
+			receive_buf_len = msg.length;
+			Z_TRY_EXCEPT(replication_buf = 
+			                safe_malloc(receive_buf_len),
+			             goto abort0);
+		} else {
+			receive_buf_len = sizeof(replication_buffer);
+			replication_buf = replication_buffer;
+		}
+		NZ_TRY_EXCEPT(comm_receive_body(env->comm, leader_peer, &msg,
+		                                &receive_buf_len,
+						replication_buf),
+			      goto abort1);
+		if(msg.length != receive_buf_len) {
+			SAFE_LOGF(log_fd, "Advertised message length in header "
+			          "%lu did not match received length %lu.\n",
+				  msg.length, receive_buf_len);
+			goto abort1;
+		}
+		replication_buf_len = msg.length;
 		NZ_TRY_EXCEPT(write_back_replication_buffer(
 					canonical,
 					replication_buf,
@@ -128,12 +164,17 @@ int replicate_results(struct environment *env,
 			      goto abort1);
 	}
 
-	free_and_null(replication_buf);
+	if(replication_buf != replication_buffer) {
+		safe_free(replication_buf, replication_buf_len);
+	}
 
 	return 0;
 
 abort1:
-	free_and_null(replication_buf);
+	if(replication_buf != replication_buffer) {
+		safe_free(replication_buf, replication_buf_len);
+	}
+abort0:
 	return 1;
 }
 
@@ -159,7 +200,10 @@ char *get_replication_buffer(struct syscall_info *canonical,
 		return NULL;
 	}
 
-	replication_buf = malloc(n);
+	replication_buf = replication_buffer;
+	if(n > sizeof(replication_buffer)) {
+		replication_buf = safe_malloc(n);
+	}
 	if(NULL == replication_buf) {
 		return NULL;
 	}

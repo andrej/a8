@@ -66,4 +66,13 @@ static inline unsigned long sdbm_hash(size_t buf_len, unsigned char *buf) {
 	return hash;
 }
 
+/**
+ * Safe alternative to malloc() that can be called from within system call
+ * handlers. Since calloc() and malloc() are non-reentrant, we cannot safely
+ * use them inside system call handlers; instead we use this, which simply
+ * issues an anonymous mmap() call.
+ */
+void *safe_malloc(size_t size);
+void safe_free(void *ptr, size_t size);
+
 #endif

@@ -5,24 +5,48 @@
 #include "serialization.h"
 #include "environment.h"
 
-/* 1. Syscall entry
-      Callback performs: Arg serialization/normalization + argument remapping
-      Callback returns: Dispatch type, canonical syscall with arguments
-   2. Main function cross-checks canonical syscall buffer. Only dispatches if
-      all agree.
-      Dispatches local system call execution if needed.
-   3. Syscall exit
-      Callback performs: Bookkeeping for argument remapping,
-      Result propagation
-*/
-
+/**
+ * The system call cannot be dispatched because the entry handler errored. This
+ * will lead to termination of the program.
+ */
 #define DISPATCH_ERROR              0x1
+/**
+ * The system call will be executed locally on every host, with the arguments
+ * in the `actual` struct.
+ */
 #define DISPATCH_EVERYONE           0x2
+/**
+ * The system call will be executed only on the leader host. The 
+ * DISPATCH_NEEDS_REPLICATION flag nees to be ORed in if the results of the
+ * system call on the leader should also be replicated to all other nodes.
+ */
 #define DISPATCH_LEADER             0x4
+/**
+ * The system call arguments need not be cross-checked.
+ */
 #define DISPATCH_UNCHECKED          0x8
+/**
+ * Cross-check system call arguments in the `canonical` struct, and only
+ * dispatch the system call if arguments match.
+ */
 #define DISPATCH_CHECKED           0x10
+/**
+ * Currently not implemented. Future potential optimization would allow to
+ * execute a benign system call speculatively but still check its arguments
+ * later on, as soon as the first critical system call is encountered.
+ */
 #define DISPATCH_DEFERRED_CHECK    0x20
+/**
+ * Take the return value of the leader node, and replicate its results to all
+ * other nodes. Note that ARG_FLAG_REPLICATE needs to be set on the return
+ * value flags for this to take place. Any arguments with ARG_FLAG_REPLICATE
+ * will also be replicated. 
+ */
 #define DISPATCH_NEEDS_REPLICATION 0x40
+/**
+ * Do not execute this system call anywhere (not on leader or other hosts), and
+ * continue with the exit handler.
+ */
 #define DISPATCH_SKIP              0x80
 
 #define ARG_FLAG_NONE        0x0
@@ -88,6 +112,10 @@ struct syscall_handler {
 
 extern const struct syscall_handler * const syscall_handlers_arch[];
 extern const struct syscall_handler * const syscall_handlers_canonical[];
+
+/* See comment in replication.h for replication_buffer. */
+#define HANDLER_SCRATCH_BUFFER_SZ 4096
+extern char handler_scratch_buffer[HANDLER_SCRATCH_BUFFER_SZ];
 
 struct syscall_handler const *get_handler(long no);
 

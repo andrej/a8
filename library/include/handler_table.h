@@ -15,9 +15,9 @@ SYSCALL_EXIT_PROT(default_creates_fd_exit);
 #define SYSCALLS(X) \
 /* ************************************************************************* *\
  * Syscall Handler Definitions                                               *\
- *  number,        name,        enter,                                        *\
- *                              post_call,                                    *\
- *                              exit                                          *\
+ *  number,        name,        enter,                                       *\
+ *                              post_call,                                   *\
+ *                              exit                                         *\
  * ************************************************************************* */\
  X( __NR_brk,      brk,         SYSCALL_ENTER(brk), \
                                 NULL, \

@@ -27,7 +27,6 @@ struct communicator {
 	struct peer peers[MAX_N_PEERS];
 };
 
-
 struct __attribute__((packed)) message {
 	uint64_t length;
 	char data[];
@@ -39,6 +38,17 @@ struct __attribute__((packed)) message {
  */
 int comm_init(struct communicator *comm, int own_id, struct sockaddr *own_addr);
 int comm_destroy(struct communicator *comm);
+
+static inline
+struct peer *comm_get_peer(struct communicator *comm, int peer_id)
+{
+	for(size_t i = 0; i < comm->n_peers; i++) {
+		if(peer_id == comm->peers[i].id) {
+			return &comm->peers[i];
+		}
+	}
+	return NULL;
+}
 
 /**
  * comm_connect - Establish a bidirectional connection with peer with ID 
@@ -56,6 +66,15 @@ int comm_send(struct communicator *comm, int peer_id, size_t n,
               const char *buf);
 #define comm_send_p(comm, peer_id, val) comm_send(comm, peer_id, \
                                                   sizeof(val), (char *)&(val))
+
+int comm_receive_header(struct communicator *comm, 
+                        struct peer *peer,
+                        struct message *msg);
+
+int comm_receive_body(struct communicator *comm,
+                     struct peer *peer,
+                     struct message *msg,
+                     size_t *n, char *buf);
 
 /**
  * comm_receive_partial - Same as comm_receive except for differing behavior

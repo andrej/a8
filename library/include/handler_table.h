@@ -27,7 +27,10 @@ SYSCALL_EXIT_PROT(default_creates_fd_exit);
                                 NULL ) \
  X( __NR_access,   access,      SYSCALL_ENTER(access), \
                                 NULL, \
-                                SYSCALL_EXIT(access) ) \
+                                SYSCALL_EXIT(default_free_scratch) ) \
+ X( __NR_faccessat, faccessat,  SYSCALL_ENTER(faccessat), \
+                                NULL, \
+                                SYSCALL_EXIT(default_free_scratch) ) \
  X( __NR_open,     open,        SYSCALL_ENTER(open), \
                                 NULL, \
                                 SYSCALL_EXIT(default_creates_fd_exit) ) \
@@ -177,8 +180,14 @@ SYSCALL_EXIT_PROT(default_creates_fd_exit);
                                 SYSCALL_EXIT(default_free_scratch) ) \
  X( __NR_setrlimit, setrlimit,  SYSCALL_ENTER(setrlimit), \
                                 NULL, \
-                                SYSCALL_EXIT(default_free_scratch) )
-
+                                SYSCALL_EXIT(default_free_scratch) ) \
+ X( __NR_getsockname, getsockname,  SYSCALL_ENTER(getsockname), \
+                                NULL, \
+                                SYSCALL_EXIT(default_free_scratch)) \
+ X( __NR_getpeername, getpeername,  SYSCALL_ENTER(getsockname), \
+                                NULL, \
+                                SYSCALL_EXIT(default_free_scratch)) /* TODO */ \
+ 
 #include "handler_table_prototypes.h"
 
 

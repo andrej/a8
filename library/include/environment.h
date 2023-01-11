@@ -13,7 +13,8 @@
 #define DI_PRESENT           0x1
 #define DI_OPENED_LOCALLY    0x2 
 #define DI_OPENED_ON_LEADER  0x4
-#define DI_IS_SOCKET         0x8
+#define DI_UNCHECKED         0x8  /* Any operations involving this descriptor
+                                     should not be cross-checked. */
 
 struct descriptor_info {
 	int flags;

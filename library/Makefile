@@ -19,7 +19,7 @@ LDFLAGS := -g -shared $(LIB_DIRS:%=-L%) $(LIB_DIRS:%=-Wl,-rpath,%) \
 ifdef opt
 LDFLAGS += -O3 -flto
 endif
-LDLIBS  := -lconfig
+LDLIBS  := -lconfig -ldl
 
 C_SOURCES := $(shell find $(SOURCE_DIRS) -maxdepth 1 -name \*.c)
 S_SOURCES := $(shell find $(SOURCE_DIRS) -maxdepth 1 -name \*.S)

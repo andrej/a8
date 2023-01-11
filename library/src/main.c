@@ -34,8 +34,6 @@ struct variant_config *own_variant_conf;
 int is_leader;
 bool kernel_monmod_active = false;
 int log_fd = 0;
-void *libvma_start = NULL;
-size_t libvma_len = 0;
 
 int monmod_exit(int code)
 {
@@ -78,6 +76,13 @@ long monmod_syscall_handle(struct syscall_trace_func_stack *stack)
 	/* Preparation: Initialize data. */
 	actual.no = syscall_no;
 	SYSCALL_ARGS_TO_ARRAY(regs, actual.args);
+
+#if MEASURE_TRACING_OVERHEAD
+	return monmod_trusted_syscall(actual.no, actual.args[0], actual.args[1],
+		                      actual.args[2], actual.args[3], 
+				      actual.args[4], actual.args[5]);
+#endif
+
 	actual.ret = -ENOSYS;
 	if(NULL != handler) {
 		canonical.no = handler->canonical_no;
@@ -85,20 +90,6 @@ long monmod_syscall_handle(struct syscall_trace_func_stack *stack)
 		canonical.no = actual.no;
 	}
 	memcpy(canonical.args, actual.args, sizeof(actual.args));
-
-	// /* If the system call came from another trusted region, skip checking 
-	//    it.
-	//    FIXME: This is unsafe. A process could write to this trusted region
-	//    or jump into it maliciously. */
-	// if(libvma_start <= ret_addr && ret_addr < libvma_start + libvma_len) {
-	// 	return monmod_trusted_syscall(syscall_no, 
-	// 	                              actual.args[0],
-	// 	                              actual.args[1],
-	// 	                              actual.args[2],
-	// 	                              actual.args[3],
-	// 	                              actual.args[4],
-	// 	                              actual.args[5]);
-	// }
 
 	/* Phase 1: Cross-check arguments. */
 #if VERBOSITY >= 2
@@ -180,7 +171,12 @@ long monmod_syscall_handle(struct syscall_trace_func_stack *stack)
 		}
 
 #if VERBOSITY >= 3
-		SAFE_LOGF(log_fd, "Returned: %ld\n", actual.ret);
+		if(-1024 < actual.ret && actual.ret < 0) {
+			SAFE_LOGF(log_fd, "Returned: %ld (potential errno: %s)"
+			          "\n", actual.ret, strerror(-actual.ret));
+		} else {
+			SAFE_LOGF(log_fd, "Returned: %ld\n", actual.ret);
+		}
 #endif
 	}
 
@@ -302,15 +298,14 @@ void monmod_library_init()
 	// Round up to next whole page
 	monitor_len = (monitor_len + page_size-1) & (~(page_size-1));
 
-	NZ_TRY_EXCEPT(find_mapped_region_bounds(&socket,
-	                                        &libvma_start, &libvma_len),
-		      exit(1));
-
 	NZ_TRY_EXCEPT(monmod_init(own_pid, monitor_start, monitor_len,
 	                          &monmod_syscall_trusted_addr,
 				  &monmod_syscall_trace_enter),
 	              exit(1));
 
+#if MEASURE_TRACING_OVERHEAD
+	return;
+#endif
 	// Read environment variables.
 	if(NULL == (own_id_str = getenv("MONMOD_ID"))) {
 		WARN("libmonmod.so requres MONMOD_ID environment variable. \n");

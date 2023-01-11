@@ -7,6 +7,7 @@
 #include <sys/time.h>
 #include <sys/epoll.h>
 #include <sys/resource.h>
+#include <limits.h>
 
 #include "util.h"
 #include "handlers.h"
@@ -100,6 +101,37 @@ void *next_preallocated = handler_scratch_buffer;
 	return; \
 }
 
+static inline int get_dispatch_by_path(const char *path)
+{
+	// Check path
+	char pathname[PATH_MAX];
+	if(NULL == realpath(path, pathname)) {
+		return DISPATCH_EVERYONE | DISPATCH_UNCHECKED;
+	}
+	/* If realpath() errored, it is likely because the path does not
+		exist. Just dispatch it for everyone and let them handle the
+		error. */
+	const char dev_prefix[] = "/dev/";
+	const char proc_prefix[] = "/proc/";
+	const char etc_localtime[] = "/etc/localtime";
+	const char etc_group[] = "/etc/group";
+	const char zoneinfo[] = "/usr/share/zoneinfo/";
+	if(strncmp(pathname, dev_prefix, sizeof(dev_prefix)-1) == 0) {
+		return DISPATCH_LEADER | DISPATCH_CHECKED
+		| DISPATCH_NEEDS_REPLICATION;
+	} else if(strncmp(pathname, proc_prefix, sizeof(proc_prefix)-1) == 0
+	          || strncmp(pathname, etc_localtime, sizeof(etc_localtime)-1
+    		      == 0)
+		  || strncmp(pathname, etc_group, sizeof(etc_group)-1) == 0
+		  || strncmp(pathname, zoneinfo, sizeof(zoneinfo)-1) == 0
+		  || NULL != strstr(pathname, "libnss") // FIXME
+		  || NULL != strstr(pathname, "libnsl")
+		  ) {
+		return DISPATCH_EVERYONE | DISPATCH_UNCHECKED;
+	}
+	return DISPATCH_EVERYONE | DISPATCH_CHECKED;
+}
+
 struct syscall_handler const *get_handler(long no)
 {
 	const size_t n_handlers =
@@ -134,10 +166,15 @@ SYSCALL_ENTER_PROT(default_checked_arg1) {
 SYSCALL_ENTER_PROT(default_arg1_fd)
 {
 	struct descriptor_info *di = get_di(0);
+	remap_fd(di, 0);
+
 	canonical->arg_types[0] = DESCRIPTOR_TYPE();
 	canonical->ret_type = IMMEDIATE_TYPE(long);
 	canonical->ret_flags = ARG_FLAG_REPLICATE;
-	remap_fd(di, 0);
+
+	if(di->flags & DI_UNCHECKED) {
+		return dispatch_leader_if_needed(di, DISPATCH_UNCHECKED);
+	}
 	return dispatch_leader_if_needed(di, DISPATCH_CHECKED);
 }
 
@@ -150,15 +187,21 @@ SYSCALL_EXIT_PROT(default_creates_fd_exit)
 #if VERBOSITY >= 3
 	SAFE_LOGF(log_fd, "%s adding descriptor.\n", handler->name);
 #endif
+	int flags = 0;
+	int local_fd = -1;
 	if(dispatch & DISPATCH_EVERYONE) {
-		di = env_add_local_descriptor(env, actual->ret, 
-		                             DI_OPENED_LOCALLY);
+		flags |= DI_OPENED_LOCALLY;
+		local_fd = actual->ret;
 	} else if(env->is_leader) {
-		di = env_add_local_descriptor(env, actual->ret, 
-		                             DI_OPENED_ON_LEADER);
+		flags |= DI_OPENED_ON_LEADER;
+		local_fd = actual->ret;
 	} else {
-		di = env_add_local_descriptor(env, -1, DI_OPENED_ON_LEADER);
+		flags = DI_OPENED_ON_LEADER;
 	}
+	if(dispatch & DISPATCH_UNCHECKED) {
+		flags |= DI_UNCHECKED;
+	}
+	di = env_add_local_descriptor(env, local_fd, flags);
 	actual->ret = canonical_fd_for(env, di);
 	free_scratch();
 	return;
@@ -191,19 +234,36 @@ SYSCALL_ENTER_PROT(brk)
 
 SYSCALL_ENTER_PROT(access)
 {
-	// TODO check if pathname should only be access-ed on leader, like in
-	// openat handlers
-	alloc_scratch(sizeof(struct type));
-	struct type *string_type = (struct type *)*scratch;
-	canonical->arg_types[0] = POINTER_TYPE(string_type);
-	*string_type            = STRING_TYPE();
-	canonical->arg_types[1] = IMMEDIATE_TYPE(int);
-	return DISPATCH_EVERYONE | DISPATCH_CHECKED;
+	// Redirect to facessat handlers
+	canonical->args[2] = canonical->args[1];
+	canonical->args[1] = canonical->args[0];
+	canonical->args[0] = AT_FDCWD;
+	canonical->no = SYSCALL_faccessat_CANONICAL;
+	return SYSCALL_ENTER(faccessat)(env, handler, actual, canonical, 
+	                                scratch);
 }
 
-SYSCALL_EXIT_PROT(access)
+
+/* ************************************************************************** *
+ * faccessat                                                                  *
+ *                                                                            *
+ * int faccessat(int dirfd, const char *pathname, int mode);                  *
+ * ************************************************************************** */
+
+SYSCALL_ENTER_PROT(faccessat)
 {
-	free_scratch();
+	int dispatch = get_dispatch_by_path((const char *)canonical->args[1]);
+	alloc_scratch(sizeof(struct type));
+	if(AT_FDCWD != canonical->args[0]) {
+		struct descriptor_info *di = get_di(0);
+		remap_fd(di, 0);
+	}
+	struct type *string_type = (struct type *)*scratch;
+	canonical->arg_types[0] = IMMEDIATE_TYPE(int);
+	canonical->arg_types[1] = POINTER_TYPE(string_type);
+	*string_type            = STRING_TYPE();
+	canonical->arg_types[2] = IMMEDIATE_TYPE(int);
+	return dispatch;
 }
 
 
@@ -258,15 +318,8 @@ SYSCALL_ENTER_PROT(openat)
 	canonical->ret_type = IMMEDIATE_TYPE(long);
 	canonical->ret_flags = ARG_FLAG_REPLICATE;
 
-	const char *pathname = (const char *)canonical->args[1];
-	const char dev_prefix[] = "/dev/";
-	// TODO Fix this for relative paths
-	if(strncmp(pathname, dev_prefix, sizeof(dev_prefix)-1) == 0) {
-		return DISPATCH_LEADER | DISPATCH_CHECKED
-		       | DISPATCH_NEEDS_REPLICATION;
-	}
+	return get_dispatch_by_path((const char *)canonical->args[1]);
 
-	return DISPATCH_EVERYONE | DISPATCH_CHECKED;
 }
 
 
@@ -279,11 +332,14 @@ SYSCALL_ENTER_PROT(openat)
 SYSCALL_ENTER_PROT(close)
 {
 	struct descriptor_info *di = get_di(0);
+	remap_fd(di, 0);
 	*scratch = (void *)di;
 	canonical->arg_types[0] = DESCRIPTOR_TYPE();
 	canonical->ret_type = IMMEDIATE_TYPE(long);
 	canonical->ret_flags = ARG_FLAG_REPLICATE;
-	remap_fd(di, 0);
+	if(di->flags & DI_UNCHECKED) {
+		return dispatch_leader_if_needed(di, DISPATCH_UNCHECKED);
+	}
 	return dispatch_leader_if_needed(di, DISPATCH_CHECKED);
 }
 
@@ -313,10 +369,14 @@ SYSCALL_ENTER_PROT(mmap)
 
 	if(!(flags & (MAP_ANON | MAP_ANONYMOUS))) {
 		di = get_di(4);
+		remap_fd(di, 4);
 		if(di->flags & DI_OPENED_ON_LEADER) {
 			/* A memory-mapped file must be open locally; we do not 
 			   support a "remote" memory-mapped file. */
 			return DISPATCH_ERROR;
+		}
+		if(di->flags & DI_UNCHECKED) {
+			return DISPATCH_EVERYONE | DISPATCH_UNCHECKED;
 		}
 	}
 
@@ -327,9 +387,6 @@ SYSCALL_ENTER_PROT(mmap)
 	canonical->arg_types[2] = IMMEDIATE_TYPE(int);
 	canonical->arg_types[3] = IMMEDIATE_TYPE(int);
 	canonical->arg_types[4] = DESCRIPTOR_TYPE();
-	if(NULL != di) {
-		remap_fd(di, 4);
-	}
 
 	canonical->arg_types[5] = IMMEDIATE_TYPE(off_t);
 	canonical->args[5] = (canonical->args[5] == 0 ? 0 : 1);
@@ -385,6 +442,9 @@ SYSCALL_ENTER_PROT(read)
 	canonical->ret_type = IMMEDIATE_TYPE(long);
 	canonical->ret_flags = ARG_FLAG_REPLICATE;
 
+	if(di->flags & DI_UNCHECKED) {
+		return dispatch_leader_if_needed(di, DISPATCH_UNCHECKED);
+	}
 	return dispatch_leader_if_needed(di, DISPATCH_CHECKED);
 }
 
@@ -449,6 +509,9 @@ SYSCALL_ENTER_PROT(readv)
 	canonical->ret_type = IMMEDIATE_TYPE(long);
 	canonical->ret_flags = ARG_FLAG_REPLICATE;
 
+	if(di->flags & DI_UNCHECKED) {
+		return dispatch_leader_if_needed(di, DISPATCH_UNCHECKED);
+	}
 	return dispatch_leader_if_needed(di, DISPATCH_CHECKED);
 }
 
@@ -481,6 +544,9 @@ SYSCALL_ENTER_PROT(write)
 	canonical->ret_type = IMMEDIATE_TYPE(long);
 	canonical->ret_flags = ARG_FLAG_REPLICATE;
 
+	if(di->flags & DI_UNCHECKED) {
+		return dispatch_leader_if_needed(di, DISPATCH_UNCHECKED);
+	}
 	return dispatch_leader_if_needed(di, DISPATCH_CHECKED);
 }
 
@@ -538,6 +604,9 @@ SYSCALL_ENTER_PROT(writev)
 	canonical->ret_type = IMMEDIATE_TYPE(long);
 	canonical->ret_flags = ARG_FLAG_REPLICATE;
 	
+	if(di->flags & DI_UNCHECKED) {
+		return dispatch_leader_if_needed(di, DISPATCH_UNCHECKED);
+	}
 	return dispatch_leader_if_needed(di, DISPATCH_CHECKED);
 }
 
@@ -589,9 +658,18 @@ SYSCALL_EXIT_PROT(stat)
 SYSCALL_ENTER_PROT(fstat)
 {
 	struct descriptor_info *di = get_di(0);
-	int dispatch = dispatch_leader_if_needed(di, DISPATCH_CHECKED);
-	// TODO temporary fix:
-	dispatch = DISPATCH_LEADER | DISPATCH_NEEDS_REPLICATION | DISPATCH_CHECKED;
+	remap_fd(di, 0);
+
+	int dispatch = 0; 
+	if(di->flags & DI_UNCHECKED) {
+		dispatch = DISPATCH_EVERYONE | DISPATCH_UNCHECKED;
+	} else {
+		/* Metadata of files is likely to cause a false positive 
+		   divergence. For example, file time stamps are likely to be 
+		   different. Thus, we dispatch all as leader-only currently. */
+		dispatch = DISPATCH_LEADER | DISPATCH_NEEDS_REPLICATION
+		           | DISPATCH_CHECKED;
+	}
 
 	alloc_scratch(sizeof(struct type));
 	struct type *stat_buf_type = (struct type *)*scratch;
@@ -606,7 +684,6 @@ SYSCALL_ENTER_PROT(fstat)
 	}
 
 	canonical->arg_types[0] = DESCRIPTOR_TYPE();
-	remap_fd(di, 0);
 	canonical->args[1]      = (long)normalized_stat;
 	canonical->arg_types[1] = POINTER_TYPE(stat_buf_type);
 	*stat_buf_type          = BUFFER_TYPE(NORMALIZED_STAT_STRUCT_SIZE);
@@ -628,6 +705,9 @@ SYSCALL_POST_CALL_PROT(fstat)
 
 SYSCALL_EXIT_PROT(fstat)
 {
+	if(!(dispatch & DISPATCH_NEEDS_REPLICATION)) {
+		return;
+	}
 	char *normalized_stat = (char *)canonical->args[1];
 	denormalize_stat_struct_into(normalized_stat,
 	                             (struct stat *)actual->args[1]);
@@ -654,10 +734,13 @@ SYSCALL_ENTER_PROT(fstatat)
 	alloc_scratch(2 * sizeof(struct type));
 	struct type *stat_buf_type = (struct type *)*scratch;
 	struct type *str_type = ((struct type *)*scratch) + 1;
-	int dispatch = dispatch_leader_if_needed(di, DISPATCH_CHECKED);
-	// TODO check path to inform whether we should do it everywhere or
-	// leader-only
-	dispatch = DISPATCH_LEADER | DISPATCH_NEEDS_REPLICATION | DISPATCH_CHECKED;
+
+	int dispatch = get_dispatch_by_path((const char *)actual->args[1]);
+	if(!(dispatch & DISPATCH_UNCHECKED)) {
+		/* See fstat docuementation why whe dispatch on leader. */
+		dispatch = DISPATCH_LEADER | DISPATCH_NEEDS_REPLICATION
+		           | DISPATCH_CHECKED;
+	}
 	if(NULL == (char *)actual->args[2]) {
 		return DISPATCH_ERROR;
 	}
@@ -916,11 +999,15 @@ ret:
 SYSCALL_ENTER_PROT(lseek)
 {
 	struct descriptor_info *di = get_di(0);
+	remap_fd(di, 0);
 	canonical->arg_types[0] = DESCRIPTOR_TYPE();
 	canonical->arg_types[1] = IMMEDIATE_TYPE(off_t);
 	canonical->arg_types[2] = IMMEDIATE_TYPE(int);
 	canonical->ret_type = IMMEDIATE_TYPE(long);
 	canonical->ret_flags = ARG_FLAG_REPLICATE;
+	if(di->flags & DI_UNCHECKED) {
+		return dispatch_leader_if_needed(di, DISPATCH_UNCHECKED);
+	}
 	return dispatch_leader_if_needed(di, DISPATCH_CHECKED);
 }
 
@@ -933,11 +1020,17 @@ SYSCALL_ENTER_PROT(lseek)
 
 SYSCALL_ENTER_PROT(socket)
 {
+	int domain = actual->args[0];
 	canonical->arg_types[0] = IMMEDIATE_TYPE(int);
 	canonical->arg_types[1] = IMMEDIATE_TYPE(int);
 	canonical->arg_types[1] = IMMEDIATE_TYPE(int);
 	canonical->ret_type = IMMEDIATE_TYPE(long);
-	canonical->ret_flags = ARG_FLAG_REPLICATE;
+	if(domain != AF_UNIX) {
+		canonical->ret_flags = ARG_FLAG_REPLICATE;
+	}
+	if(domain == AF_UNIX) {
+		return DISPATCH_EVERYONE | DISPATCH_UNCHECKED;
+	}
 	return DISPATCH_LEADER | DISPATCH_CHECKED
 		| DISPATCH_NEEDS_REPLICATION;
 }
@@ -1508,4 +1601,38 @@ SYSCALL_ENTER_PROT(setrlimit)
 	canonical->arg_types[1] = POINTER_TYPE(rlim_type);
 	*rlim_type              = BUFFER_TYPE(sizeof(struct rlimit));
 	return DISPATCH_EVERYONE | DISPATCH_CHECKED;
+}
+
+/* ************************************************************************** *
+ * getsockname / getpeername                                                  * 
+ * int getsockname(int sockfd, struct sockaddr *restrict addr,                *
+ *                 socklen_t *restrict addrlen);                              *
+ * int getpeername(int sockfd, struct sockaddr *restrict addr,                *
+ *                 socklen_t *restrict addrlen);                              *
+ * ************************************************************************** */
+
+SYSCALL_ENTER_PROT(getsockname) 
+{
+	struct descriptor_info *di = get_di(0);
+	remap_fd(di, 0);
+	alloc_scratch(2*sizeof(struct type));
+	struct type *sockaddr_type = (struct type *)*scratch;
+	struct type *socklen_type = ((struct type *)*scratch) + 1;
+	if(NULL == (socklen_t *)actual->args[2]
+	   || *(socklen_t *)actual->args[2] != sizeof(struct sockaddr)) {
+		/* A little restrictive. Anything bigger would be fine, but
+		   unexpected and could indicate something else going wrong. */
+		return DISPATCH_ERROR;
+	}
+
+	canonical->arg_types[0] = DESCRIPTOR_TYPE();
+	canonical->arg_types[1] = POINTER_TYPE(sockaddr_type);
+	canonical->arg_flags[1] = ARG_FLAG_WRITE_ONLY | ARG_FLAG_REPLICATE;
+	*sockaddr_type = BUFFER_TYPE(sizeof(struct sockaddr));
+	canonical->arg_types[2] = POINTER_TYPE(socklen_type);
+	canonical->arg_flags[2] = ARG_FLAG_REPLICATE;
+	*socklen_type = IMMEDIATE_TYPE(socklen_t);
+	canonical->ret_type = IMMEDIATE_TYPE(int);
+	canonical->ret_flags = ARG_FLAG_REPLICATE;
+	return dispatch_leader_if_needed(di, DISPATCH_CHECKED);
 }

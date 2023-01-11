@@ -28,24 +28,27 @@ static int open_tcp_socket()
 {
 	int fd, ov;
 
-	LZ_TRY_EXCEPT(fd = socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0),
+	LZ_TRY_EXCEPT(fd = s.socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0),
 		goto abort1);
 
 	ov = 1;
-	NZ_TRY_EXCEPT(setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &ov, sizeof(ov)),
+	NZ_TRY_EXCEPT(s.setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &ov, 
+			           sizeof(ov)),
 		goto abort2);
-	NZ_TRY_EXCEPT(setsockopt(fd, SOL_SOCKET, SO_REUSEPORT, &ov, sizeof(ov)),
+	NZ_TRY_EXCEPT(s.setsockopt(fd, SOL_SOCKET, SO_REUSEPORT, &ov, 
+			           sizeof(ov)),
 		goto abort2);
 	// Minimal-latency socket: disable Nagle's algorithm
-	NZ_TRY_EXCEPT(setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &ov, sizeof(ov)),
+	NZ_TRY_EXCEPT(s.setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &ov, 
+			           sizeof(ov)),
 		goto abort2);
-	NZ_TRY_EXCEPT(setsockopt(fd, IPPROTO_TCP, TCP_QUICKACK, &ov, 
+	NZ_TRY_EXCEPT(s.setsockopt(fd, IPPROTO_TCP, TCP_QUICKACK, &ov, 
 	                         sizeof(ov)),
 		goto abort2);
 
 	return fd;
 abort2:
-	NZ_TRY_EXCEPT(close(fd), exit(1));
+	NZ_TRY_EXCEPT(s.close(fd), exit(1));
 
 abort1:
 	return -1;
@@ -61,15 +64,15 @@ static int start_server(in_port_t port)
 	addr.sin_family = AF_INET;
 	addr.sin_addr.s_addr = INADDR_ANY;
 	addr.sin_port = htons(port);
-	NZ_TRY_EXCEPT(bind(fd, (struct sockaddr *)&addr, sizeof(addr)),
+	NZ_TRY_EXCEPT(s.bind(fd, (struct sockaddr *)&addr, sizeof(addr)),
 	              goto abort);
-	NZ_TRY_EXCEPT(listen(fd, MAX_N_PEERS),
+	NZ_TRY_EXCEPT(s.listen(fd, MAX_N_PEERS),
 	              goto abort);
 
 	return fd;
 
 abort:
-	NZ_TRY_EXCEPT(close(fd), exit(1));
+	NZ_TRY_EXCEPT(s.close(fd), exit(1));
 	return -1;
 }
 
@@ -77,7 +80,7 @@ static int read_all(int fd, char *dest, size_t n)
 {
 	size_t m = 0;
 	while(n > 0) {
-		LZ_TRY(m = read(fd, dest, n));
+		LZ_TRY(m = s.read(fd, dest, n));
 		n -= m;
 		dest += m;
 	}
@@ -88,7 +91,7 @@ static int write_all(int fd, const char *src, size_t n)
 {
 	size_t m = 0;
 	while(n > 0) {
-		LZ_TRY(m = write(fd, src, n));
+		LZ_TRY(m = s.write(fd, src, n));
 		n -= m;
 		src += m;
 	}
@@ -103,7 +106,7 @@ static inline int flush_fd(int fd, size_t n)
 	size_t bytes_read = 0;
 	while(n > 0) {
 		const size_t to_read = (n > sizeof(tmp) ? sizeof(tmp) : n);
-		LZ_TRY(bytes_read = read(fd, tmp, to_read));
+		LZ_TRY(bytes_read = s.read(fd, tmp, to_read));
 		n -= bytes_read;
 	}
 	return 0;
@@ -153,6 +156,7 @@ int comm_init(struct communicator *comm, int own_id, struct sockaddr *own_addr)
 {
 	struct sockaddr_in *own_addr_in = (struct sockaddr_in *)own_addr;
 	in_port_t own_port = own_addr_in->sin_port;
+	NZ_TRY(init_vma_redirect());
 	if(0 > own_id) {
 		WARN("own_id < 0");
 		return 1;
@@ -172,7 +176,7 @@ int comm_destroy(struct communicator *comm)
 {
 	int ret = 0;
 	NZ_TRY_EXCEPT(comm_disconnect_all(comm), ret = 1);
-	NZ_TRY(close(comm->self.fd));
+	NZ_TRY(s.close(comm->self.fd));
 	comm->self.fd = -1;
 	return ret;
 }
@@ -207,7 +211,7 @@ int comm_connect(struct communicator *comm, int peer_id, struct sockaddr *sa)
 	if(peer_id > comm->self.id) {
 		do {
 			socklen_t addr_len = sizeof(peer_addr);
-			LZ_TRY(fd = accept(comm->self.fd, 
+			LZ_TRY(fd = s.accept(comm->self.fd, 
 			                   (struct sockaddr *)&peer_addr, 
 			                   &addr_len));
 			NZ_TRY(read_all(fd, (char *)&welcome_id, 
@@ -227,7 +231,7 @@ int comm_connect(struct communicator *comm, int peer_id, struct sockaddr *sa)
 		peer_addr.sin_port = 
 			htons(((struct sockaddr_in *)sa)->sin_port);
 		LZ_TRY(fd = open_tcp_socket());
-		LZ_TRY_EXCEPT(connect(fd, (struct sockaddr *)&peer_addr, 
+		LZ_TRY_EXCEPT(s.connect(fd, (struct sockaddr *)&peer_addr, 
 		              sizeof(peer_addr)), goto abort);
 		NZ_TRY_EXCEPT(write_all(fd, (char *)&welcome_id, 
 		                       sizeof(welcome_id)), goto abort);
@@ -238,7 +242,7 @@ int comm_connect(struct communicator *comm, int peer_id, struct sockaddr *sa)
 
 	return 0;
 abort:
-	NZ_TRY_EXCEPT(close(fd), exit(1));
+	NZ_TRY_EXCEPT(s.close(fd), exit(1));
 	return 1;
 }
 
@@ -253,7 +257,7 @@ int comm_disconnect(struct communicator *comm, int peer_id)
 		WARNF("No such peer %d.\n", peer_id);
 		return 1;
 	}
-	NZ_TRY(close(peer->fd));
+	NZ_TRY(s.close(peer->fd));
 	NZ_TRY(delete_peer(comm, peer_id));
 	return 0;
 }

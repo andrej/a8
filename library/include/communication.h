@@ -3,7 +3,7 @@
 
 #include <stdint.h>
 #include <sys/socket.h>
-
+#include "vma_redirect.h"
 #include "util.h"
 
 #define MAX_N_PEERS 8

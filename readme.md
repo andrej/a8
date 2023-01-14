@@ -80,6 +80,11 @@ The IDs can be arbitrarily chosen and must be unique. On each host, that host's 
    <target program>
    ```
 
-   This preloads the shared library `libmonmod.so`. If  target program uses the `time` or `gettimeofday` system calls, the `vsyscall_override.so` library is needed as well, because those system calls usually circumvent the kernel completely. Set the `MONMOD_CONFIG` environment variable to the same configuration file on each host, and `MONMOD_ID` to a unique chosen ID on each host, as in the configuration file.
+   This preloads the shared library `libmonmod.so`.  Set the `MONMOD_CONFIG` environment variable to the same configuration file on each host, and `MONMOD_ID` to a unique chosen ID on each host, as in the configuration file.
 
     
+
+### Known Issues / To-Dos
+
+ - The `sigreturn` system call cannot currently be monitored.
+ - Only one variant per physical machine can currently be monitored. Supporting multiple variants on one machine will require adjustmens to the custom system call implementation in the kernel module. (A unique link between system call enter and exit needs to be established so overlapping system calls do not mess with each other's return values through the kernel module global variables.)

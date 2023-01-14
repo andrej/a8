@@ -1,5 +1,5 @@
 #include <sys/syscall.h>
-#include "custom_syscalls.h"
+#include "custom_syscall_nrs.h"
 
 .text
 
@@ -8,7 +8,7 @@
 monmod_syscall_trace_enter:
 	/* Pass struct syscall_trace_func_stack to monmod_syscall_handle. */
 	mov x0, sp
-	bl monmod_syscall_handle
+	bl monmod_handle_syscall
 	/* Write back return value to struct syscall_trace_func_stack. */
 	str x0, [sp]
 	mov x8, __NR_monmod_reprotect

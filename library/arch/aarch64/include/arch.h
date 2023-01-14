@@ -1,7 +1,11 @@
 #ifndef ARM64_ARCH_H
 #define ARM64_ARCH_H
 
+#define _GNU_SOURCE
 #include <sys/syscall.h>
+#include <ucontext.h>
+
+#define ARCH_aarch64 1
 
 #define MIN_SYSCALL_NO __NR_io_setup
 #define MAX_SYSCALL_NO __NR_syscalls
@@ -34,5 +38,7 @@
 	args[5] = SYSCALL_ARG5_REG(regs); \
 	args[6] = SYSCALL_ARG6_REG(regs); \
 }
+
+#define UCONTEXT_PC(c) (((ucontext_t *)c)->uc_mcontext.pc)
 
 #endif

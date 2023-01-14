@@ -1,12 +1,21 @@
 #ifndef UTIL_H
 #define UTIL_H
 
+#define _GNU_SOURCE
 #include <stdio.h>
 #include <errno.h>
 #include <string.h>
 #include <sys/syscall.h>
+#include <link.h>
+#include <elf.h>
+
 #include "build_config.h"
 #include "syscall.h"
+
+
+/* ************************************************************************** *
+ * Macros                                                                     *
+ * ************************************************************************** */
 
 #define free_and_null(x) { \
 	free(x); \
@@ -41,7 +50,6 @@
 #define LZ_TRY(x) LZ_TRY_EXCEPT(x, return 1)
 #define Z_TRY(x) Z_TRY_EXCEPT(x, return 1)
 
-extern int log_fd;
 
 #define SAFE_LOGF_LEN(n, log_fd, msg, ...) { \
 	char log[n]; \
@@ -55,6 +63,19 @@ extern int log_fd;
 }
 
 #define SAFE_LOGF(log_fd, msg, ...) SAFE_LOGF_LEN(128, log_fd, msg, __VA_ARGS__)
+
+
+/* ************************************************************************** *
+ * Global variables                                                           *
+ * ************************************************************************** */
+
+extern int log_fd;  // Initialized in monmod_library_init()
+size_t page_size;
+
+
+/* ************************************************************************** *
+ * Miscellaneous functions                                                    *
+ * ************************************************************************** */
 
 static inline unsigned long sdbm_hash(size_t buf_len, unsigned char *buf) {
 	unsigned long hash = 0;
@@ -74,5 +95,8 @@ static inline unsigned long sdbm_hash(size_t buf_len, unsigned char *buf) {
  */
 void *safe_malloc(size_t size);
 void safe_free(void *ptr, size_t size);
+
+int find_mapped_region_bounds(void * const needle, 
+                              void **start, size_t *len);
 
 #endif

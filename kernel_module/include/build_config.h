@@ -14,4 +14,11 @@
  */
 #define MONMOD_LOG_INFO 1
 
+/**
+ * For benchmarking, memory protection calls for the monitor can be disabled.
+ * This makes the system insecure, since the tracee application can write to
+ * the monitor address range and hence compromise the monitor.
+ */
+#define MONMOD_SKIP_MONITOR_PROTECTION_CALLS 1
+
 #endif

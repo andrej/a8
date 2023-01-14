@@ -26,9 +26,11 @@ static int config_has_id(struct config *conf, int i, int id)
 int parse_config(const char *path, struct config *dest)
 {
 	config_t config;
-	config_setting_t *variants_config, *variant_config;
+	config_setting_t *variants_config, *variant_config, *breakpoints_config,
+	                 *breakpoint_config;
 	const char *tmp_str;
 	int tmp_int;
+	long long tmp_long;
 	struct sockaddr_in *sa;
 	int n_variants;
 
@@ -47,6 +49,8 @@ int parse_config(const char *path, struct config *dest)
 	for(int i = 0; i < n_variants; i++) {
 		Z_TRY(variant_config = config_setting_get_elem(variants_config,
 		                                               i));
+		
+		// variant ID
 		Z_TRY(config_setting_lookup_int(variant_config, "id",
 		                                 &tmp_int));
 		if(config_has_id(dest, i, tmp_int)) {
@@ -54,6 +58,8 @@ int parse_config(const char *path, struct config *dest)
 			return 1;
 		}
 		dest->variants[i].id = tmp_int;
+
+		// variant address + port
 		Z_TRY(config_setting_lookup_string(variant_config, 
 		                                   "address",
 					    &tmp_str));
@@ -63,6 +69,36 @@ int parse_config(const char *path, struct config *dest)
 		sa->sin_family = AF_INET;
 		sa->sin_addr.s_addr = inet_addr(tmp_str);
 		sa->sin_port = tmp_int;
+
+		// variant breakpoints
+		dest->variants[i].n_breakpoints = 0;
+		breakpoints_config = config_setting_lookup(variant_config, 
+		                                          "breakpoints");
+		if(NULL != breakpoints_config) {
+			dest->variants[i].n_breakpoints = 
+				config_setting_length(breakpoints_config);
+			for(int j = 0; j < dest->variants[i].n_breakpoints; j++)
+			{
+				Z_TRY(breakpoint_config = 
+				     config_setting_get_elem(breakpoints_config,
+				                             j));
+				Z_TRY(config_setting_lookup_int64(
+					breakpoint_config, "pc", &tmp_long));
+				dest->variants[i].breakpoints[j].pc = \
+					(void *)tmp_long;
+				Z_TRY(config_setting_lookup_int64(
+					breakpoint_config, "instr_len",
+					&tmp_long));
+				dest->variants[i].breakpoints[j].instr_len = \
+					(size_t)tmp_long;
+				Z_TRY(config_setting_lookup_int(
+					breakpoint_config, "interval", 
+					&tmp_int));
+				dest->variants[i].breakpoints[j].interval = 
+					tmp_int;
+			}
+		}
+
 	}
 	return 0;
 }

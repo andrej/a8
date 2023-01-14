@@ -7,8 +7,8 @@
 #include <sys/user.h>
 #include <stdio.h>
 #include <stdbool.h>
-#include <link.h>
-#include <elf.h>
+#include <signal.h>
+
 #include "arch.h"
 #include "syscall.h"
 #include "util.h"
@@ -23,37 +23,32 @@
 #include "replication.h"
 #include "custom_syscalls.h"
 #include "init.h"
+#include "unprotected.h"
+#include "checkpointing.h"
 
 
 struct config conf;
 int own_id;
 struct communicator comm;
 struct environment env;
+#if ENABLE_CHECKPOINTING
+struct checkpoint_env checkpoint_env = {};
+#endif
 
 struct variant_config *own_variant_conf;
 int is_leader;
 bool kernel_monmod_active = false;
 int log_fd = 0;
 
-int monmod_exit(int code)
-{
-	comm_destroy(&comm);
-	return monmod_trusted_syscall(__NR_exit, code, 0, 0, 0, 0, 0);
-}
+/* The following two are defined in the main.lds linker script and capture the
+   start and end address of any functions marked section("unprotected").
+   Functions in this section will remain accessible even when the rest of the
+   monitor is memory-protected. */
+void __unprotected_start();
+void __unprotected_end();
 
-int monmod_init(pid_t pid, void *monitor_start, size_t monitor_len,
-                void *trusted_syscall_addr, void *monitor_enter_addr)
-{
-	int ret = monmod_trusted_syscall(__NR_monmod_init, pid, 
-	                                 (long)monitor_start,
-	                                 monitor_len, 
-					 (long)trusted_syscall_addr,
-					 (long)monitor_enter_addr,
-					 0);
-	return ret;
-}
 
-long monmod_syscall_handle(struct syscall_trace_func_stack *stack)
+long monmod_handle_syscall(struct syscall_trace_func_stack *stack)
 {
 
 	int s = 0;
@@ -70,7 +65,9 @@ long monmod_syscall_handle(struct syscall_trace_func_stack *stack)
 	handler = get_handler(syscall_no);
 	if(NULL == handler) {
 		SAFE_LOGF(log_fd, "%ld -- no handler!\n", syscall_no);
-		//exit(1);
+#if NO_HANDLER_TERMINATES
+		exit(1);
+#endif
 	}
 
 	/* Preparation: Initialize data. */
@@ -228,51 +225,6 @@ long monmod_syscall_handle(struct syscall_trace_func_stack *stack)
 	return actual.ret;
 }
 
-struct _find_mapped_region_bounds_data {
-	void * const search_addr;
-	void *start;
-	size_t len;
-};
-
-static int _find_mapped_region_bounds_cb(struct dl_phdr_info *info, size_t size,
-                                         void *data)
-{
-	void *addr = NULL;
-	struct _find_mapped_region_bounds_data *d = 
-		(struct _find_mapped_region_bounds_data *)data;
-	for(size_t i = 0; i < info->dlpi_phnum; i++) {
-		const ElfW(Phdr) *phdr_info = &info->dlpi_phdr[i];
-		if(PT_LOAD != phdr_info->p_type) {
-			// Only consider loadable segments
-			continue;
-		}
-		// see man dl_iterate_phdr
-		addr = (void *)(info->dlpi_addr + info->dlpi_phdr[i].p_vaddr);	
-		if(addr <= d->search_addr 
-		   && d->search_addr < addr + phdr_info->p_memsz) {
-			d->start = addr;
-			d->len = (size_t)phdr_info->p_memsz;
-			return 1;
-		}
-	}
-	return 0;
-}
-
-/**
- * Puts the start and end address of the shared library that the address needle
- * is a part of in `start` and `end`. Returns 1 if this functions address is not
- * within the range of any loaded library (0 on success).
- */
-static int find_mapped_region_bounds(void * const needle, 
-                                  void **start, size_t *len)
-{
-	int ret = 0;
-	struct _find_mapped_region_bounds_data d = { needle, NULL, 0 };
-	ret = !(1 == dl_iterate_phdr(_find_mapped_region_bounds_cb, &d));
-	*start = d.start;
-	*len = d.len;
-	return ret;
-}
 
 #pragma GCC push_options // Save current options
 #pragma GCC optimize ("no-optimize-sibling-calls")
@@ -284,9 +236,9 @@ void monmod_library_init()
 	char tmp_path[128];
 	struct variant_config *own_variant_config;
 	void *monitor_start = NULL;
-	size_t monitor_len = 0;
-	const size_t page_size = sysconf(_SC_PAGE_SIZE);
+	size_t monitor_len = 0, protected_len = 0;
 
+	page_size = sysconf(_SC_PAGE_SIZE);
 	own_pid = getpid();
 	
 	/* Find the pages this module is loaded on. These pages will be 
@@ -295,12 +247,25 @@ void monmod_library_init()
 	NZ_TRY_EXCEPT(find_mapped_region_bounds(&monmod_library_init, 
 	                                        &monitor_start, &monitor_len),
 		      exit(1));
-	// Round up to next whole page
-	monitor_len = (monitor_len + page_size-1) & (~(page_size-1));
 
-	NZ_TRY_EXCEPT(monmod_init(own_pid, monitor_start, monitor_len,
+	/* Sanity check that our linker script worked and, after loading,
+	   the "unprotected" section is the very last page-aligned sub-section
+	   of the loaded executable segment. */
+	Z_TRY_EXCEPT(monitor_len == (monitor_len & ~(page_size-1))
+	             && __unprotected_end == monitor_start + monitor_len
+	             && (void *)__unprotected_start > monitor_start 
+	             && (void *)__unprotected_start < monitor_start+monitor_len,
+		     exit(1));
+	protected_len = (void *)__unprotected_start - monitor_start;
+
+	init_unprotected();
+
+	/* Issue monmod_init system call. */
+	NZ_TRY_EXCEPT(monmod_init(own_pid, 
+	                          monitor_start, 
+	                          protected_len,
 	                          &monmod_syscall_trusted_addr,
-				  &monmod_syscall_trace_enter),
+	                          &monmod_syscall_trace_enter),
 	              exit(1));
 
 #if MEASURE_TRACING_OVERHEAD
@@ -350,10 +315,20 @@ void monmod_library_init()
 		}
 		NZ_TRY_EXCEPT(comm_connect(&comm, conf.variants[i].id, 
 		                           &conf.variants[i].addr),
-			      exit(1));
+		              exit(1));
 	}
 
 	env_init(&env, &comm, &conf, own_id);
+
+#if ENABLE_CHECKPOINTING
+	NZ_TRY_EXCEPT(init_checkpoint_env(&checkpoint_env,
+	                                  own_variant_conf),
+	              exit(1));
+#endif
+	
+	/* The architecture-specific caller of this code issues a
+	   monmod_reprotect call to initialize the module and protect the
+	   module code after this and exits out of it. */
 }
 #pragma GCC pop_options
 

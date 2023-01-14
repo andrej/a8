@@ -42,6 +42,9 @@ static void set_syscall_unprotect_monitor(
 		struct pt_regs *regs)
 {
 	SYSCALL_NO_REG(regs) = __NR_mprotect;
+#if MONMOD_SKIP_MONITOR_PROTECTION_CALLS
+	SYSCALL_NO_REG(regs) = (unsigned long)-2;
+#endif
 	SYSCALL_ARG0_REG(regs) = (long)tracee_conf->monitor_start;
 	SYSCALL_ARG1_REG(regs) = (long)tracee_conf->monitor_len;
 	SYSCALL_ARG2_REG(regs) = PROT_READ | PROT_EXEC;
@@ -50,7 +53,7 @@ static void set_syscall_unprotect_monitor(
 	SYSCALL_ARG5_REG(regs) = 0;
 #if MONMOD_LOG_INFO
 	printk(KERN_INFO "monmod: <%d> Unprotecting pages with "
-	       "mprotect(%p, %lx, %x)\n", current->pid, 
+	       "mprotect(%px, %lx, %x)\n", current->pid, 
 	       tracee_conf->monitor_start,
 	       tracee_conf->monitor_len,
 	       PROT_READ | PROT_EXEC);
@@ -72,10 +75,14 @@ static inline bool syscall_breaks_protection(
 			void __user *monitor_end = monitor_start
 			                           + tracee_conf->monitor_len;
 			if(BETWEEN(addr, monitor_start, monitor_end)
-			   || BETWEEN(addr + len, monitor_start, monitor_end)) {
+			   || BETWEEN(addr + len, monitor_start, monitor_end)
+			   || (addr <= monitor_start 
+			       && addr + len >= monitor_end) ) {
 				return true;
 			}
+			break;
 		}
+		// TODO: process_vm_writev
 	}
 	return false;
 }
@@ -137,7 +144,7 @@ static void sys_enter_probe(void *__data, struct pt_regs *regs, long id)
 	if(!tracee_conf->active) {
 #if MONMOD_LOG_INFO
 		printk(KERN_INFO "monmod: <%d> Entering trusted system call "
-		       "%lu at PC %p\n", pid,
+		       "%lu at PC %px\n", pid,
 		       (unsigned long)SYSCALL_NO_REG(regs),
 		       (void *)PC_REG(regs));
 #endif
@@ -149,8 +156,8 @@ static void sys_enter_probe(void *__data, struct pt_regs *regs, long id)
 
 #if MONMOD_LOG_INFO
 	printk(KERN_INFO "monmod: <%d> Forwarding untrusted system call %lu "
-	                 "entry\n", 
-	       pid, id);
+	                 "entry from %px\n", 
+	       pid, id, (void __user *)PC_REG(regs));
 #endif
 
 	/* Set up the registers and stack so we will continue in the monitoring 
@@ -182,11 +189,13 @@ static void sys_exit_probe(void *__data, struct pt_regs *regs,
 		return;
 	}
 	if(in_unprotect_call) {
+#if !MONMOD_SKIP_MONITOR_PROTECTION_CALLS
 		if(0 != SYSCALL_RET_REG(regs)) {
 			printk(KERN_WARNING "monmod: <%d> mprotect failed with "
 			"return value %lld.\n", current->pid, 
 			(long long int)SYSCALL_RET_REG(regs));
 		}
+#endif
 		in_unprotect_call = false;
 	}
 }

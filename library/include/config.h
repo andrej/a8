@@ -4,6 +4,18 @@
 #include <sys/socket.h>
 
 #define MAX_N_VARIANTS 8
+#define MAX_N_BREAKPOINTS 4
+
+/**
+ * Variants are checkpointed each N-th time they hit breakpoints at the given
+ * PC.
+ */
+struct breakpoint_config {
+	void *pc;
+	size_t instr_len;  /* width of instruction at pc; must be given in
+	                      config until we include an instruction decoder */
+	long interval;
+};
 
 /**
  * A variant is one instance of the monitored program. Multiple variants can
@@ -13,6 +25,8 @@
 struct variant_config {
 	int id;
 	struct sockaddr addr;
+	size_t n_breakpoints;
+	struct breakpoint_config breakpoints[MAX_N_BREAKPOINTS];
 };
 
 struct config {

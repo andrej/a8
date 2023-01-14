@@ -3,6 +3,8 @@
 #include <unistd.h>
 #include <sys/syscall.h>
 
+#include "unprotected.h"
+
 /**
  * Certain system calls never enter kernel space through a mechanism called
  * "virtual system calls." Due to this, we are unable to monitor them --
@@ -24,24 +26,27 @@ __vdso_time            LINUX_2.6
 */
 
 int 
-__attribute__((visibility("default")))
+__attribute__((visibility("default"),
+               section("unprotected")))
 gettimeofday(struct timeval *restrict tv, struct timezone *restrict tz)
 {
 
-	return syscall(__NR_gettimeofday, (long)tv, (long)tz, 0, 0, 0, 0);
+	return unprotected_funcs.syscall(__NR_gettimeofday, (long)tv, (long)tz, 
+	                                 0, 0, 0, 0);
 }
 void *vdso_gettimeofday = (void *)gettimeofday;
 
 time_t 
-__attribute__((visibility("default")))
+__attribute__((visibility("default"),
+               section("unprotected")))
 time(time_t *tloc)
 {
 #ifdef __NR_time
 
-	return syscall(__NR_time, (long)tloc, 0, 0, 0, 0, 0);
+	return unprotected_funcs.syscall(__NR_time, (long)tloc, 0, 0, 0, 0, 0);
 #else
 	struct timeval tv;
-	syscall(__NR_gettimeofday, (long)&tv, 0, 0, 0, 0, 0);
+	unprotected_funcs.syscall(__NR_gettimeofday, (long)&tv, 0, 0, 0, 0, 0);
 	if(NULL != tloc) {
 		*tloc = tv.tv_sec;
 	}

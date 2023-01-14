@@ -11,7 +11,7 @@
  *    - Replication of results
  *    - Adding/removing of descriptor mappings
  */
-#define VERBOSITY 1
+#define VERBOSITY 3
 
 /**
  * CHECK_HASHES_ONLY
@@ -25,13 +25,26 @@
  * with direct-memory-access without a round-trip through the kernel on
  * enabled Mellanox devices.
  */
-#define USE_LIBVMA 1
+#define USE_LIBVMA 0
 
 /**
  * If set to true, no monitoring happens. The monitor will go ahead and execute
  * the desired system call immediately with no cross-checking or replication.
  */
-#define MEASURE_TRACING_OVERHEAD 1
+#define MEASURE_TRACING_OVERHEAD 0
+
+/**
+ * If set to true, execution of the program is terminated if a system call
+ * that we do not have a handler for is attempted to be executed.
+ */
+#define NO_HANDLER_TERMINATES 0 
+
+/**
+ * If set to false, all checkpointing code is omitted. This disables the 
+ * survivability aspect and allows benchmarking a pure MVEE implementation that
+ * terminates upon divergence.
+ */
+#define ENABLE_CHECKPOINTING 1
 
 #define MONMOD_SYSFS_PATH "/sys/kernel/monmod"
 #define MONMOD_SYSFS_UNTRACED_SYSCALLS_FILE "/untraced_syscalls"

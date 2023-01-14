@@ -1,6 +1,10 @@
+#define _GNU_SOURCE
 #include <sys/mman.h>
 #include <sys/syscall.h>
 #include <stdlib.h>
+#include <link.h>
+#include <elf.h>
+
 #include "syscall.h"
 #include "util.h"
 
@@ -24,4 +28,50 @@ void safe_free(void *ptr, size_t size)
 		          ptr, size);
 		exit(1);
 	}
+}
+
+struct _find_mapped_region_bounds_data {
+	void * const search_addr;
+	void *start;
+	size_t len;
+};
+
+static int _find_mapped_region_bounds_cb(struct dl_phdr_info *info, size_t size,
+                                         void *data)
+{
+	void *addr = NULL;
+	struct _find_mapped_region_bounds_data *d = 
+		(struct _find_mapped_region_bounds_data *)data;
+	for(size_t i = 0; i < info->dlpi_phnum; i++) {
+		const ElfW(Phdr) *phdr_info = &info->dlpi_phdr[i];
+		if(PT_LOAD != phdr_info->p_type) {
+			// Only consider loadable segments
+			continue;
+		}
+		// see man dl_iterate_phdr
+		addr = (void *)(info->dlpi_addr + info->dlpi_phdr[i].p_vaddr);	
+		if(addr <= d->search_addr 
+		   && d->search_addr < addr + phdr_info->p_memsz) {
+			d->start = addr;
+			d->len = (size_t)phdr_info->p_memsz;
+			return 1;
+		}
+	}
+	return 0;
+}
+
+/**
+ * Puts the start and end address of the shared library that the address needle
+ * is a part of in `start` and `end`. Returns 1 if this functions address is not
+ * within the range of any loaded library (0 on success).
+ */
+int find_mapped_region_bounds(void * const needle, 
+                              void **start, size_t *len)
+{
+	int ret = 0;
+	struct _find_mapped_region_bounds_data d = { needle, NULL, 0 };
+	ret = !(1 == dl_iterate_phdr(_find_mapped_region_bounds_cb, &d));
+	*start = d.start;
+	*len = d.len;
+	return ret;
 }

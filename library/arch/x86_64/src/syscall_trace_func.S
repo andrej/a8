@@ -1,4 +1,4 @@
-#include "custom_syscalls.h"
+#include "custom_syscall_nrs.h"
 
 .text
 
@@ -10,7 +10,7 @@ monmod_syscall_trace_enter:
 	   padding to previous stack pointer. */
 
 	movq %rsp, %rdi
-	callq monmod_syscall_handle
+	callq monmod_handle_syscall
 
 	/* Return to the original system call site via the reprotect system
 	   call. This system call takes the syscall_trace_func_stack pointer

@@ -23,10 +23,13 @@ int sys_monmod_init(struct pt_regs *regs)
 	const pid_t pid = (pid_t)SYSCALL_ARG0_REG(regs);
 	/* Even though currently a process can only put itself into monitored
 	   mode, we add the pid argument for possible future extensions. */
-	void __user * const monitor_start = (void *)SYSCALL_ARG1_REG(regs);
+	void __user * const monitor_start = \
+		(void __user *)SYSCALL_ARG1_REG(regs);
 	const size_t monitor_len = (size_t)SYSCALL_ARG2_REG(regs);
-	void __user * const trusted_syscall_addr = (void *)SYSCALL_ARG3_REG(regs);
-	void __user * const monitor_enter_addr = (void *)SYSCALL_ARG4_REG(regs);
+	void __user * const trusted_syscall_addr = \
+		(void __user *)SYSCALL_ARG3_REG(regs);
+	void __user * const monitor_enter_addr = \
+		(void __user *)SYSCALL_ARG4_REG(regs);
 	struct monmod_tracee_config *tracee_conf = NULL;
 	void __user * const pc = (void __user *)PC_REG(regs);
 
@@ -38,7 +41,7 @@ int sys_monmod_init(struct pt_regs *regs)
 	   || !BETWEEN(monitor_enter_addr, monitor_start, 
 	               monitor_start+monitor_len)) {
 		printk(KERN_WARNING "monmod: <%d> Sanity check failed for "
-		       "monmod_init(%d, %p, %lx, %p, %p) system call.\n",
+		       "monmod_init(%d, %px, %lx, %px, %px) system call.\n",
 		       current->pid, pid, monitor_start, monitor_len, 
 		       trusted_syscall_addr, monitor_enter_addr);
 		return -EINVAL;
@@ -70,8 +73,8 @@ int sys_monmod_init(struct pt_regs *regs)
         tracee_conf->trusted_addr = trusted_syscall_addr;
         tracee_conf->trace_func_addr = monitor_enter_addr;
 
-	printk(KERN_INFO "monmod: <%d> Added tracing. Monitor: %p - %p. "
-	       "Trusted syscall address: %p. Trace function address: %p.\n",
+	printk(KERN_INFO "monmod: <%d> Added tracing. Monitor: %px - %px. "
+	       "Trusted syscall address: %px. Trace function address: %px.\n",
 	       current->pid, tracee_conf->monitor_start,
 	       tracee_conf->monitor_start + tracee_conf->monitor_len,
 	       tracee_conf->trusted_addr, tracee_conf->trace_func_addr);
@@ -120,6 +123,9 @@ int sys_monmod_reprotect(struct pt_regs *regs)
 	}
 
 	SYSCALL_NO_REG(regs) = __NR_mprotect;
+#if MONMOD_SKIP_MONITOR_PROTECTION_CALLS
+	SYSCALL_NO_REG(regs) = (unsigned long)-2;
+#endif
 	SYSCALL_ARG0_REG(regs) = (long)tracee_conf->monitor_start;
 	SYSCALL_ARG1_REG(regs) = (long)tracee_conf->monitor_len;
 	SYSCALL_ARG2_REG(regs) = PROT_READ;
@@ -131,7 +137,7 @@ int sys_monmod_reprotect(struct pt_regs *regs)
 
 #if MONMOD_LOG_INFO
 	printk(KERN_INFO "monmod: <%d> Reprotecting monitor with "
-	       "mprotect(%p, %lx, %x).\n", current->pid,
+	       "mprotect(%px, %lx, %x).\n", current->pid,
 	       (void *)SYSCALL_ARG0_REG(regs), 
 	       (size_t)SYSCALL_ARG1_REG(regs), 
 	       (int)SYSCALL_ARG2_REG(regs));
@@ -151,11 +157,13 @@ void sys_monmod_reprotect_exit(struct pt_regs *regs)
 	}
 	is_in_reprotect_call = false;
 	mprotect_return_value = (unsigned long)SYSCALL_RET_REG(regs);
+#if !MONMOD_SKIP_MONITOR_PROTECTION_CALLS
 	if(0 != mprotect_return_value) {
 		printk(KERN_WARNING "monmod: <%d> mprotect failed with return "
 		       "value %ld.\n", current->pid, mprotect_return_value);
 		return;
 	}
+#endif
 	/* Restore the registers as given in the entry arguments. */
 	if(write_back_regs) {
 		/* The redirected program counter was already written on system 
@@ -166,7 +174,7 @@ void sys_monmod_reprotect_exit(struct pt_regs *regs)
 
 #if MONMOD_LOG_INFO
 	printk(KERN_INFO "monmod: <%d> mprotect returned with %ld, returning "
-	       "to address %p with return value %lld.\n", current->pid, 
+	       "to address %px with return value %lld.\n", current->pid, 
 	       mprotect_return_value, ret_addr, 
 	       (long long int)SYSCALL_RET_REG(regs));
 #endif

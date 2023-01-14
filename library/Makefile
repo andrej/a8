@@ -14,8 +14,8 @@ CFLAGS  := -g -fpic $(INCLUDE_DIRS:%=-I%) \
 ifdef opt
 CFLAGS  += -O3 -flto 
 endif
-LDFLAGS := -g -shared $(LIB_DIRS:%=-L%) $(LIB_DIRS:%=-Wl,-rpath,%) \
-           -fvisibility=hidden 
+LDFLAGS := -g -shared $(LIB_DIRS:%=-L%) \
+           -fvisibility=hidden -Tmain.lds 
 ifdef opt
 LDFLAGS += -O3 -flto
 endif

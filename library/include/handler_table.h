@@ -52,6 +52,9 @@ SYSCALL_EXIT_PROT(default_creates_fd_exit);
  X( __NR_getpid,   getpid,      SYSCALL_ENTER(default_checked), \
                                 NULL, \
                                 NULL  ) \
+ X( __NR_getppid,  getppid,     SYSCALL_ENTER(default_checked), \
+                                NULL, \
+                                NULL ) \
  X( __NR_read,     read,        SYSCALL_ENTER(read), \
                                 NULL, \
                                 SYSCALL_EXIT(read) ) \

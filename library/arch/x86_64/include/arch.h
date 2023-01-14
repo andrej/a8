@@ -1,7 +1,11 @@
 #ifndef X86_ARCH_H
 #define X86_ARCH_H
 
+#define _GNU_SOURCE
 #include <sys/syscall.h>
+#include <ucontext.h>
+
+#define ARCH_x86_64 1
 
 #define MIN_SYSCALL_NO __NR_read
 #define MAX_SYSCALL_NO __NR_mlock2
@@ -28,5 +32,7 @@
 	args[4] = SYSCALL_ARG4_REG(regs); \
 	args[5] = SYSCALL_ARG5_REG(regs); \
 }
+
+#define UCONTEXT_PC(c) (((ucontext_t *)c)->uc_mcontext.gregs[REG_RIP])
 
 #endif

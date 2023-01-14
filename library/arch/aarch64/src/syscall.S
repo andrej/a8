@@ -8,8 +8,7 @@
 	.type name, @function; \
 	name:
 
-	.text
-ENTRY(monmod_trusted_syscall)
+.macro syscall_prep_instrs
 	uxtw x8, w0  /* Sign-extend w0 (src) into x8 (dest) */
 	mov x0, x1   /* move x1 (src) into x0 (dest) */
 	mov x1, x2
@@ -20,6 +19,18 @@ ENTRY(monmod_trusted_syscall)
 	/* mov x6, x7 */
 	mov x6, #0  /* for now we skip argument 7 ... no one seems to use it
 	               and x86_64 only has 6 arguments */
+.endm
+
+	.text
+ENTRY(monmod_trusted_syscall)
+	syscall_prep_instrs
 	svc 0x0  /* syscall enter instruction */
 EXPORT(monmod_syscall_trusted_addr)
 	ret  /* return raw syscall return value in x0 */
+
+	.section unprotected,"ax",@progbits
+ENTRY(monmod_untrusted_syscall)
+	syscall_prep_instrs
+	svc 0x0
+	ret
+

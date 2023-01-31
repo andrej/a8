@@ -14,8 +14,11 @@ CFLAGS  := -g -fpic $(INCLUDE_DIRS:%=-I%) \
 ifdef opt
 CFLAGS  += -O3 -flto 
 endif
+# Linking with -pthread is required for the POSIX semaphores used for
+# checkpointing
 LDFLAGS := -g -shared $(LIB_DIRS:%=-L%) \
-           -fvisibility=hidden -Tmain.lds 
+           -fvisibility=hidden -Tmain.lds \
+	   -pthread 
 ifdef opt
 LDFLAGS += -O3 -flto
 endif

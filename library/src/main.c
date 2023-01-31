@@ -39,6 +39,7 @@ struct variant_config *own_variant_conf;
 int is_leader;
 bool kernel_monmod_active = false;
 int log_fd = 0;
+size_t syscall_count = 0;
 
 /* The following two are defined in the main.lds linker script and capture the
    start and end address of any functions marked section("unprotected").
@@ -61,10 +62,13 @@ long monmod_handle_syscall(struct syscall_trace_func_stack *stack)
 	void *handler_scratch_space = NULL;
 	int dispatch = 0;
 
+	syscall_count++;
+
 	/* Find syscall handlers handler. */
 	handler = get_handler(syscall_no);
 	if(NULL == handler) {
-		SAFE_LOGF(log_fd, "%ld -- no handler!\n", syscall_no);
+		SAFE_LOGF(log_fd, "%ld -- no handler (PID %d)!\n", syscall_no, 
+		          getpid());
 #if NO_HANDLER_TERMINATES
 		exit(1);
 #endif
@@ -88,11 +92,20 @@ long monmod_handle_syscall(struct syscall_trace_func_stack *stack)
 	}
 	memcpy(canonical.args, actual.args, sizeof(actual.args));
 
+	if(conf.restore_interval > 0 && checkpoint_env.last_checkpoint.valid) {
+		if(syscall_count % conf.restore_interval == 0) {
+			restore_last_checkpoint(&checkpoint_env);
+			/* Should be unreachable. */
+			Z_TRY_EXCEPT(0,
+			             exit(1));
+		}
+	}
+
 	/* Phase 1: Cross-check arguments. */
 #if VERBOSITY >= 2
 	if(NULL != handler) {
-		SAFE_LOGF(log_fd, "%s (%ld) -- enter from %p.\n",
-			  handler->name, actual.no, ret_addr);
+		SAFE_LOGF(log_fd, ">> %s (%ld) -- enter from PC %p, PID %d.\n",
+			  handler->name, actual.no, ret_addr, getpid());
 	}
 #endif
 	if(NULL != handler && NULL != handler->enter) {
@@ -216,10 +229,7 @@ long monmod_handle_syscall(struct syscall_trace_func_stack *stack)
 	}
 
 #if VERBOSITY >= 2
-	if(NULL != handler) {
-		SAFE_LOGF(log_fd, "%s (%ld) -- exit with %ld.\n\n",
-		          handler->name, actual.no, actual.ret);
-	}
+	SAFE_LOGF(log_fd, "<< Return %ld.\n\n", actual.ret);
 #endif
 
 	return actual.ret;
@@ -322,7 +332,8 @@ void monmod_library_init()
 
 #if ENABLE_CHECKPOINTING
 	NZ_TRY_EXCEPT(init_checkpoint_env(&checkpoint_env,
-	                                  own_variant_conf),
+	                                  own_variant_conf,
+					  monitor_start, protected_len),
 	              exit(1));
 #endif
 	

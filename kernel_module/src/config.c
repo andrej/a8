@@ -1,6 +1,8 @@
 #include <linux/module.h>
+#include <linux/spinlock.h>
 #include "util.h"
 #include "config.h"
+#include "tracee_info.h"
 
 
 /* ************************************************************************** *
@@ -20,6 +22,11 @@
  * ************************************************************************** */
 
 struct monmod_config monmod_global_config = {};
+
+/* The mutex is held whenever a new tracee is added or deleted.
+   RCU is used for readers that need to get the tracee config on each system 
+   call. */
+DEFINE_SPINLOCK(monmod_tracees_lock);
 
 
 /* ************************************************************************** *
@@ -93,68 +100,46 @@ int monmod_config_init()
 
 void monmod_config_free()
 {
-    int i = 0;
-    for(i = 0; i < monmod_global_config.n_tracees; i++) {
-        monmod_tracee_config_free(i);
-    }
     monmod_global_config.n_tracees = 0;
     kobject_put(&monmod_global_config.kobj);
     memset(&monmod_global_config, 0, sizeof(monmod_global_config));
 }
 
-int monmod_add_tracee_config(pid_t pid)
+int monmod_tracee_config_init(pid_t pid, struct monmod_tracee_config *conf)
 {
-    size_t idx = 0;
+    struct kobject *config_kobject = NULL;
+    struct kobject *root_kobject = NULL;
+    char name[16];
+    int s = 0;
 
-    if(monmod_global_config.n_tracees >= MONMOD_MAX_N_TRACEES) {
-        MONMOD_WARN("Adding tracee config, exhausted capacity.\n");
+    // Sanity checks 
+    root_kobject = &monmod_global_config.kobj;
+    config_kobject = &conf->kobj;
+
+    s = snprintf(name, sizeof(name), "%d", pid);
+    if(0 > s || s >= sizeof(name)) {
         return 1;
     }
-    idx = 0;
-    // Find free slot to put this tracee config
-    for(; idx < MONMOD_MAX_N_TRACEES; idx++) {
-        if(0 == monmod_global_config.tracee_pids[idx]) {
-            break;
-        }
-    }
-    if(idx > MONMOD_MAX_N_TRACEES) {
-        MONMOD_WARN("Adding tracee config, sanity check failed!\n");
+    s = kobject_init_and_add(config_kobject, 
+                             &static_kobj_ktype,
+                             root_kobject,
+                             name);
+    if(0 != s) {
         return 1;
     }
-    // Reset tracee configuration, make sure we start from a clean slate
-    memset(&monmod_global_config.tracees[idx], 0, 
-           sizeof(monmod_global_config.tracees[0]));
-    monmod_global_config.tracee_pids[idx] = pid;
-    monmod_tracee_config_init(idx);
-    monmod_global_config.n_tracees++;
+    if(0 != sysfs_create_group(config_kobject, &tracee_attr_group)) {
+        kobject_put(config_kobject);
+        return 1;
+    }
     return 0;
 }
 
-int monmod_del_tracee_config(size_t idx)
+void monmod_tracee_config_free(struct monmod_tracee_config *conf)
 {
-    // Sanity checks
-    if(0 >= monmod_global_config.n_tracees
-       || monmod_global_config.n_tracees > MONMOD_MAX_N_TRACEES) {
-        return 1;
+    if(NULL == conf) {
+        return;
     }
-    monmod_tracee_config_free(idx);
-    monmod_global_config.tracee_pids[idx] = 0;
-    monmod_global_config.n_tracees--;
-    return 0;
-}
-
-struct monmod_tracee_config *monmod_get_tracee_config(pid_t pid)
-{
-    int i = 0;
-    for(; i < MONMOD_MAX_N_TRACEES; i++) {
-        if(0 == monmod_global_config.tracee_pids[i]) {
-            continue;
-        }
-        if(monmod_global_config.tracee_pids[i] == pid) {
-            return &monmod_global_config.tracees[i];
-        }
-    }
-    return NULL;
+    kobject_put(&conf->kobj);
 }
 
 int monmod_syscall_is_active(u64 syscall_no)
@@ -206,50 +191,6 @@ int monmod_syscall_deactivate(u64 syscall_no)
  * Internal Functions                                                         *
  * ************************************************************************** */
 
-
-int monmod_tracee_config_init(size_t idx)
-{
-    struct kobject *config_kobject = NULL;
-    struct kobject *root_kobject = NULL;
-    char name[16];
-    int s = 0;
-    pid_t pid = 0;
-
-    // Sanity checks 
-    if(0 > idx || idx >= MONMOD_MAX_N_TRACEES) {
-        return 1;
-    }
-    root_kobject = &monmod_global_config.kobj;
-    config_kobject = &monmod_global_config.tracees[idx].kobj;
-    pid = monmod_global_config.tracee_pids[idx];
-
-    s = snprintf(name, sizeof(name), "%d", pid);
-    if(0 > s || s >= sizeof(name)) {
-        return 1;
-    }
-    s = kobject_init_and_add(config_kobject, 
-                             &static_kobj_ktype,
-                             root_kobject,
-                             name);
-    if(0 != s) {
-        return 1;
-    }
-    if(0 != sysfs_create_group(config_kobject, &tracee_attr_group)) {
-        kobject_put(config_kobject);
-        return 1;
-    }
-    return 0;
-}
-
-void monmod_tracee_config_free(size_t idx)
-{
-    // Sanity checks
-    if(0 > idx || idx >= MONMOD_MAX_N_TRACEES) {
-        return;
-    }
-    kobject_put(&monmod_global_config.tracees[idx].kobj);
-}
-
 inline int _monmod_syscall_mask_index(u64 no)
 {
     int res;
@@ -288,7 +229,9 @@ static inline int _config_callback_sanity_checks(const struct kobject *kobj,
 }
 
 
-// Generic callbacks
+/* ************************************************************************** *
+ * Generic Setting Store / Show Callbacks                                     *
+ * ************************************************************************** */
 
 ssize_t _monmod_config_long_show(struct kobject *kobj, 
                                  struct kobj_attribute *attr, 
@@ -354,7 +297,10 @@ ssize_t _monmod_config_int_or_long_store(struct kobject *kobj,
         return ret; \
     }
 
-// Specific setting callbacks
+
+/* ************************************************************************** *
+ * Config Setting Store / Show Callbacks                                      *
+ * ************************************************************************** */
 
 CONFIG_LONG_SHOW_FUN(trusted_addr, struct monmod_tracee_config, trusted_addr)
 CONFIG_LONG_STORE_FUN(trusted_addr, struct monmod_tracee_config, trusted_addr, 
@@ -376,11 +322,6 @@ CONFIG_LONG_STORE_FUN(trace_func_addr, struct monmod_tracee_config,
 CONFIG_LONG_SHOW_FUN(active, struct monmod_config, active)
 CONFIG_LONG_STORE_FUN(active, struct monmod_config, active, false)
 
-/*
-
-struct monmod_config *dst = container_of(kobject, struct monmod_config, kobj); 
-const struct kobject * *__mptr = (ptr);	
-*/
 
 ssize_t _monmod_config_tracee_pids_show(struct kobject *kobject, 
                                         struct kobj_attribute *attr,
@@ -391,13 +332,15 @@ ssize_t _monmod_config_tracee_pids_show(struct kobject *kobject,
     if(0 != _config_callback_sanity_checks(kobject, attr, buf)) {
         return -1;
     }
-    for(i = 0; i < MONMOD_MAX_N_TRACEES; i++) {
-        if(0 == monmod_global_config.tracee_pids[i]) {
+    rcu_read_lock();
+    for(i = 0; i < MAX_N_TRACEES; i++) {
+        if(TRACEE_INFO_VALID != tracees[i].state) {
             continue;
         }
         n_written += snprintf(buf + n_written, PAGE_SIZE - n_written,
-                              "%d\n", monmod_global_config.tracee_pids[i]);
+                              "%d\n", tracees[i].pid);
     }
+    rcu_read_unlock();
     if(n_written > 0 && n_written < PAGE_SIZE) {
         // Include terminating NULL in n_written count
         n_written += 1;
@@ -410,85 +353,9 @@ ssize_t _monmod_config_tracee_pids_store(struct kobject *kobj,
                                          const char *buf,
                                          size_t count)
 {
-#define array_contains(haystack, max_len, needle) ({\
-    int i = 0; \
-    bool result = false; \
-    for(; i < max_len && 0 != haystack[i]; i++) { \
-        if(haystack[i] == needle) { \
-            result = true; \
-            break; \
-        } \
-    } \
-    result; \
-})
-
-    size_t consumed = 0;
-    size_t n_old_pids = 0;
-    size_t n_new_pids = 0;
-    pid_t old_pids[MONMOD_MAX_N_TRACEES];
-    pid_t new_pids[MONMOD_MAX_N_TRACEES];
-    int i = 0;
-    if(0 != _config_callback_sanity_checks(kobj, attr, buf)) {
-        return -1;
-    }
-
-    // Save old pids
-    memcpy(old_pids, monmod_global_config.tracee_pids, sizeof(old_pids));
-    n_old_pids = monmod_global_config.n_tracees;
-
-    // Scan input
-    while(consumed < count) {
-        pid_t pid = 0;
-        ssize_t line_len = next_int_line(buf + consumed, count - consumed, 
-                                         &pid);
-        if(line_len < 0) { // Invalid input encountered.
-            MONMOD_WARNF("Parsing configuration: Invalid input at offset %lu", 
-                         consumed);
-            return -1;
-        }
-        if(line_len == 0) { // No input numbers remaining; everything was valid.
-            consumed = count;
-            break;
-        }
-        if(n_new_pids >= MONMOD_MAX_N_TRACEES) {
-            MONMOD_WARNF("Parsing configuration: More than %d tracees are not "
-                         "supported.\n", MONMOD_MAX_N_TRACEES);
-            return -1;
-        }
-        new_pids[n_new_pids] = pid;
-        n_new_pids += 1;
-        consumed += line_len;
-    }
-
-    // See what has changed
-    for(i = 0; i < n_old_pids; i++) {
-        pid_t pid = old_pids[i];
-        if(!array_contains(new_pids, n_new_pids, pid)) {
-            if(0 == monmod_del_tracee_config(i)) {
-                printk(KERN_INFO "monmod: Removed tracing for PID %d.\n", pid);
-            } else {
-                printk(KERN_INFO "monmod: Failed to remove tracing for PID "
-                       "%d.\n", pid);
-                return -1;
-            }
-        }
-    }
-    for(i = 0; i < n_new_pids; i++) {
-        pid_t pid = new_pids[i];
-        if(!array_contains(old_pids, n_old_pids, pid)) {
-            if(0 == monmod_add_tracee_config(pid)) {
-                printk(KERN_INFO "monmod: Added tracing for PID %d.\n", pid);
-            } else {
-                printk(KERN_INFO "monmod: Failed to add tracing for PID %d.\n",
-                       pid);
-                return -1;
-            }
-        }
-    }
-
-    return consumed;
-
-#undef array_contains
+    /* Adding new tracees through sysfs is no longer supported. Use the
+       __NR_monmod_init system call instead. */
+    return -1;
 }
 
 ssize_t _monmod_config_untraced_syscalls_show(struct kobject *kobj, 

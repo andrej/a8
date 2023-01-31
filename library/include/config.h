@@ -41,6 +41,13 @@ struct config {
 	int leader_id;
 	size_t n_variants;
 	struct variant_config variants[MAX_N_VARIANTS];
+	/**
+	 * If set to a positive value, this will reset the variant to the last
+	 * checkpoint after every # restore_interval system calls. Set too low,
+	 * this will lead to an infinite loop. For server-type applications,
+	 * this could potentially be useful as a moving target defense.
+	 */
+	int restore_interval;
 };
 
 /**

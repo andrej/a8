@@ -7,18 +7,23 @@
 #include <linux/mman.h>
 #include <linux/errno.h>
 #include <linux/uaccess.h>
+#include <linux/slab.h>
+#include <linux/rcupdate.h>
 #include "custom_syscalls.h"
 #include "config.h"
 #include "util.h"
+#include "tracee_info.h"
 #include "syscall_trace_func.h"
 
-struct intercepted_syscalls_map intercepts = {};
-bool have_intercept = false;
+
+/* ************************************************************************** *
+ * Custom System Calls                                                        *
+ * ************************************************************************** */
 
 /* Exposed to user space:
    int monmod_init(pid_t pid, void *monitor_start, size_t monitor_len,
                 void *trusted_syscall_addr, void *monitor_enter_addr) */
-int sys_monmod_init(struct pt_regs *regs)
+int sys_monmod_init(struct pt_regs *regs, struct tracee *tracee)
 {
 	const pid_t pid = (pid_t)SYSCALL_ARG0_REG(regs);
 	/* Even though currently a process can only put itself into monitored
@@ -30,12 +35,9 @@ int sys_monmod_init(struct pt_regs *regs)
 		(void __user *)SYSCALL_ARG3_REG(regs);
 	void __user * const monitor_enter_addr = \
 		(void __user *)SYSCALL_ARG4_REG(regs);
-	struct monmod_tracee_config *tracee_conf = NULL;
-	void __user * const pc = (void __user *)PC_REG(regs);
 
 	// Sanity checks first
 	if(pid != current->pid || NULL == monitor_start
-	   || !BETWEEN(pc, monitor_start, monitor_start+monitor_len)
 	   || !BETWEEN(trusted_syscall_addr, monitor_start, 
 	               monitor_start+monitor_len)
 	   || !BETWEEN(monitor_enter_addr, monitor_start, 
@@ -44,98 +46,111 @@ int sys_monmod_init(struct pt_regs *regs)
 		       "monmod_init(%d, %px, %lx, %px, %px) system call.\n",
 		       current->pid, pid, monitor_start, monitor_len, 
 		       trusted_syscall_addr, monitor_enter_addr);
-		return -EINVAL;
-	}
-	tracee_conf = monmod_get_tracee_config(current->pid);
-	if(NULL != tracee_conf) {
-		/* There may be at most one initialize call per PID. A second
-		   init call could be a malicious attempt to move the protected
-		   monitor memory region addresses. */
-		printk(KERN_WARNING "monmod: <%d> Attempt to reinitialize "
-		       "already initialized monitor.\n", current->pid);
+		/* We do not check for a PC between the monitor_start and 
+		   monitor end addresses; our checkpointing code initializes
+		   monmod from outside of this range ("unprotected" section). */
 		return -EINVAL;
 	}
 
-	if(0 != monmod_add_tracee_config(pid)) {
-		printk(KERN_WARNING "monmod: <%d> Unable to add "
-		       "tracee config.\n", pid);
-		return -ENOMEM;
-	}
-	tracee_conf = monmod_get_tracee_config(current->pid);
-	if(NULL == tracee_conf) {
-		printk(KERN_WARNING "monmod: <%d> Confused -- just added "
-		       "tracee config, but cannot find it.\n", current->pid);
-		return -EBADE;
-	}
-	tracee_conf->active = false; /* until first reprotect call */
-	tracee_conf->monitor_start = monitor_start;
-        tracee_conf->monitor_len = monitor_len;
-        tracee_conf->trusted_addr = trusted_syscall_addr;
-        tracee_conf->trace_func_addr = monitor_enter_addr;
+	tracee->config.active = false; /* until first reprotect call */
+	tracee->config.monitor_start = monitor_start;
+	tracee->config.monitor_len = monitor_len;
+	tracee->config.trusted_addr = trusted_syscall_addr;
+	tracee->config.trace_func_addr = monitor_enter_addr;
 
 	printk(KERN_INFO "monmod: <%d> Added tracing. Monitor: %px - %px. "
 	       "Trusted syscall address: %px. Trace function address: %px.\n",
-	       current->pid, tracee_conf->monitor_start,
-	       tracee_conf->monitor_start + tracee_conf->monitor_len,
-	       tracee_conf->trusted_addr, tracee_conf->trace_func_addr);
+	       current->pid, tracee->config.monitor_start,
+	       tracee->config.monitor_start + tracee->config.monitor_len,
+	       tracee->config.trusted_addr, tracee->config.trace_func_addr);
 
 	return 0;
+}
+
+struct tracee *sys_monmod_init_special_entry(struct tracee *tracee)
+{
+	const pid_t pid = current->pid;
+	BUG_ON(!rcu_read_lock_held());
+	if(NULL != tracee) {
+		/* There may be at most one initialize call per PID. A second
+		init call could be a malicious attempt to move the protected
+		monitor memory region addresses. */
+		printk(KERN_WARNING "monmod: <%d> Attempt to reinitialize "
+		"already initialized monitor.\n", pid);
+		return NULL;
+	}
+	tracee = add_tracee_info(pid);
+	if(NULL == tracee) {
+		printk(KERN_WARNING "monmod: <%d> Unable to add tracee "
+			"info upon initialization.\n", pid);
+		return NULL;
+	}
+	return tracee;
 }
 
 /* Exposed to user space:
    int monmod_reprotect(bool write_back_regs, 
                         struct syscall_trace_func_stack *stack);
    */
-static bool is_in_reprotect_call = false;
-static bool write_back_regs = false;
-static void __user *ret_addr = NULL;
-static struct syscall_trace_func_stack reprotect_stack = {};
+struct reprotect_info {
+	bool write_back_regs;
+	void __user *ret_addr;
+	struct syscall_trace_func_stack reprotect_stack;
+};
 
-int sys_monmod_reprotect(struct pt_regs *regs)
+int sys_monmod_reprotect(struct pt_regs *regs, struct tracee *tracee)
 {
-	struct monmod_tracee_config *tracee_conf;
-	bool _write_back_regs = (bool)SYSCALL_ARG0_REG(regs);
+	struct reprotect_info *info = NULL;
+	bool write_back_regs = (bool)SYSCALL_ARG0_REG(regs);
 	void __user *reprotect_stack_addr = (void __user *)
 	                                    SYSCALL_ARG1_REG(regs);
-	if(NULL == (tracee_conf = monmod_get_tracee_config(current->pid))) {
-		printk(KERN_WARNING "monmod: <%d> cannot get config for "
-		       "tracee during reprotect system call.\n", current->pid);
+	
+	/* Set up data structure for information to pass to exit handler. */
+	tracee->entry_info.custom_data = NULL;
+	info = kmalloc(sizeof(struct reprotect_info), GFP_KERNEL);
+	if(NULL == info) {
+		printk(KERN_WARNING "monmod: <%d> Unable to allocate memory "
+		       "internal handling of monmod_reprotect call.\n",
+		       current->pid);
 		return -EBADE;
 	}
+	tracee->entry_info.custom_data = info;
 
-	write_back_regs = _write_back_regs;
-	if(write_back_regs) {
-		TRY(copy_from_user(&reprotect_stack, reprotect_stack_addr,
-				sizeof(reprotect_stack)),
-		return 1);
-		ret_addr = (void __user *)PC_REG(&reprotect_stack.regs);
+	info->write_back_regs = write_back_regs;
+	if(info->write_back_regs) {
+		info->reprotect_stack = (struct syscall_trace_func_stack){};
+		TRY(copy_from_user(&info->reprotect_stack, 
+		                   reprotect_stack_addr,
+				   sizeof(info->reprotect_stack)),
+		     goto abort1);
+		info->ret_addr = (void __user *)
+		                 PC_REG(&info->reprotect_stack.regs);
 	} else {
-		ret_addr = reprotect_stack_addr;
+		info->ret_addr = reprotect_stack_addr;
 	}
-	is_in_reprotect_call = true;
 
-	if(BETWEEN(ret_addr, tracee_conf->monitor_start,
-	           tracee_conf->monitor_start + tracee_conf->monitor_len)) {
+	if(BETWEEN(info->ret_addr, tracee->config.monitor_start,
+	           tracee->config.monitor_start + tracee->config.monitor_len)) {
 		printk(KERN_WARNING "monmod: <%d> cannot return into monitor "
 		       "after reprotect call -- that memory is going to be "
 		       "inaccessible.\n", current->pid);
-		return -EINVAL;
+		goto abort1;
 	}
 
 	SYSCALL_NO_REG(regs) = __NR_mprotect;
 #if MONMOD_SKIP_MONITOR_PROTECTION_CALLS
 	SYSCALL_NO_REG(regs) = (unsigned long)-2;
 #endif
-	SYSCALL_ARG0_REG(regs) = (long)tracee_conf->monitor_start;
-	SYSCALL_ARG1_REG(regs) = (long)tracee_conf->monitor_len;
+	SYSCALL_ARG0_REG(regs) = (long)tracee->config.monitor_start;
+	SYSCALL_ARG1_REG(regs) = (long)tracee->config.monitor_len;
 	SYSCALL_ARG2_REG(regs) = PROT_READ;
 	SYSCALL_ARG3_REG(regs) = 0;
 	SYSCALL_ARG4_REG(regs) = 0;
 	SYSCALL_ARG5_REG(regs) = 0;
-	PC_REG(regs) = (long)ret_addr;
-	tracee_conf->active = true;
+	PC_REG(regs) = (long)info->ret_addr;
+	tracee->config.active = true;
 
-#if MONMOD_LOG_INFO
+#if MONMOD_LOG_VERBOSITY >= 1
 	printk(KERN_INFO "monmod: <%d> Reprotecting monitor with "
 	       "mprotect(%px, %lx, %x).\n", current->pid,
 	       (void *)SYSCALL_ARG0_REG(regs), 
@@ -144,18 +159,28 @@ int sys_monmod_reprotect(struct pt_regs *regs)
 #endif
 
 	return 0;
+
+abort1:
+	return -EINVAL;
 }
 
-void sys_monmod_reprotect_exit(struct pt_regs *regs)
+void sys_monmod_reprotect_exit(struct pt_regs *regs, struct tracee *tracee)
 {
+	struct reprotect_info info = {};
 	unsigned long mprotect_return_value = 0;
-	if(!is_in_reprotect_call) {
+
+	if(NULL == tracee->entry_info.custom_data) {
 		printk(KERN_WARNING "monmod: <%d> reprotect_exit called even "
 		       "though system call enter was never observed.\n", 
 		       current->pid);
 		return;
+	} else {
+		// Copy onto the stack and free before we forget.
+		info = *(struct reprotect_info *)tracee->entry_info.custom_data;
+		kfree(tracee->entry_info.custom_data);
+		tracee->entry_info.custom_data = NULL;
 	}
-	is_in_reprotect_call = false;
+
 	mprotect_return_value = (unsigned long)SYSCALL_RET_REG(regs);
 #if !MONMOD_SKIP_MONITOR_PROTECTION_CALLS
 	if(0 != mprotect_return_value) {
@@ -165,36 +190,65 @@ void sys_monmod_reprotect_exit(struct pt_regs *regs)
 	}
 #endif
 	/* Restore the registers as given in the entry arguments. */
-	if(write_back_regs) {
+	if(info.write_back_regs) {
 		/* The redirected program counter was already written on system 
 		   call entry.
 		   This also overwrites the system call return register. */
-		memcpy(regs, &reprotect_stack.regs, sizeof(*regs));
+		memcpy(regs, &info.reprotect_stack.regs, sizeof(*regs));
 	}
 
-#if MONMOD_LOG_INFO
+#if MONMOD_LOG_VERBOSITY >= 1
 	printk(KERN_INFO "monmod: <%d> mprotect returned with %ld, returning "
 	       "to address %px with return value %lld.\n", current->pid, 
-	       mprotect_return_value, ret_addr, 
+	       mprotect_return_value, info.ret_addr, 
 	       (long long int)SYSCALL_RET_REG(regs));
 #endif
+
 }
 
-void custom_syscall_enter(void *__data, struct pt_regs *regs, long id)
+/* Exposed to user space:
+      monmod_destroy(int pid)
+   */
+int sys_monmod_destroy(struct pt_regs *regs, struct tracee *tracee)
 {
-	const pid_t pid = current->pid;
-	long ret = -ENOSYS;
-	if(intercepts.size >= MAX_N_INTERCEPTS) {
-		/* This will result in an -ENOSYS return. */
-		return;
+	const pid_t pid = (pid_t)SYSCALL_ARG0_REG(regs);
+	if(pid != current->pid) {
+		printk(KERN_WARNING "monmod: <%d> Sanity check for "
+		       "sys_monmod_destroy failed (pid %d != current %d).",
+		       current->pid, pid, current->pid);
+		return -EINVAL;
 	}
+#if MONMOD_LOG_VERBOSITY >= 1
+	printk(KERN_INFO "monmod: <%d> Unregistering.\n", pid);
+#endif
+	/* After unregistering, we have to kill the process; otherwise it could
+	   execute unsupervised system calls. 
+	   Issuing an exit_group call should kill the tracee and invoke the
+	   sched_exit probe (in main.c) that does tracee cleanup. */
+	SYSCALL_NO_REG(regs) = __NR_exit_group;
+	SYSCALL_ARG0_REG(regs) = 0;
+	return 0;
+}
+
+
+/* ************************************************************************** *
+ * Custom System Call Interception                                            *
+ * ************************************************************************** */
+
+void custom_syscall_enter(struct pt_regs *regs, long id, struct tracee *tracee)
+{
+	long ret = -ENOSYS;
 	switch(id) {
 		case __NR_monmod_init: {
-			ret = sys_monmod_init(regs);
+			ret = sys_monmod_init(regs, tracee);
 			break;
 		}
 		case __NR_monmod_reprotect: {
-			ret = sys_monmod_reprotect(regs);
+			ret = sys_monmod_reprotect(regs, tracee);
+			break;
+		}
+		case __NR_monmod_destroy: {
+			ret = sys_monmod_destroy(regs, tracee);
 			break;
 		}
 		default: {
@@ -204,36 +258,20 @@ void custom_syscall_enter(void *__data, struct pt_regs *regs, long id)
 			return;
 		}
 	}
-	if(-1 == put_intercepted_syscall((struct intercepted_syscall)
-	                                 {pid, id, ret})) {
-		printk(KERN_WARNING "monmod <%d>: Unable to store intercepted "
-		       "syscall return.\n", pid);
-	}
-	have_intercept = true;
+	tracee->entry_info.do_inject_return = true;
+	tracee->entry_info.inject_return = ret;
 }
 
-int custom_syscall_exit(void *__data, struct pt_regs *regs,
-                                long return_value)
+void custom_syscall_exit(struct pt_regs *regs, long return_value,
+                         struct tracee *tracee)
 {
-	const pid_t pid = current->pid;
-	struct intercepted_syscall *intercept = NULL;
-	if(!have_intercept) {
-		return 0;
+	if(tracee->entry_info.do_inject_return) {
+		SYSCALL_RET_REG(regs) = tracee->entry_info.inject_return;
 	}
-	intercept = get_intercepted_syscall(pid);
-	if(NULL == intercept) {
-		return 1;
-	}
-	SYSCALL_RET_REG(regs) = intercept->inject_return;
-	switch(intercept->syscall_no) {
+	switch(tracee->entry_info.syscall_no) {
 		case __NR_monmod_reprotect: {
-			sys_monmod_reprotect_exit(regs);
+			sys_monmod_reprotect_exit(regs, tracee);
 			break;
 		}
 	}
-	pop_intercepted_syscall(intercept);
-	if(intercepts.size == 0) {
-		have_intercept = false;
-	}
-	return 1;
 }

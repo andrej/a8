@@ -46,6 +46,13 @@ int parse_config(const char *path, struct config *dest)
 		return 2;
 	}
 	dest->n_variants = n_variants;
+
+	if(config_lookup_int(&config, "restore_interval", 
+	                     &tmp_int)) {
+		Z_TRY(tmp_int >= 0);
+		dest->restore_interval = tmp_int;
+	}
+
 	for(int i = 0; i < n_variants; i++) {
 		Z_TRY(variant_config = config_setting_get_elem(variants_config,
 		                                               i));

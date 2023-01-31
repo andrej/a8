@@ -87,4 +87,3 @@ The IDs can be arbitrarily chosen and must be unique. On each host, that host's 
 ### Known Issues / To-Dos
 
  - The `sigreturn` system call cannot currently be monitored.
- - Only one variant per physical machine can currently be monitored. Supporting multiple variants on one machine will require adjustmens to the custom system call implementation in the kernel module. (A unique link between system call enter and exit needs to be established so overlapping system calls do not mess with each other's return values through the kernel module global variables.)

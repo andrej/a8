@@ -9,16 +9,22 @@
 #define MONMOD_SKIP_SANITY_CHECKS 0
 
 /**
- * If defined, will print info/debug messages to kernel logs. Otherwise, only
- * errors are printed.
+ * Log verbosity. Choose 0 for performance.
+ * 
+ * 0: Nothing but errors are logged.
+ * 1: monmod-specific custom system calls and other informative strings are 
+ *    logged.
+ * 2: All system calls that are forwarded to the monitor are additionally also
+ *    logged.
+ * 3: All of the above, plus unmonitored system calls are additionally logged.
  */
-#define MONMOD_LOG_INFO 1
+#define MONMOD_LOG_VERBOSITY 1
 
 /**
  * For benchmarking, memory protection calls for the monitor can be disabled.
  * This makes the system insecure, since the tracee application can write to
  * the monitor address range and hence compromise the monitor.
  */
-#define MONMOD_SKIP_MONITOR_PROTECTION_CALLS 1
+#define MONMOD_SKIP_MONITOR_PROTECTION_CALLS 0
 
 #endif

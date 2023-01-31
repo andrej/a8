@@ -37,8 +37,7 @@
 #define TRY_EXCEPT(x, rhs, except) { \
 	const long ret_val = (long)(x); \
 	if(ret_val rhs) { \
-		WARNF(#x " failed with return value %ld: %s\n", ret_val, \
-		strerror(errno)); \
+		WARNF(#x " failed with return value %ld\n", ret_val); \
 		except; \
 	} \
 }

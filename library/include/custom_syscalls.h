@@ -10,4 +10,10 @@ int monmod_exit(int code);
 int monmod_init(pid_t pid, void *monitor_start, size_t monitor_len,
                 void *trusted_syscall_addr, void *monitor_enter_addr);
 
+int monmod_init_unprotected(pid_t pid, void *monitor_start, size_t monitor_len,
+                            void *trusted_syscall_addr, 
+                            void *monitor_enter_addr);
+
+int monmod_destroy();
+
 #endif

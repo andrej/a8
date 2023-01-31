@@ -31,7 +31,6 @@
 #define MONMOD_N_SYSCALL_MASKS ((__NR_syscalls + MONMOD_BITS_PER_MASK - 1) \
                                 / MONMOD_BITS_PER_MASK)
 
-#define MONMOD_MAX_N_TRACEES 8
 #define MONMOD_NO_SYSCALL (__NR_syscalls+1)
 
 
@@ -51,8 +50,6 @@ struct monmod_tracee_config {
 struct monmod_config {
 	struct kobject kobj;
         size_t n_tracees;
-	pid_t tracee_pids[MONMOD_MAX_N_TRACEES]; // 0 == unused
-        struct monmod_tracee_config tracees[MONMOD_MAX_N_TRACEES];
         long active;
 	u64 syscall_masks[MONMOD_N_SYSCALL_MASKS];
 };
@@ -67,21 +64,8 @@ extern struct monmod_config monmod_global_config;
 int monmod_config_init(void);
 void monmod_config_free(void);
 
-int monmod_add_tracee_config(pid_t pid);
-int monmod_del_tracee_config(size_t idx);
-
-static inline __attribute__((__always_inline__))
-bool monmod_is_pid_traced(pid_t pid)
-{
-        int i = 0;
-        for(; i < MONMOD_MAX_N_TRACEES; i++) {
-                if(monmod_global_config.tracee_pids[i] == pid) {
-                        return true;
-                }
-        }
-        return false;
-}
-struct monmod_tracee_config *monmod_get_tracee_config(pid_t pid);
+int monmod_tracee_config_init(pid_t pid, struct monmod_tracee_config *conf);
+void monmod_tracee_config_free(struct monmod_tracee_config *conf);
 
 int monmod_syscall_is_active(u64 syscall_no);
 int monmod_syscall_activate(u64 syscall_no);
@@ -95,9 +79,6 @@ int monmod_syscall_deactivate(u64 syscall_no);
 
 int _monmod_syscall_mask_index(u64 syscall_no);
 int _monmod_syscall_mask_offset(u64 syscall_no);
-
-int monmod_tracee_config_init(size_t idx);
-void monmod_tracee_config_free(size_t idx);
 
 #define GLOBAL_ATTRIBUTES(X) \
     X(tracee_pids) \

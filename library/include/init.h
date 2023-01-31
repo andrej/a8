@@ -7,4 +7,7 @@ void monmod_library_init();
 // defined in arch/xx/src/init.c
 void __attribute__((constructor)) monmod_do_init();
 
+void __attribute__ ((section ("unprotected")))
+monmod_unprotected_reprotect();
+
 #endif

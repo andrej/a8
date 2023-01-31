@@ -1,6 +1,14 @@
 #ifndef UNPROTECTED_H
 #define UNPROTECTED_H
 
+#include <unistd.h>
+#include <string.h>
+#include <sys/mman.h>
+#include <semaphore.h>
+#include <stdlib.h>
+
+#include "init.h"
+
 /* Since the PLT is inside the protected monitor, unprotected code cannot
    indirectly call other functions through the PLT (it would lead to a 
    segfault).
@@ -17,6 +25,30 @@ struct unprotected_funcs {
 	// syscall.h
 	long (* syscall)(long, long, long, long, long, long, long);
 
+   // unistd.h
+   pid_t (* fork)(void);
+   pid_t (* getpid)(void);
+   typeof(getppid) *getppid;
+   typeof(usleep) *usleep;
+
+   // string.h
+   typeof(memcpy) *memcpy;
+
+   // <sys/mman.h>
+   typeof(mprotect) *mprotect;
+
+   // custom_syscalls.h
+   int (* monmod_init)(pid_t, void *, size_t, void *, void *);
+
+   // init.h
+   typeof(monmod_unprotected_reprotect) *monmod_unprotected_reprotect;
+
+   // semaphore.h
+   typeof(sem_wait) *sem_wait;
+   typeof(sem_post) *sem_post;
+
+   // stdlib.h
+   typeof(exit) *exit;
 };
 
 extern struct unprotected_funcs

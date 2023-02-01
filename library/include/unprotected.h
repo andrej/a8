@@ -30,6 +30,7 @@ struct unprotected_funcs {
    pid_t (* getpid)(void);
    typeof(getppid) *getppid;
    typeof(usleep) *usleep;
+   typeof(close) *close;
 
    // string.h
    typeof(memcpy) *memcpy;

@@ -92,14 +92,24 @@ long monmod_handle_syscall(struct syscall_trace_func_stack *stack)
 	}
 	memcpy(canonical.args, actual.args, sizeof(actual.args));
 
-	if(conf.restore_interval > 0 && checkpoint_env.last_checkpoint.valid) {
-		if(syscall_count % conf.restore_interval == 0) {
+#if ENABLE_CHECKPOINTING
+	/* Periodically restore to the last checkpoint, as set in
+	   config.restore_interval. This is used to assess the performance of
+	   the checkpoint/restore mechanism. Otherwise, a restore only takes
+	   place upon a divergence. */
+	if(checkpoint_env.n_breakpoints > 0 &&
+	   conf.restore_interval > 0 && checkpoint_env.last_checkpoint.valid) {
+		if(checkpoint_env.breakpoints[0].hits 
+		   % conf.restore_interval == 0) {
+			SAFE_LOGF(log_fd, "<%d> Restoring last checkpoint.\n", 
+			          getpid());
 			restore_last_checkpoint(&checkpoint_env);
 			/* Should be unreachable. */
 			Z_TRY_EXCEPT(0,
 			             exit(1));
 		}
 	}
+#endif
 
 	/* Phase 1: Cross-check arguments. */
 #if VERBOSITY >= 2
@@ -130,7 +140,12 @@ long monmod_handle_syscall(struct syscall_trace_func_stack *stack)
 	} else if(dispatch & (DISPATCH_CHECKED | DISPATCH_DEFERRED_CHECK)) {
 		s = cross_check_args(&env, &canonical);
 		if(0 == s) {
+#if !ENABLE_CHECKPOINTING
 			SAFE_LOGF(log_fd, "Divergence -- abort!%s", "\n");
+#else
+			SAFE_LOGF(log_fd, "Divergence -- attempt restore last "
+			          "checkpoint.%s", "\n");
+#endif
 #if VERBOSITY > 0 && VERBOSITY < 3
 			// Print divergence information if we have not before.
 			if(NULL != handler) {
@@ -143,6 +158,19 @@ long monmod_handle_syscall(struct syscall_trace_func_stack *stack)
 				         &canonical);
 				SAFE_LOGF_LEN(sizeof(log_buf), log_fd, "%s", 
 				              log_buf);
+			}
+#endif
+#if ENABLE_CHECKPOINTING
+			if(checkpoint_env.last_checkpoint.valid) {
+				s = restore_last_checkpoint(&checkpoint_env);
+				if(0 != s) {
+					SAFE_LOGF(log_fd, "Checkpoint "
+					          "restoration failed with exit"
+						  "code %d.\n", s);
+				}
+			} else {
+				SAFE_LOGF(log_fd, "No valid last checkpoint.%s",
+				          "\n");
 			}
 #endif
 			monmod_exit(1);
@@ -343,19 +371,22 @@ void monmod_library_init()
 }
 #pragma GCC pop_options
 
-void __attribute__((destructor)) destruct()
+void 
+__attribute__((destructor)) 
+__attribute__((section("unprotected")))
+destruct()
 {
-	/* TODO: Disable monitor beforehand and tear down correctly here.
-	   Currently, the destructor is called while the monitor's pages are
-	   protected, so all programs exit with a segfault. */
+	/* Currently, the destructor is called while the monitor's pages are
+	   protected, so we are restricted to only calling unprotected
+	   functions here. */
 
-	close(log_fd);
+	unprotected_funcs.close(log_fd);
 
 	// Close shared memory area.
-	comm_destroy(&comm);
+	// comm_destroy(&comm);
 
 	/* Nothing may run after our monitor is destroyed. Without this,
 	   exit code may flush buffers etc without us monitoring this.
 	   FIXME always exits with zero exit code */
-	monmod_trusted_syscall(__NR_exit, 0, 0, 0, 0, 0, 0);
+	unprotected_funcs.exit(0);
 }

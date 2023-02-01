@@ -66,4 +66,19 @@ struct tracepoint {
 	void *funcs;
 };
 
+#define DEFINE_SPINLOCK(name) static long name = 0
+
+static inline int rcu_read_lock_held(void) { return 0; }
+
+static inline long spin_unlock_irqsave(long a, long b) {
+	return 0;
+}
+
+static inline long spin_unlock_irqrestore(long a, long b) {
+	return 0;
+}
+
+#define WARN_ON(x) 
+#define BUG_ON(x) 
+
 #endif

@@ -21,6 +21,7 @@ init_unprotected()
 	unprotected_funcs.getpid = getpid;
 	unprotected_funcs.getppid = getppid;
 	unprotected_funcs.usleep = usleep;
+	unprotected_funcs.close = close;
 	unprotected_funcs.memcpy = memcpy;
 	unprotected_funcs.mprotect = mprotect;
 	unprotected_funcs.monmod_init = monmod_init_unprotected;

@@ -1,8 +1,10 @@
 #ifndef TRACEE_INFO_H
 #define TRACEE_INFO_H
 
+#ifndef TEST_H
 #include <linux/spinlock.h>
 #include <linux/rcupdate.h>
+#endif
 #include "config.h"
 
 

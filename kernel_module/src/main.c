@@ -60,7 +60,7 @@ static void set_syscall_unprotect_monitor(
 	SYSCALL_ARG3_REG(regs) = 0;
 	SYSCALL_ARG4_REG(regs) = 0;
 	SYSCALL_ARG5_REG(regs) = 0;
-#if MONMOD_LOG_VERBOSITY >= 1
+#if !MONMOD_SKIP_MONITOR_PROTECTION_CALLS && MONMOD_LOG_VERBOSITY >= 1
 	printk(KERN_INFO "monmod: <%d> Unprotecting pages with "
 	       "mprotect(%px, %lx, %x)\n", current->pid, 
 	       tracee->config.monitor_start,
@@ -182,8 +182,9 @@ static void regular_syscall_exit(struct pt_regs *regs,
 #if MONMOD_LOG_VERBOSITY >= 1
 	if(tracee->entry_info.do_log) {
 		printk(KERN_INFO "monmod: <%d> << Exit  system call (%ld) "
-		       "with return value %ld.\n", current->pid, 
-		       tracee->entry_info.syscall_no, SYSCALL_RET_REG(regs));
+		       "with return value %lld.\n", current->pid, 
+		       tracee->entry_info.syscall_no, 
+		       (long long int)SYSCALL_RET_REG(regs));
 	}
 #endif
 }
@@ -276,8 +277,9 @@ static void sys_exit_probe(void *__data, struct pt_regs *regs,
 		custom_syscall_exit(regs, return_value, tracee);
 #if MONMOD_LOG_VERBOSITY >= 1
 		printk(KERN_INFO "monmod: <%d> << Exit  system call (%ld) "
-		       "(custom) with return value %ld.\n", pid, 
-		       tracee->entry_info.syscall_no, SYSCALL_RET_REG(regs));
+		       "(custom) with return value %lld.\n", pid, 
+		       tracee->entry_info.syscall_no, 
+		       (long long int)SYSCALL_RET_REG(regs));
 #endif
 	} else {
 		regular_syscall_exit(regs, return_value, tracee);

@@ -150,7 +150,7 @@ int sys_monmod_reprotect(struct pt_regs *regs, struct tracee *tracee)
 	PC_REG(regs) = (long)info->ret_addr;
 	tracee->config.active = true;
 
-#if MONMOD_LOG_VERBOSITY >= 1
+#if !MONMOD_SKIP_MONITOR_PROTECTION_CALLS && MONMOD_LOG_VERBOSITY >= 1
 	printk(KERN_INFO "monmod: <%d> Reprotecting monitor with "
 	       "mprotect(%px, %lx, %x).\n", current->pid,
 	       (void *)SYSCALL_ARG0_REG(regs), 
@@ -197,7 +197,7 @@ void sys_monmod_reprotect_exit(struct pt_regs *regs, struct tracee *tracee)
 		memcpy(regs, &info.reprotect_stack.regs, sizeof(*regs));
 	}
 
-#if MONMOD_LOG_VERBOSITY >= 1
+#if !MONMOD_SKIP_MONITOR_PROTECTION_CALLS && MONMOD_LOG_VERBOSITY >= 1
 	printk(KERN_INFO "monmod: <%d> mprotect returned with %ld, returning "
 	       "to address %px with return value %lld.\n", current->pid, 
 	       mprotect_return_value, info.ret_addr, 

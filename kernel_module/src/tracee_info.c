@@ -1,5 +1,7 @@
 #include <linux/slab.h>
+#ifndef TEST_H
 #include <linux/spinlock.h>
+#endif
 #include "tracee_info.h"
 
 /* ************************************************************************** *

@@ -259,7 +259,8 @@ create_checkpoint(struct checkpoint_env *env, struct breakpoint *b)
 		do {
 			msg = smem_get(&env->smem->semaphore,
 			               env->smem->message);
-			if(msg == CHECKPOINT_HOLD && unprotected_funcs.getppid() == 1) {
+			if(msg == CHECKPOINT_HOLD 
+			   && unprotected_funcs.getppid() == 1) {
 				/* Parent died before it was able to give us an
 				   instruction, and we got reposessed by init;
 				   treat this like a CHECKPOINT_DELETE message. 

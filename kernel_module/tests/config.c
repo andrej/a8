@@ -3,6 +3,7 @@
 #include "mocks.h"
 #include "test_suite/test.h"
 #include "../include/config.h"
+#include "../include/tracee_info.h"
 
 // Mock needed for running tests outside kernel ...
 struct sysfs_ops kobj_sysfs_ops = {};
@@ -203,6 +204,18 @@ TEST(config_untraced_syscalls_store)
 	return 0;
 }
 
+MOCK(void, kfree, void)
+{ }
+
+/*MOCK(int, rcu_read_lock_held, void)
+{ return 0; }*/
+
+MOCK(long, _raw_spin_lock_irqsave, long a, long b)
+{ return 0; }
+
+MOCK(long, _raw_spin_unlock_irqrestore, long a, long b)
+{ return 0; }
+
 TEST(_config_show_tracee_pids)
 {
 	ssize_t ret;
@@ -214,17 +227,14 @@ TEST(_config_show_tracee_pids)
 	                   "57\n";
 	char target_buf2[] = "42\n";
 	monmod_global_config = (struct monmod_config){};
-	monmod_global_config.n_tracees = 3;
-	monmod_global_config.tracee_pids[2] = 32;
-	monmod_global_config.tracee_pids[3] = 42;
-	monmod_global_config.tracee_pids[6] = 57;
+	add_tracee_info(32);
+	add_tracee_info(42);
+	add_tracee_info(57);
 	ret = _monmod_config_tracee_pids_show(kobj, &attr, buf);
 	ASSERT_EQ(ret, sizeof(target_buf1));
 	ASSERT_EQ(strcmp(buf, target_buf1), 0);
-	monmod_global_config.n_tracees = 1;
-	monmod_global_config.tracee_pids[2] = 0;
-	monmod_global_config.tracee_pids[3] = 0;
-	monmod_global_config.tracee_pids[6] = 42;
+	del_tracee_info(get_tracee_info(32));
+	del_tracee_info(get_tracee_info(57));
 	ASSERT_EQ(_monmod_config_tracee_pids_show(kobj, &attr, buf),
 	          sizeof(target_buf2));
 	ASSERT_EQ(strcmp(buf, target_buf2), 0);
@@ -235,48 +245,29 @@ TEST(config_store_tracee_pids)
 {
 	struct kobject *kobj = &monmod_global_config.kobj; 
 	struct kobj_attribute attr = {};
-	const char buf1[] = "123\n"
-		"45\n"
-		"\n"
-		"6";
-	const char buf2[] = "99\n"
-		"5\n"
-		"kk\n"
-		"2\n";
-	const char buf3[] = { '\n' };
 	monmod_global_config = (struct monmod_config){};
 	kobj->name = "monmod";
 	attr.name = "untraced_syscalls";
 
-	ASSERT_EQ(sizeof(buf1), _monmod_config_tracee_pids_store(
-		kobj, &attr, buf1, sizeof(buf1)));
-	ASSERT_EQ(0, monmod_is_pid_traced(1));
-	ASSERT_EQ(0, monmod_is_pid_traced(99));
-	ASSERT_EQ(0, monmod_is_pid_traced(5));
-	ASSERT_EQ(1, monmod_is_pid_traced(123));
-	ASSERT_EQ(1, monmod_is_pid_traced(45));
-	ASSERT_EQ(1, monmod_is_pid_traced(6));
+	ASSERT_NEQ(NULL, add_tracee_info(45));
+	ASSERT_NEQ(NULL, add_tracee_info(6));
+	ASSERT_NEQ(NULL, add_tracee_info(123));
 
-	ASSERT_EQ(-1, _monmod_config_tracee_pids_store(
-		kobj, &attr, buf2, sizeof(buf2)));
-	ASSERT_EQ(0, monmod_is_pid_traced(1));
-	ASSERT_EQ(1, monmod_is_pid_traced(123));
-	ASSERT_EQ(1, monmod_is_pid_traced(45));
-	ASSERT_EQ(1, monmod_is_pid_traced(6));
-	ASSERT_EQ(0, monmod_is_pid_traced(99));
-	ASSERT_EQ(0, monmod_is_pid_traced(5));
-	ASSERT_EQ(0, monmod_is_pid_traced(2));
+	ASSERT_EQ(NULL,  get_tracee_info(1));
+	ASSERT_EQ(NULL,  get_tracee_info(99));
+	ASSERT_EQ(NULL,  get_tracee_info(5));
+	ASSERT_NEQ(NULL, get_tracee_info(123));
+	ASSERT_NEQ(NULL, get_tracee_info(45));
+	ASSERT_NEQ(NULL, get_tracee_info(6));
 
-
-	ASSERT_EQ(sizeof(buf3), _monmod_config_tracee_pids_store(
-		kobj, &attr, buf3, sizeof(buf3)));
-	ASSERT_EQ(0, monmod_is_pid_traced(1));
-	ASSERT_EQ(0, monmod_is_pid_traced(123));
-	ASSERT_EQ(0, monmod_is_pid_traced(45));
-	ASSERT_EQ(0, monmod_is_pid_traced(6));
-	ASSERT_EQ(0, monmod_is_pid_traced(99));
-	ASSERT_EQ(0, monmod_is_pid_traced(5));
-	ASSERT_EQ(0, monmod_is_pid_traced(2));
+	free_tracee_infos();
+	ASSERT_EQ(NULL, get_tracee_info(1));
+	ASSERT_EQ(NULL, get_tracee_info(123));
+	ASSERT_EQ(NULL, get_tracee_info(45));
+	ASSERT_EQ(NULL, get_tracee_info(6));
+	ASSERT_EQ(NULL, get_tracee_info(99));
+	ASSERT_EQ(NULL, get_tracee_info(5));
+	ASSERT_EQ(NULL, get_tracee_info(2));
 
 	return 0;
 }

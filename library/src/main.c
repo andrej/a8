@@ -25,7 +25,7 @@
 #include "init.h"
 #include "unprotected.h"
 #include "checkpointing.h"
-
+#include "globals.h"
 
 struct config conf;
 int own_id;

@@ -18,6 +18,8 @@
 #include "syscall_trace_func.h"
 #include "init.h"
 #include "unprotected.h"
+#include "environment.h"
+#include "globals.h"
 
 
 /* ************************************************************************** *
@@ -74,6 +76,11 @@ int init_checkpoint_env(struct checkpoint_env *env,
 	env->n_breakpoints = 0;
 	for(size_t i = 0; i < config->n_breakpoints; i++) {
 		// TODO add check that breakpoint is not in monitor space
+		if(0 == config->breakpoints[i].interval) {
+			// Setting interval to 0 disables checkpointing for that
+			// location; easy way to temporarily disable
+			continue;
+		}
 		NZ_TRY(inject_breakpoint(env, config->breakpoints[i].pc,
 		                         config->breakpoints[i].instr_len,
 		                         config->breakpoints[i].interval));
@@ -208,7 +215,7 @@ handle_breakpoint(struct checkpoint_env *env, void *loc)
 
 static int
 __attribute__((section("unprotected")))
-create_checkpoint(struct checkpoint_env *env, struct breakpoint *b)
+create_checkpoint(struct checkpoint_env *cenv, struct breakpoint *b)
 {
 	int s = 0;
 	/* We perform a very lightweight, incomplete checkpointing by simply
@@ -217,11 +224,11 @@ create_checkpoint(struct checkpoint_env *env, struct breakpoint *b)
 	
 	/* First, kill previous checkpoint, if any. We only need the most 
 	   recent. */
-	if(env->last_checkpoint.valid) {
-		smem_put(&env->smem->semaphore, 
-		         env->smem->message = CHECKPOINT_DELETE);
-		while(!smem_get(&env->smem->semaphore,
-		                env->smem->done_flag));
+	if(cenv->last_checkpoint.valid) {
+		smem_put(&cenv->smem->semaphore, 
+		         cenv->smem->message = CHECKPOINT_DELETE);
+		while(!smem_get(&cenv->smem->semaphore,
+		                cenv->smem->done_flag));
 		/* At this point, we are sure that we are memory-synchronized
 		   with the checkpointed process, and it is about to exit --
 		   it is guaranteed to not acquire the semaphore again, but not
@@ -229,24 +236,28 @@ create_checkpoint(struct checkpoint_env *env, struct breakpoint *b)
 		   death (either kill errors because child already exited, or
 		   it succeeds -- in both cases after the call, the child is
 		   gone). */
-		kill(env->last_checkpoint.pid, SIGKILL);
+		unprotected_funcs.kill(cenv->last_checkpoint.pid, SIGKILL);
 	}
 
 	/* Set message in shared memory to CHECKPOINT_HOLD before fork() to
 	   avoid any race conditions. This causes the child to hold in a busy
 	   loop. No memory synchronization mechanisms are needed here since we
 	   just killed any previous checkpoint that may be trying to read. */
-	env->smem->message = CHECKPOINT_HOLD;
-	env->smem->done_flag = false;
+	cenv->smem->message = CHECKPOINT_HOLD;
+	cenv->smem->done_flag = false;
 
 	/* Fork creates a copy of current process state. */
 	pid_t child = 0;
 	LZ_TRY(child = unprotected_funcs.fork());
 	if(0 == child) {
+		s = unprotected_funcs.checkpointed_environment_fix_up(&env);
+		if(0 != s) {
+			return 1;
+		}
 		/* Register self for tracing. */
 		s = unprotected_funcs.monmod_init(unprotected_funcs.getpid(), 
-		                                  env->monitor_start, 
-		                                  env->protected_len,
+		                                  cenv->monitor_start, 
+		                                  cenv->protected_len,
 		                                  &monmod_syscall_trusted_addr,
 		                                  &monmod_syscall_trace_enter);
 		if(0 != s) {
@@ -254,11 +265,11 @@ create_checkpoint(struct checkpoint_env *env, struct breakpoint *b)
 		}
 		/* The child remains paused and waits until it gets asked to 
 		   resume. */
-		env->last_checkpoint.valid = false;
+		cenv->last_checkpoint.valid = false;
 		enum checkpointing_message msg;
 		do {
-			msg = smem_get(&env->smem->semaphore,
-			               env->smem->message);
+			msg = smem_get(&cenv->smem->semaphore,
+			               cenv->smem->message);
 			if(msg == CHECKPOINT_HOLD 
 			   && unprotected_funcs.getppid() == 1) {
 				/* Parent died before it was able to give us an
@@ -273,14 +284,14 @@ create_checkpoint(struct checkpoint_env *env, struct breakpoint *b)
 		} while(msg == CHECKPOINT_HOLD);
 		switch(msg) {
 			case CHECKPOINT_DELETE: {
-				smem_put(&env->smem->semaphore, 
-				         env->smem->done_flag = true);
+				smem_put(&cenv->smem->semaphore, 
+				         cenv->smem->done_flag = true);
 				unprotected_funcs.exit(0);
 				break; /* unreachable */
 			}
 			case CHECKPOINT_RESTORE: {
-				smem_put(&env->smem->semaphore, 
-				         env->smem->done_flag = true);
+				smem_put(&cenv->smem->semaphore, 
+				         cenv->smem->done_flag = true);
 				unprotected_funcs
 					.monmod_unprotected_reprotect();
 				return 0; /* resume execution out of 
@@ -292,8 +303,8 @@ create_checkpoint(struct checkpoint_env *env, struct breakpoint *b)
 		   yet (not yet waiting for messages), it is safe to continue
 		   without introducing a race. We know that the child will
 		   eventually see any restore requests issued. */
-		env->last_checkpoint.valid = true;
-		env->last_checkpoint.pid = child;
+		cenv->last_checkpoint.valid = true;
+		cenv->last_checkpoint.pid = child;
 		return 0;
 	}
 }

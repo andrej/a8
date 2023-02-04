@@ -16,9 +16,20 @@
 #define DI_UNCHECKED         0x8  /* Any operations involving this descriptor
                                      should not be cross-checked. */
 
+#define is_open_locally(env, di) \
+	((di->flags & DI_OPENED_LOCALLY) \
+	 || (env->is_leader && (di->flags & DI_OPENED_ON_LEADER)))
+
+enum descriptor_type {
+	FILE_DESCRIPTOR,
+	SOCKET_DESCRIPTOR,
+	EPOLL_DESCRIPTOR
+};
+
 struct descriptor_info {
 	int flags;
 	int local_fd;
+	enum descriptor_type type;
 };
 
 struct epoll_data_info {
@@ -33,6 +44,9 @@ struct epoll_data_infos {
 	struct epoll_data_info *head;
 	struct epoll_data_info *tail;
 };
+
+#define for_each_epoll_data_info(epoll_data_infos, x) \
+	for((x) = (epoll_data_infos).head; (x) != NULL; (x) = (x)->next)
 
 /**
  * The environment structure is used to encode information about the execution
@@ -67,7 +81,8 @@ void env_init(struct environment *env,
 
 static inline struct descriptor_info *
 env_add_descriptor(struct environment *env, 
-		   int local_fd, int canonical_fd, int flags)
+		   int local_fd, int canonical_fd, int flags,
+		   enum descriptor_type type)
 {
 	const int i = canonical_fd;
 	if(DI_FREE != env->descriptors[i].flags) {
@@ -79,6 +94,7 @@ env_add_descriptor(struct environment *env,
 	}
 	env->descriptors[i].flags = DI_PRESENT | flags;
 	env->descriptors[i].local_fd = local_fd;
+	env->descriptors[i].type = type;
 	env->n_descriptors++;
 #if VERBOSITY >= 3
 	SAFE_LOGF(log_fd, "Added descriptor mapping %d -> %d.\n", canonical_fd, 
@@ -93,7 +109,8 @@ env_add_descriptor(struct environment *env,
  */
 static inline struct descriptor_info *
 env_add_local_descriptor(struct environment *env, 
-			 int fd, int flags)
+			 int fd, int flags,
+			 enum descriptor_type type)
 {
 	/* Find the next free canonical ID. 
 	   Programs may assume that IDs 0, 1, 2 are stdin, stdout and stderr,
@@ -113,11 +130,12 @@ env_add_local_descriptor(struct environment *env,
 #endif
 		return NULL;
 	}
-	return env_add_descriptor(env, fd, canonical, flags);
+	return env_add_descriptor(env, fd, canonical, flags, type);
 }
 
 static inline int canonical_fd_for(struct environment *env,
-                                   struct descriptor_info *di) {
+                                   struct descriptor_info *di)
+{
 	size_t i = (di - env->descriptors);
 	if(i > MAX_N_DESCRIPTOR_MAPPINGS || !(DI_PRESENT & di->flags)) {
 #if VERBOSITY >= 3
@@ -190,5 +208,13 @@ int append_epoll_data_info(struct environment *env,
  */
 int remove_epoll_data_info(struct environment *env, 
                            struct epoll_data_info *info);
+
+/**
+ * Sanitize the file descriptor state in a child process after a call to fork()
+ * issued by the checkpointing mechanism. This is required to clean up 
+ * situations where the semantics of fork() don't exactly mirror a duplication
+ * of file descriptors etc. 
+ */
+int checkpointed_environment_fix_up(struct environment *env);
 
 #endif

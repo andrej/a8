@@ -6,8 +6,11 @@
 #include <sys/mman.h>
 #include <semaphore.h>
 #include <stdlib.h>
+#include <sys/epoll.h>
+#include <signal.h>
 
 #include "init.h"
+#include "environment.h"
 
 /* Since the PLT is inside the protected monitor, unprotected code cannot
    indirectly call other functions through the PLT (it would lead to a 
@@ -25,12 +28,16 @@ struct unprotected_funcs {
 	// syscall.h
 	long (* syscall)(long, long, long, long, long, long, long);
 
+   // environment.h
+   typeof(checkpointed_environment_fix_up) *checkpointed_environment_fix_up;
+
    // unistd.h
    pid_t (* fork)(void);
    pid_t (* getpid)(void);
    typeof(getppid) *getppid;
    typeof(usleep) *usleep;
    typeof(close) *close;
+   typeof(dup) *dup;
 
    // string.h
    typeof(memcpy) *memcpy;
@@ -50,6 +57,14 @@ struct unprotected_funcs {
 
    // stdlib.h
    typeof(exit) *exit;
+
+   // sys/epoll.h
+   typeof(epoll_create1) *epoll_create1;
+   typeof(epoll_ctl) *epoll_ctl;
+
+   // signal.h
+   typeof(kill) *kill;
+
 };
 
 extern struct unprotected_funcs

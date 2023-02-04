@@ -17,11 +17,14 @@ __attribute__((section("unprotected")))
 init_unprotected()
 {
 	unprotected_funcs.syscall = monmod_untrusted_syscall;
+	unprotected_funcs.checkpointed_environment_fix_up =
+		checkpointed_environment_fix_up;
 	unprotected_funcs.fork = fork;
 	unprotected_funcs.getpid = getpid;
 	unprotected_funcs.getppid = getppid;
 	unprotected_funcs.usleep = usleep;
 	unprotected_funcs.close = close;
+	unprotected_funcs.dup = dup;
 	unprotected_funcs.memcpy = memcpy;
 	unprotected_funcs.mprotect = mprotect;
 	unprotected_funcs.monmod_init = monmod_init_unprotected;
@@ -30,4 +33,7 @@ init_unprotected()
 	unprotected_funcs.sem_wait = sem_wait;
 	unprotected_funcs.sem_post = sem_post;
 	unprotected_funcs.exit = exit;
+	unprotected_funcs.epoll_create1 = epoll_create1;
+	unprotected_funcs.epoll_ctl = *epoll_ctl;
+	unprotected_funcs.kill = *kill;
 }

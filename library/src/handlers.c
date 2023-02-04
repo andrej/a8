@@ -14,6 +14,7 @@
 #include "handler_table.h"
 #include "serialization.h"
 #include "handler_data_types.h"
+#include "environment.h"
 
 #include "handler_table_definitions.h"
 
@@ -83,9 +84,6 @@ void *next_preallocated = handler_scratch_buffer;
 	flags; \
 })
 
-#define is_open_locally(env, di) \
-	((di->flags & DI_OPENED_LOCALLY) \
-	 || (env->is_leader && (di->flags & DI_OPENED_ON_LEADER)))
 
 /* TODO: monitor opens some file descriptors itself, e.g. for logging, 
    sockets for intra-monitor commmunication, etc. If the variant requests to
@@ -181,6 +179,7 @@ SYSCALL_ENTER_PROT(default_arg1_fd)
 SYSCALL_EXIT_PROT(default_creates_fd_exit)
 {
 	struct descriptor_info *di;
+	enum descriptor_type type;
 	if(0 > actual->ret) {
 		return;
 	}
@@ -201,7 +200,18 @@ SYSCALL_EXIT_PROT(default_creates_fd_exit)
 	if(dispatch & DISPATCH_UNCHECKED) {
 		flags |= DI_UNCHECKED;
 	}
-	di = env_add_local_descriptor(env, local_fd, flags);
+	type = (enum descriptor_type)FILE_DESCRIPTOR;
+	switch(canonical->no) {
+		case SYSCALL_socket_CANONICAL:
+		case SYSCALL_accept4_CANONICAL:
+			type = SOCKET_DESCRIPTOR;
+			break;
+		case SYSCALL_epoll_create_CANONICAL:
+		case SYSCALL_epoll_create1_CANONICAL:
+			type = EPOLL_DESCRIPTOR;
+			break;
+	}
+	di = env_add_local_descriptor(env, local_fd, flags, type);
 	actual->ret = canonical_fd_for(env, di);
 	free_scratch();
 	return;
@@ -980,7 +990,8 @@ SYSCALL_EXIT_PROT(dup3)
 #if VERBOSITY >= 3
 	SAFE_LOGF(log_fd, "dup3 adding descriptor.%s", "\n");
 #endif
-	Z_TRY_EXCEPT(env_add_descriptor(env, local_fd, newfd, di[0]->flags),
+	Z_TRY_EXCEPT(env_add_descriptor(env, local_fd, newfd, di[0]->flags,
+	                                di[0]->type),
 	             newfd = -1);
 	
 	actual->ret = newfd;

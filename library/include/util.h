@@ -23,53 +23,73 @@
 }
 
 #if VERBOSITY > 0
+
 #define WARN(msg) { \
 	WARNF(msg "%s", ""); \
 }
 #define WARNF(msg, ...) { \
 	fprintf(stderr, __FILE__ ": %d: " msg, __LINE__, __VA_ARGS__); \
 }
+
+/* The SAFE_* log functions print to log_fd using a monmod_trusted_syscall,
+   instead of stderr, which makes them suitable for use in syscall handlers,
+   where stderr might be closed or pointing to something else. */
+#define SAFE_LOGF_LEN(n, msg, ...) { \
+	char log[n]; \
+	int len = 0; \
+	len = snprintf(log, sizeof(log), msg, __VA_ARGS__); \
+	if(0 < len && len < sizeof(log)) { \
+		monmod_trusted_syscall(__NR_write, monmod_log_fd, (long)log, \
+		                       (long)len, 0, 0, 0); \
+	} \
+}
+#define SAFE_LOGF(msg, ...) SAFE_LOGF_LEN(128, msg, __VA_ARGS__)
+#define SAFE_LOG(msg) SAFE_LOGF(msg "%s", "")
+#define SAFE_WARNF(msg, ...) SAFE_LOGF(__FILE__ ": %d: " msg, __LINE__, \
+                                       __VA_ARGS__)
+#define SAFE_WARN(msg) SAFE_WARNF(msg "%s", "")
+
 #else
 #define WARN(...)
 #define WARNF(...)
+#define SAFE_LOGF_LEN(...)
+#define SAFE_LOGF(...)
+#define SAFE_LOG(...)
 #endif
 
-#define TRY_EXCEPT(x, rhs, except) { \
+#define TRY_EXCEPT_F(x, rhs, except, print_func) { \
 	const long ret_val = (long)(x); \
 	if(ret_val rhs) { \
-		WARNF(#x " failed with return value %ld\n", ret_val); \
+		print_func(#x " failed with return value %ld\n", ret_val); \
 		except; \
 	} \
 }
+
+#define TRY_EXCEPT(x, rhs, except) TRY_EXCEPT_F(x, rhs, except, WARNF)
 #define NZ_TRY_EXCEPT(x, except) TRY_EXCEPT(x, != 0, except)
 #define LZ_TRY_EXCEPT(x, except) TRY_EXCEPT(x, < 0, except)
 #define Z_TRY_EXCEPT(x, except) TRY_EXCEPT(x, == 0, except)
+
+#define SAFE_TRY_EXCEPT(x, rhs, except) TRY_EXCEPT_F(x, rhs, except, SAFE_WARNF)
+#define SAFE_NZ_TRY_EXCEPT(x, except) SAFE_TRY_EXCEPT(x, != 0, except)
+#define SAFE_LZ_TRY_EXCEPT(x, except) SAFE_TRY_EXCEPT(x, < 0, except)
+#define SAFE_Z_TRY_EXCEPT(x, except) SAFE_TRY_EXCEPT(x, == 0, except)
 
 #define NZ_TRY(x) NZ_TRY_EXCEPT(x, return 1)
 #define LZ_TRY(x) LZ_TRY_EXCEPT(x, return 1)
 #define Z_TRY(x) Z_TRY_EXCEPT(x, return 1)
 
-
-#define SAFE_LOGF_LEN(n, log_fd, msg, ...) { \
-	char log[n]; \
-	int len = 0; \
-	len = snprintf(log, sizeof(log), \
-	              msg, __VA_ARGS__); \
-	if(0 < len && len < sizeof(log)) { \
-		monmod_trusted_syscall(__NR_write, log_fd, (long)log, \
-		                       (long)len, 0, 0, 0); \
-	} \
-}
-
-#define SAFE_LOGF(log_fd, msg, ...) SAFE_LOGF_LEN(128, log_fd, msg, __VA_ARGS__)
+#define SAFE_NZ_TRY(x) SAFE_NZ_TRY_EXCEPT(x, monmod_exit(1))
+#define SAFE_LZ_TRY(x) SAFE_LZ_TRY_EXCEPT(x, monmod_exit(1))
+#define SAFE_Z_TRY(x) SAFE_Z_TRY_EXCEPT(x, monmod_exit(1))
 
 
 /* ************************************************************************** *
  * Global variables                                                           *
  * ************************************************************************** */
 
-extern int log_fd;  // Initialized in monmod_library_init()
-size_t page_size;
+extern int monmod_log_fd;  // Initialized in monmod_library_init()
+extern size_t monmod_page_size;
 
 
 /* ************************************************************************** *

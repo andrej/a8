@@ -87,8 +87,8 @@ env_add_descriptor(struct environment *env,
 	const int i = canonical_fd;
 	if(DI_FREE != env->descriptors[i].flags) {
 #if VERBOSITY >= 3
-		SAFE_LOGF(log_fd, "A descriptor with canonical ID %d already "
-		          "exists.\n", i);
+		SAFE_WARNF("A descriptor with canonical ID %d already "
+		           "exists.\n", i);
 #endif
 		return NULL;
 	}
@@ -97,7 +97,7 @@ env_add_descriptor(struct environment *env,
 	env->descriptors[i].type = type;
 	env->n_descriptors++;
 #if VERBOSITY >= 3
-	SAFE_LOGF(log_fd, "Added descriptor mapping %d -> %d.\n", canonical_fd, 
+	SAFE_LOGF("Added descriptor mapping %d -> %d.\n", canonical_fd, 
 	          local_fd);
 #endif
 	return &env->descriptors[i];
@@ -125,8 +125,7 @@ env_add_local_descriptor(struct environment *env,
 	}
 	if(DI_FREE != env->descriptors[canonical].flags) {
 #if VERBOSITY >= 3
-		SAFE_LOGF(log_fd, "No more space for descriptor mappings.%s",
-		          "\n");
+		SAFE_WARN("No more space for descriptor mappings.");
 #endif
 		return NULL;
 	}
@@ -139,8 +138,8 @@ static inline int canonical_fd_for(struct environment *env,
 	size_t i = (di - env->descriptors);
 	if(i > MAX_N_DESCRIPTOR_MAPPINGS || !(DI_PRESENT & di->flags)) {
 #if VERBOSITY >= 3
-		SAFE_LOGF(log_fd, "No descriptor mapping with local fd %d "
-		          "registered (%p).\n", di->local_fd, di);
+		SAFE_WARNF("No descriptor mapping with local fd %d registered "
+		          "(%p).\n", di->local_fd, di);
 #endif
 		return -1;
 	}
@@ -155,7 +154,7 @@ env_del_descriptor(struct environment *env, struct descriptor_info *di)
 		return 1;
 	}
 #if VERBOSITY >= 3
-	SAFE_LOGF(log_fd, "Removing descriptor mapping %d -> %d.\n", 
+	SAFE_LOGF("Removing descriptor mapping %d -> %d.\n", 
 	          i, env->descriptors[i].local_fd);
 #endif
 	env->descriptors[i].flags = DI_FREE;
@@ -183,7 +182,7 @@ static inline struct descriptor_info
 	if(0 > fd || fd >= MAX_N_DESCRIPTOR_MAPPINGS
 	   || !(env->descriptors[fd].flags & DI_PRESENT)) {
 #if VERBOSITY >= 3
-		SAFE_LOGF(log_fd, "No such canonical descriptor: %d.\n", fd);
+		SAFE_WARNF("No such canonical descriptor: %d.\n", fd);
 #endif
 		return NULL;
 	}

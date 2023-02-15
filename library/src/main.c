@@ -27,19 +27,31 @@
 #include "checkpointing.h"
 #include "globals.h"
 
-struct config conf;
-int own_id;
+/* ************************************************************************** *
+ * Globals                                                                    *
+ * ************************************************************************** */
+
+int monmod_log_fd = 0;
+size_t monmod_page_size = 0;
+
+
+/* ************************************************************************** *
+ * Local variables                                                            *
+ * ************************************************************************** */
+
+struct config conf;  // parsed .ini configuration
 struct communicator comm;
-struct environment env;
+struct environment env;  // variant's opened file descriptors, epolls, ...
 #if ENABLE_CHECKPOINTING
-struct checkpoint_env checkpoint_env = {};
+struct checkpoint_env checkpoint_env = {};  // dumped checkpoints, ...
 #endif
 
+int own_id;
 struct variant_config *own_variant_conf;
+
 int is_leader;
-bool kernel_monmod_active = false;
-int log_fd = 0;
-size_t syscall_count = 0;
+
+char syscall_log_buf[1024];
 
 /* The following two are defined in the main.lds linker script and capture the
    start and end address of any functions marked section("unprotected").
@@ -49,203 +61,114 @@ void __unprotected_start();
 void __unprotected_end();
 
 
+/* ************************************************************************** *
+ * Local Forward Declarations                                                 *
+ * ************************************************************************** */
+
+static int
+syscall_check_dispatch_sanity(int dispatch,
+                              struct syscall_handler const *const handler,
+                              struct syscall_info *actual,
+                              struct syscall_info *canonical);
+
+static void
+syscall_handle_divergence(struct syscall_handler const *const handler,
+                          struct syscall_info *actual,
+                          struct syscall_info *canonical);
+
+static void syscall_execute_locally(struct syscall_handler const *const handler,
+                                    struct syscall_info *actual, 
+                                    struct syscall_info *canonical);
+
+
+/* ************************************************************************** *
+ * System Call Monitoring                                                     *
+ * ************************************************************************** */
+
+/* All monitored system calls go through this function. */
 long monmod_handle_syscall(struct syscall_trace_func_stack *stack)
 {
+#if MEASURE_TRACING_OVERHEAD
+	return monmod_trusted_syscall(SYSCALL_NO_REG(regs), 
+           SYSCALL_ARG0_REG(stack->regs), SYSCALL_ARG1_REG(stack->regs), 
+           SYSCALL_ARG2_REG(stack->regs), SYSCALL_ARG3_REG(stack->regs), 
+           SYSCALL_ARG4_REG(stack->regs), SYSCALL_ARG5_REG(stack->regs));
+#endif
 
 	int s = 0;
 	struct pt_regs *regs = &(stack->regs);
 	const long syscall_no = SYSCALL_NO_REG(regs);
 	const void *ret_addr = (void *)PC_REG(regs);
-	struct syscall_handler const *handler = NULL;
+	struct syscall_handler const * const handler = get_handler(syscall_no);
 	struct syscall_info actual = {};
 	struct syscall_info canonical = {};
 	void *handler_scratch_space = NULL;
 	int dispatch = 0;
 
-	syscall_count++;
-
-	/* Find syscall handlers handler. */
-	handler = get_handler(syscall_no);
-	if(NULL == handler) {
-		SAFE_LOGF(log_fd, "%ld -- no handler (PID %d)!\n", syscall_no, 
-		          getpid());
 #if NO_HANDLER_TERMINATES
-		exit(1);
+	SAFE_Z_TRY(handler);
 #endif
-	}
+#if ENABLE_CHECKPOINTING
+	restore_checkpoint_if_needed(&checkpoint_env, conf.restore_interval);
+#endif
 
-	/* Preparation: Initialize data. */
+	/* Preparation: Initialize data structures. */
 	actual.no = syscall_no;
 	SYSCALL_ARGS_TO_ARRAY(regs, actual.args);
-
-#if MEASURE_TRACING_OVERHEAD
-	return monmod_trusted_syscall(actual.no, actual.args[0], actual.args[1],
-		                      actual.args[2], actual.args[3], 
-				      actual.args[4], actual.args[5]);
-#endif
-
 	actual.ret = -ENOSYS;
+	canonical.no = syscall_no;
 	if(NULL != handler) {
 		canonical.no = handler->canonical_no;
-	} else {
-		canonical.no = actual.no;
 	}
 	memcpy(canonical.args, actual.args, sizeof(actual.args));
 
-#if ENABLE_CHECKPOINTING
-	/* Periodically restore to the last checkpoint, as set in
-	   config.restore_interval. This is used to assess the performance of
-	   the checkpoint/restore mechanism. Otherwise, a restore only takes
-	   place upon a divergence. */
-	if(checkpoint_env.n_breakpoints > 0 &&
-	   conf.restore_interval > 0 && checkpoint_env.last_checkpoint.valid) {
-		if(checkpoint_env.breakpoints[0].hits 
-		   % conf.restore_interval == 0) {
-			SAFE_LOGF(log_fd, "<%d> Restoring last checkpoint.\n", 
-			          getpid());
-			restore_last_checkpoint(&checkpoint_env);
-			/* Should be unreachable. */
-			Z_TRY_EXCEPT(0,
-			             exit(1));
-		}
-	}
-#endif
-
-	/* Phase 1: Cross-check arguments. */
+	/* Phase 1: Determine call dispatch type through entry handler. */
 #if VERBOSITY >= 2
 	if(NULL != handler) {
-		SAFE_LOGF(log_fd, ">> %s (%ld) -- enter from PC %p, PID %d.\n",
+		SAFE_LOGF(">> %s (%ld) -- enter from PC %p, PID %d.\n",
 			  handler->name, actual.no, ret_addr, getpid());
 	}
 #endif
+	dispatch = DISPATCH_UNCHECKED | DISPATCH_EVERYONE;	
 	if(NULL != handler && NULL != handler->enter) {
 		dispatch = handler->enter(&env, handler, &actual, &canonical,
 		                          &handler_scratch_space);
-	} else {
-		dispatch = DISPATCH_UNCHECKED | DISPATCH_EVERYONE;	
 	}
+	syscall_check_dispatch_sanity(dispatch, handler, &actual, &canonical);
 
-#if VERBOSITY >= 3
-	if(NULL != handler) {
-		char log_buf[1024];
-		log_buf[0] = '\0';
-		log_args(log_buf, sizeof(log_buf), &actual, &canonical);
-		SAFE_LOGF_LEN(sizeof(log_buf), log_fd, "%s", log_buf);
-	}
-#endif
 
-	if(dispatch & DISPATCH_ERROR) {
-		SAFE_LOGF(log_fd, "Error on dispatch.%s", "\n");
-		monmod_exit(1);
-	} else if(dispatch & (DISPATCH_CHECKED | DISPATCH_DEFERRED_CHECK)) {
-		s = cross_check_args(&env, &canonical);
+	/* Phase 2: Cross-check system call & arguments with other variants. */
+	if(dispatch & (DISPATCH_CHECKED | DISPATCH_DEFERRED_CHECK)) {
+		SAFE_LZ_TRY(s = cross_check_args(&env, &canonical));
 		if(0 == s) {
-#if !ENABLE_CHECKPOINTING
-			SAFE_LOGF(log_fd, "Divergence -- abort!%s", "\n");
-#else
-			SAFE_LOGF(log_fd, "Divergence -- attempt restore last "
-			          "checkpoint.%s", "\n");
-#endif
-#if VERBOSITY > 0 && VERBOSITY < 3
-			// Print divergence information if we have not before.
-			if(NULL != handler) {
-				SAFE_LOGF(log_fd, "%s (%ld) -- enter from "
-				          "%p.\n", handler->name, actual.no, 
-					  ret_addr);
-				char log_buf[1024];
-				log_buf[0] = '\0';
-				log_args(log_buf, sizeof(log_buf), &actual, 
-				         &canonical);
-				SAFE_LOGF_LEN(sizeof(log_buf), log_fd, "%s", 
-				              log_buf);
-			}
-#endif
-#if ENABLE_CHECKPOINTING
-			if(checkpoint_env.last_checkpoint.valid) {
-				s = restore_last_checkpoint(&checkpoint_env);
-				if(0 != s) {
-					SAFE_LOGF(log_fd, "Checkpoint "
-					          "restoration failed with exit"
-						  "code %d.\n", s);
-				}
-			} else {
-				SAFE_LOGF(log_fd, "No valid last checkpoint.%s",
-				          "\n");
-			}
-#endif
-			monmod_exit(1);
-		} else if(0 > s) {
-			SAFE_LOGF(log_fd, "Argument cross-checking failed%s",
-			          "\n");
-			monmod_exit(1);
+			syscall_handle_divergence(handler, &actual, &canonical);
 		}
 	}
 
-	/* Phase 2: Execute system call locally if needed. */
+	/* Phase 3: Execute system call locally if needed. */
 	if(dispatch & DISPATCH_EVERYONE || 
 	   ((dispatch & DISPATCH_LEADER) && is_leader)) {
-#if VERBOSITY >= 3
-		SAFE_LOGF(log_fd, "Executing syscall no. %ld with ("
-		          "%ld, %ld, %ld, %ld, %ld, %ld)\n",
-			   actual.no, actual.args[0], actual.args[1],
-			   actual.args[2], actual.args[3], actual.args[4],
-			   actual.args[5]);
-#endif
-		actual.ret = monmod_trusted_syscall(actual.no, 
-		                                    actual.args[0], 
-		                                    actual.args[1],
-		                                    actual.args[2],
-		                                    actual.args[3],
-		                                    actual.args[4], 
-		                                    actual.args[5]);
-		canonical.ret = actual.ret;  // Default to the same
+		syscall_execute_locally(handler, &actual, &canonical);
 		if(NULL != handler && NULL != handler->post_call) {
 			/* This callback gets called whenever a system call has
 			   actually been issued locally. It can be used to
 			   normalize results in a canonical form before 
 			   replication, from actual into canonical. */
 			handler->post_call(&env, handler, dispatch, &actual, 
-			                   &canonical, &handler_scratch_space);
-		}
-
-#if VERBOSITY >= 3
-		if(-1024 < actual.ret && actual.ret < 0) {
-			SAFE_LOGF(log_fd, "Returned: %ld (potential errno: %s)"
-			          "\n", actual.ret, strerror(-actual.ret));
-		} else {
-			SAFE_LOGF(log_fd, "Returned: %ld\n", actual.ret);
-		}
-#endif
-	}
-
-	/* Phase 3: Replicate results if needed */
-#if VERBOSITY >= 2
-	if(dispatch & DISPATCH_LEADER) {
-		if(!(dispatch & DISPATCH_NEEDS_REPLICATION)) {
-			SAFE_LOGF(log_fd,
-				  "Warning: Syscall dispatched only on leader, "
-			          "but no replication flag set.%s", "\n"); 
-		}
-		if(!(canonical.ret_flags & ARG_FLAG_REPLICATE)) {
-			SAFE_LOGF(log_fd,
-				  "Warning: Syscall dispatched only on leader, "
-			          "but no replication flag set for return "
-				  "value. This is probably not what you want."
-				  "%s", "\n");
+					   &canonical, &handler_scratch_space);
 		}
 	}
-#endif
+
 	if(dispatch & DISPATCH_NEEDS_REPLICATION) {
 #if VERBOSITY >= 3
-		SAFE_LOGF(log_fd, "Replicating results.%s", "\n");
+		SAFE_LOG("Replicating results.\n");
 #endif
 		/* Replicates contents of canonical.ret and canonical.args to 
 		   be the same across all nodes. It is the exit handler's 
 		   responsibility to copy this back to the actual results as
 		   approriate. By default, actual.ret = canonical.ret will be
 		   copied. */
-		NZ_TRY_EXCEPT(replicate_results(&env, &canonical),
-			      monmod_exit(1));
+		SAFE_NZ_TRY(replicate_results(&env, &canonical));
 		actual.ret = canonical.ret;
 	}
 
@@ -257,12 +180,125 @@ long monmod_handle_syscall(struct syscall_trace_func_stack *stack)
 	}
 
 #if VERBOSITY >= 2
-	SAFE_LOGF(log_fd, "<< Return %ld.\n\n", actual.ret);
+	SAFE_LOGF("<< Return %ld.\n\n", actual.ret);
 #endif
 
 	return actual.ret;
 }
 
+static int
+syscall_check_dispatch_sanity(int dispatch,
+                              struct syscall_handler const *const handler,
+                              struct syscall_info *actual,
+                              struct syscall_info *canonical)
+{
+	if(dispatch & DISPATCH_ERROR) {
+		SAFE_WARN("Error on dispatch.\n");
+		monmod_exit(1);
+	}
+
+	if(dispatch & DISPATCH_LEADER) {
+		if(!(dispatch & DISPATCH_NEEDS_REPLICATION)) {
+#if VERBOSITY >= 2
+			SAFE_WARN("Warning: Syscall dispatched only on leader, "
+			          "but no replication flag set.\n"); 
+#endif
+			return 1;
+		}
+		if(!(canonical->ret_flags & ARG_FLAG_REPLICATE)) {
+#if VERBOSITY >= 2
+			SAFE_WARN("Warning: Syscall dispatched only on leader, "
+			          "but no replication flag set for return "
+				  "value. This is probably not what you "
+				  "want.\n");
+#endif
+			return 1;
+		}
+	}
+
+#if VERBOSITY >= 3
+	if(NULL != handler) {
+		syscall_log_buf[0] = '\0';
+		log_args(syscall_log_buf, sizeof(syscall_log_buf), actual, 
+		         canonical);
+		SAFE_LOGF_LEN(sizeof(syscall_log_buf), "%s", 
+		              syscall_log_buf);
+	}
+#endif
+
+	return 0;
+}
+
+static
+void syscall_handle_divergence(struct syscall_handler const *const handler,
+                               struct syscall_info *actual,
+                               struct syscall_info *canonical)
+{
+#if !ENABLE_CHECKPOINTING
+	SAFE_LOG("Divergence -- abort!\n");
+#else
+	SAFE_LOG("Divergence -- attempt restore last checkpoint.\n");
+#endif
+#if VERBOSITY > 0 && VERBOSITY < 3
+	// Print divergence information if we have not before.
+	if(NULL != handler) {
+		SAFE_LOGF("%s (%ld) -- enter from %p.\n", 
+		          handler->name, actual.no, ret_addr);
+		char log_buf[1024];
+		log_buf[0] = '\0';
+		log_args(log_buf, sizeof(log_buf), &actual, 
+				&canonical);
+		SAFE_LOGF_LEN(sizeof(log_buf), "%s", log_buf);
+	}
+#endif
+#if ENABLE_CHECKPOINTING
+	if(checkpoint_env.last_checkpoint.valid) {
+		s = restore_last_checkpoint(&checkpoint_env);
+		if(0 != s) {
+			SAFE_WARNF("Checkpoint restoration failed with "
+			          "exit code %d.\n", s);
+		}
+	} else {
+		SAFE_WARN("No valid last checkpoint.\n");
+	}
+#endif
+	monmod_exit(2);
+}
+
+static void syscall_execute_locally(struct syscall_handler const *const handler,
+                                    struct syscall_info *actual, 
+                                    struct syscall_info *canonical)
+{
+#if VERBOSITY >= 3
+	SAFE_LOGF("Executing syscall no. %ld with (%ld, %ld, %ld, %ld, "
+	          "%ld, %ld)\n",
+		  actual->no, actual->args[0], actual->args[1],
+		  actual->args[2], actual->args[3], actual->args[4],
+		  actual->args[5]);
+#endif
+	actual->ret = monmod_trusted_syscall(actual->no, 
+	                                     actual->args[0], 
+	                                     actual->args[1],
+	                                     actual->args[2],
+	                                     actual->args[3],
+	                                     actual->args[4], 
+	                                     actual->args[5]);
+	canonical->ret = actual->ret;  // Default to the same
+
+#if VERBOSITY >= 3
+		if(-1024 < actual->ret && actual->ret < 0) {
+			SAFE_LOGF("Returned: %ld (potential errno: %s)\n", 
+			          actual->ret, strerror(-actual->ret));
+		} else {
+			SAFE_LOGF("Returned: %ld\n", actual->ret);
+		}
+#endif
+}
+
+
+/* ************************************************************************** *
+ *  Initialization                                                            *
+ * ************************************************************************** */
 
 #pragma GCC push_options // Save current options
 #pragma GCC optimize ("no-optimize-sibling-calls")
@@ -272,11 +308,10 @@ void monmod_library_init()
 	const char *config_path, *own_id_str;
 	char log_file_path[128];
 	char tmp_path[128];
-	struct variant_config *own_variant_config;
 	void *monitor_start = NULL;
 	size_t monitor_len = 0, protected_len = 0;
 
-	page_size = sysconf(_SC_PAGE_SIZE);
+	monmod_page_size = sysconf(_SC_PAGE_SIZE);
 	own_pid = getpid();
 	
 	/* Find the pages this module is loaded on. These pages will be 
@@ -289,7 +324,7 @@ void monmod_library_init()
 	/* Sanity check that our linker script worked and, after loading,
 	   the "unprotected" section is the very last page-aligned sub-section
 	   of the loaded executable segment. */
-	Z_TRY_EXCEPT(monitor_len == (monitor_len & ~(page_size-1))
+	Z_TRY_EXCEPT(monitor_len == (monitor_len & ~(monmod_page_size-1))
 	             && __unprotected_end == monitor_start + monitor_len
 	             && (void *)__unprotected_start > monitor_start 
 	             && (void *)__unprotected_start < monitor_start+monitor_len,
@@ -331,9 +366,8 @@ void monmod_library_init()
 	/* Open log file. */
 	snprintf(log_file_path, sizeof(log_file_path), MONMOD_LOG_FILE,
 	         own_id);
-	if(0 > (log_fd = open(log_file_path, O_WRONLY | O_APPEND | O_CREAT 
-	                                     | O_TRUNC, 
-	                      0664)))
+	if(0 > (monmod_log_fd = open(log_file_path, O_WRONLY | O_APPEND 
+	                             | O_CREAT | O_TRUNC, 0664)))
 	{
 		WARNF("unable to open log file at %s: %s\n",
 		      MONMOD_LOG_FILE,
@@ -395,7 +429,7 @@ destruct()
 	   protected, so we are restricted to only calling unprotected
 	   functions here. */
 
-	unprotected_funcs.close(log_fd);
+	unprotected_funcs.close(monmod_log_fd);
 
 	// Close shared memory area.
 	// comm_destroy(&comm);

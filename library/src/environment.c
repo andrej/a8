@@ -129,8 +129,8 @@ checkpointed_environment_fix_up(struct environment *env)
 		new_fd = unprotected_funcs.epoll_create1(0);
 			// FIXME: copy CLOEXEC flag from original epoll
 		if(-1 == new_fd) {
-			SAFE_LOGF(log_fd, "Cannot recreate epoll file "
-			          "descriptor: %d\n", errno);
+			SAFE_WARNF("Cannot recreate epoll file descriptor: %d\n", 
+			          errno);
 			return 1;
 		}
 		unprotected_funcs.close(old_fd);
@@ -148,8 +148,8 @@ checkpointed_environment_fix_up(struct environment *env)
 				new_fd, EPOLL_CTL_ADD, fd_di->local_fd,
 				&j->data);
 			if(0 != s) {
-				SAFE_LOGF(log_fd, "epoll_ctl failed for fd %d "
-				          "while trying to recreate epoll %d\n",
+				SAFE_WARNF("epoll_ctl failed for fd %d while "
+				          "trying to recreate epoll %d\n",
 					  canonical_fd, j->fd);
 				return 1;
 			}

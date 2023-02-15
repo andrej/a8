@@ -137,6 +137,25 @@ int restore_last_checkpoint(struct checkpoint_env *env)
 	exit(0);
 }
 
+void restore_checkpoint_if_needed(struct checkpoint_env *env, 
+                                  int restore_interval)
+{
+	/* Periodically restore to the last checkpoint, as set in
+	   config.restore_interval. This is used to assess the performance of
+	   the checkpoint/restore mechanism. Otherwise, a restore only takes
+	   place upon a divergence. */
+	if(restore_interval <= 0 || env->n_breakpoints <= 0
+	   || !env->last_checkpoint.valid) {
+		return;
+	}
+	if(env->breakpoints[0].hits % restore_interval == 0) {
+		SAFE_LOGF("<%d> Restoring last checkpoint.\n", getpid());
+		restore_last_checkpoint(env);
+		/* Should be unreachable. */
+		Z_TRY_EXCEPT(0, exit(1));
+	}
+}
+
 
 /* ************************************************************************** *
  * Internals                                                                  * 

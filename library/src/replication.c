@@ -151,7 +151,7 @@ int replicate_results(struct environment *env,
 						replication_buf),
 			      goto abort1);
 		if(msg.length != receive_buf_len) {
-			SAFE_LOGF(log_fd, "Advertised message length in header "
+			SAFE_WARNF("Advertised message length in header "
 			          "%lu did not match received length %lu.\n",
 				  msg.length, receive_buf_len);
 			goto abort1;

@@ -64,6 +64,9 @@ struct unprotected_funcs {
 
    // signal.h
    typeof(kill) *kill;
+   typeof(sigemptyset) *sigemptyset;
+   typeof(sigaddset) *sigaddset;
+   typeof(sigwait) *sigwait;
 
 };
 

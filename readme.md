@@ -6,10 +6,10 @@ The kernel module forwards all untrusted system calls to the shared library, whi
 
 ## Installation
 
-The following dependency is required:
+The following dependencies are required:
 - libconfig
 
-The script `bootstrap.sh` will install it, but you still need to add `dependencies/libconfig-install/lib` to your `LD_LIBRARY_PATH` upon execution. Alternatively, you can install the `libconfig-dev` package on Ubuntu.
+The script `bootstrap.sh` will install those, but you still need to add `dependencies/libconfig-install/lib` to your `LD_LIBRARY_PATH` upon execution. Using `scripts/run.sh` to run a monitored program will do so for you. Alternatively, you can install the `libconfig-dev` package on Ubuntu.
 
 Build the kernel module and the library:
 

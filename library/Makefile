@@ -4,8 +4,13 @@ ARCH_DIR     ?= arch
 SOURCE_DIRS  ?= src $(ARCH_DIR)/$(ARCH)/src
 TESTS_DIR    ?= tests
 BUILD_DIR    ?= build
-INCLUDE_DIRS ?= include $(ARCH_DIR)/$(ARCH)/include ../dependencies/libconfig-install/include ..
-LIB_DIRS     ?= ../dependencies/libconfig-install/lib
+INCLUDE_DIRS ?= include \
+                $(ARCH_DIR)/$(ARCH)/include \
+		../dependencies/libconfig-install/include \
+		../dependencies/criu-install/include \
+		..
+LIB_DIRS     ?= ../dependencies/libconfig-install/lib \
+                ../dependencies/criu-install/lib/$(ARCH)-linux-gnu
 
 CC      := gcc
 CFLAGS  := -g -fpic $(INCLUDE_DIRS:%=-I%) \
@@ -22,7 +27,7 @@ LDFLAGS := -g -shared $(LIB_DIRS:%=-L%) \
 ifdef opt
 LDFLAGS += -O3 -flto
 endif
-LDLIBS  := -lconfig -ldl
+LDLIBS  := -lconfig -ldl -lcriu
 
 C_SOURCES := $(shell find $(SOURCE_DIRS) -maxdepth 1 -name \*.c)
 S_SOURCES := $(shell find $(SOURCE_DIRS) -maxdepth 1 -name \*.S)

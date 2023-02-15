@@ -1,6 +1,15 @@
+# To ignore all compiled binaries (no file extension), we ignore everything,
+# then unignore anything with an extension and directories.
+*
+!*.*
+!*/
+
+# Other ignores:
 *.o
 *.d
 *.ko
+*.log
+*.img
 kernel_module/build/*
 kernel_module/test_suite/build/*
 dependencies/*

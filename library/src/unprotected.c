@@ -36,4 +36,7 @@ init_unprotected()
 	unprotected_funcs.epoll_create1 = epoll_create1;
 	unprotected_funcs.epoll_ctl = *epoll_ctl;
 	unprotected_funcs.kill = *kill;
+   	unprotected_funcs.sigemptyset = *sigemptyset;
+   	unprotected_funcs.sigaddset = *sigaddset;
+   	unprotected_funcs.sigwait = *sigwait;
 }

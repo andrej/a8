@@ -39,12 +39,16 @@
  */
 #define NO_HANDLER_TERMINATES 0 
 
+#define NO_CHECKPOITING
+#define FORK_CHECKPOINTING 1
+#define CRIU_CHECKPOINTING 2
+
 /**
  * If set to false, all checkpointing code is omitted. This disables the 
  * survivability aspect and allows benchmarking a pure MVEE implementation that
  * terminates upon divergence.
  */
-#define ENABLE_CHECKPOINTING 1
+#define ENABLE_CHECKPOINTING CRIU_CHECKPOINTING 
 
 #define MONMOD_SYSFS_PATH "/sys/kernel/monmod"
 #define MONMOD_SYSFS_UNTRACED_SYSCALLS_FILE "/untraced_syscalls"

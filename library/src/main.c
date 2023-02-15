@@ -298,18 +298,20 @@ void monmod_library_init()
 
 	init_unprotected();
 
-	/* Issue monmod_init system call. */
+#if MEASURE_TRACING_OVERHEAD
+	/* If we are only interested in measuring the tracing overhead, register
+	   the monitor now and exit, before settin up any of the network
+	   connections or checkpointing environment. */
 	NZ_TRY_EXCEPT(monmod_init(own_pid, 
 	                          monitor_start, 
 	                          protected_len,
 	                          &monmod_syscall_trusted_addr,
 	                          &monmod_syscall_trace_enter),
 	              exit(1));
-
-#if MEASURE_TRACING_OVERHEAD
 	return;
 #endif
-	// Read environment variables.
+
+	/* Read environment variables. */
 	if(NULL == (own_id_str = getenv("MONMOD_ID"))) {
 		WARN("libmonmod.so requres MONMOD_ID environment variable. \n");
 		exit(1);
@@ -326,7 +328,7 @@ void monmod_library_init()
 		exit(1);
 	}
 
-	// Open log file.
+	/* Open log file. */
 	snprintf(log_file_path, sizeof(log_file_path), MONMOD_LOG_FILE,
 	         own_id);
 	if(0 > (log_fd = open(log_file_path, O_WRONLY | O_APPEND | O_CREAT 
@@ -339,10 +341,30 @@ void monmod_library_init()
 		exit(1);
 	}
 
-	// Parse configuration.
+	/* Parse configuration. */
 	NZ_TRY_EXCEPT(parse_config(config_path, &conf), exit(1));
 	Z_TRY_EXCEPT(own_variant_conf = get_variant(&conf, own_id), exit(1));
 	is_leader = conf.leader_id == own_id;
+
+	/* The checkpointing environment needs to be initialized before 
+	   the monitor is registered: CRIU checkpointing forks a new
+	   dumper/restorer parent process, and the child process is the one
+	   that should register to be monitored. */
+#if ENABLE_CHECKPOINTING
+	NZ_TRY_EXCEPT(init_checkpoint_env(&checkpoint_env,
+	                                  own_variant_conf,
+					  monitor_start, protected_len),
+	              exit(1));
+	own_pid = getpid();
+#endif
+
+	/* Issue monmod_init system call. */
+	NZ_TRY_EXCEPT(monmod_init(own_pid, 
+	                          monitor_start, 
+	                          protected_len,
+	                          &monmod_syscall_trusted_addr,
+	                          &monmod_syscall_trace_enter),
+	              exit(1));
 
 	// Connect all nodes.
 	NZ_TRY_EXCEPT(comm_init(&comm, own_id, &own_variant_conf->addr), 
@@ -357,13 +379,6 @@ void monmod_library_init()
 	}
 
 	env_init(&env, &comm, &conf, own_id);
-
-#if ENABLE_CHECKPOINTING
-	NZ_TRY_EXCEPT(init_checkpoint_env(&checkpoint_env,
-	                                  own_variant_conf,
-					  monitor_start, protected_len),
-	              exit(1));
-#endif
 	
 	/* The architecture-specific caller of this code issues a
 	   monmod_reprotect call to initialize the module and protect the

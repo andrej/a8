@@ -51,8 +51,6 @@ struct checkpointing_smem {
 })
 
 struct checkpoint_env {
-	struct checkpointing_smem *smem;
-	size_t smem_length;
 	struct checkpoint last_checkpoint;
 	struct breakpoint *in_breakpoint; /* if non-null, we are single stepping
 	                                     after hitting this breakpoint */
@@ -62,6 +60,13 @@ struct checkpoint_env {
 	   information needed by the monmod_init call in child checkpoints. */
 	void *monitor_start;
 	size_t protected_len;
+#if ENABLE_CHECKPOINTING == FORK_CHECKPOINTING
+	struct checkpointing_smem *smem;
+	size_t smem_length;
+#elif ENABLE_CHECKPOINTING == CRIU_CHECKPOINTING
+	pid_t dumper_restorer_pid;
+	volatile bool dumper_restorer_ready;
+#endif
 };
 
 int init_checkpoint_env(struct checkpoint_env *env,
@@ -70,7 +75,6 @@ int init_checkpoint_env(struct checkpoint_env *env,
 			size_t protected_len);
 
 int restore_last_checkpoint(struct checkpoint_env *env);
-
 
 #endif
 #endif

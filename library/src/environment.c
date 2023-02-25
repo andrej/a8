@@ -5,22 +5,14 @@
 #include <sys/epoll.h>
 #include "environment.h"
 #include "communication.h"
-#include "config.h"
 #include "util.h"
 #include "unprotected.h"
 
 void env_init(struct environment *env, 
-              struct communicator *comm,
-              struct config *conf, 
-              int own_id)
+              struct communicator *comm)
 {
 	if(NULL != comm) {
 		env->comm = comm;
-	}
-
-	if(NULL != conf) {
-		env->leader_id = conf->leader_id;
-		env->is_leader = conf->leader_id == own_id;
 	}
 
 	env->epoll_data_infos = (struct epoll_data_infos){};

@@ -8,6 +8,7 @@
 #include <stdio.h>
 #include <stdbool.h>
 #include <signal.h>
+#include <sys/time.h>
 
 #include "arch.h"
 #include "syscall.h"
@@ -55,6 +56,7 @@ struct variant_config *own_variant_conf;
 int is_leader;
 
 char syscall_log_buf[1024];
+struct timeval start_tv;
 
 /* The following two are defined in the main.lds linker script and capture the
    start and end address of any functions marked section("unprotected").
@@ -116,6 +118,9 @@ long monmod_handle_syscall(struct syscall_trace_func_stack *stack)
 	struct syscall_info canonical = {};
 	void *handler_scratch_space = NULL;
 	int dispatch = 0;
+#if VERBOSITY >= 2
+	struct timeval tv;
+#endif
 
 #if NO_HANDLER_TERMINATES
 	SAFE_Z_TRY(handler);
@@ -137,7 +142,9 @@ long monmod_handle_syscall(struct syscall_trace_func_stack *stack)
 	/* Phase 1: Determine call dispatch type through entry handler. */
 #if VERBOSITY >= 2
 	if(NULL != handler) {
-		SAFE_LOGF(">> %s (%ld) -- enter from PC %p, PID %d.\n",
+		SAFE_LZ_TRY(gettimeofday(&tv, NULL));
+		SAFE_LOGF("[%3ld.%06ld] >> %s (%ld) -- enter from PC %p, PID "
+			  "%d.\n", tv.tv_sec-start_tv.tv_sec, tv.tv_usec,
 			  handler->name, actual.no, ret_addr, getpid());
 	}
 #endif
@@ -146,7 +153,7 @@ long monmod_handle_syscall(struct syscall_trace_func_stack *stack)
 		dispatch = handler->enter(&env, handler, &actual, &canonical,
 		                          &handler_scratch_space);
 	}
-	if(policy_is_exempt(conf.policy, canonical.no)) {
+	if(policy_is_exempt(conf.policy, &canonical, &env)) {
 #if VERBOSITY >= 2
 		SAFE_LOGF("Policy \"%s\" exempted system call from "
 		          "cross-checking.\n", conf.policy->name);
@@ -206,7 +213,9 @@ long monmod_handle_syscall(struct syscall_trace_func_stack *stack)
 	}
 
 #if VERBOSITY >= 2
-	SAFE_LOGF("<< Return %ld.\n\n", actual.ret);
+	SAFE_LZ_TRY(gettimeofday(&tv, NULL));
+	SAFE_LOGF("[%3ld.%06ld] << Return %ld.\n\n", tv.tv_sec-start_tv.tv_sec, 
+	          tv.tv_usec, actual.ret);
 #endif
 
 	return actual.ret;
@@ -337,8 +346,15 @@ void monmod_library_init()
 	void *monitor_start = NULL;
 	size_t monitor_len = 0, protected_len = 0;
 
+	init_unprotected();
+
 	monmod_page_size = sysconf(_SC_PAGE_SIZE);
 	own_pid = getpid();
+
+#if VERBOSITY >= 2
+	LZ_TRY_EXCEPT(gettimeofday(&start_tv, NULL),
+	              exit(1));
+#endif
 	
 	/* Find the pages this module is loaded on. These pages will be 
 	   protected by the kernel to remain inaccessible for other parts of
@@ -356,8 +372,6 @@ void monmod_library_init()
 	             && (void *)__unprotected_start < monitor_start+monitor_len,
 		     exit(1));
 	protected_len = (void *)__unprotected_start - monitor_start;
-
-	init_unprotected();
 
 #if MEASURE_TRACING_OVERHEAD
 	/* If we are only interested in measuring the tracing overhead, register
@@ -438,7 +452,9 @@ void monmod_library_init()
 		              exit(1));
 	}
 
-	env_init(&env, &comm, &conf, own_id);
+	env_init(&env, &comm);
+	env.leader_id = conf.leader_id;
+	env.is_leader = conf.leader_id == own_id;
 	size_t replication_batch_size = conf.replication_batch_size;
 	if(0 == replication_batch_size) {
 		/* For a zero setting, batching is disabled. In this case, the

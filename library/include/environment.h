@@ -4,7 +4,6 @@
 #include <stdbool.h>
 #include <unistd.h>
 #include <sys/epoll.h>
-#include "config.h"
 #include "communication.h"
 #include "util.h"
 
@@ -75,9 +74,7 @@ struct environment {
  * stderr.
  */
 void env_init(struct environment *env, 
-              struct communicator *comm,
-              struct config *config, 
-              int own_id);
+              struct communicator *comm);
 
 static inline struct descriptor_info *
 env_add_descriptor(struct environment *env, 

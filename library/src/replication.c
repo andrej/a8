@@ -167,16 +167,12 @@ int replicate_results(struct environment *env,
 	              struct syscall_info *canonical,
 		      bool force_send)
 {
-	size_t len = 0;
 	size_t recv_len = 0;
 	char *buf = NULL;
 
-	len = get_replication_buffer_len(canonical);
-	if(0 == len) {
-		return 0;  // nothing to replicate
-	}
-
 	if(env->is_leader) {
+		size_t len = 0;
+		len = get_replication_buffer_len(canonical);
 		SAFE_Z_TRY_EXCEPT(
 			buf = batch_comm_reserve(bc, len),
 			goto abort0);
@@ -190,9 +186,8 @@ int replicate_results(struct environment *env,
 		SAFE_Z_TRY_EXCEPT(
 			buf = batch_comm_receive(bc, &recv_len),
 			goto abort1);
-		SAFE_Z_TRY(recv_len == len);  // assert
 		SAFE_NZ_TRY_EXCEPT(
-			write_back_replication_buffer(canonical, buf, len),
+			write_back_replication_buffer(canonical, buf, recv_len),
 			goto abort1);
 	}
 

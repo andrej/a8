@@ -190,6 +190,12 @@ SYSCALL_EXIT_PROT(default_creates_fd_exit);
  X( __NR_getpeername, getpeername,  SYSCALL_ENTER(getsockname), \
                                 NULL, \
                                 SYSCALL_EXIT(default_free_scratch)) /* TODO */ \
+ X( __NR_exit,      exit,       SYSCALL_ENTER(default_checked), \
+                                NULL, \
+                                NULL) \
+ X( __NR_exit_group, exit_group, SYSCALL_ENTER(default_checked), \
+                                NULL, \
+                                NULL) \
  
 #include "handler_table_prototypes.h"
 

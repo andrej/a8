@@ -26,6 +26,8 @@
 #include "unprotected.h"
 #include "checkpointing.h"
 #include "globals.h"
+#include "policy.h"
+
 
 /* ************************************************************************** *
  * Globals                                                                    *
@@ -33,6 +35,7 @@
 
 int monmod_log_fd = 0;
 size_t monmod_page_size = 0;
+bool is_exiting = false;
 
 
 /* ************************************************************************** *
@@ -66,6 +69,9 @@ void __unprotected_end();
  * ************************************************************************** */
 
 static int
+syscall_dispatch_apply_policy(int dispatch, struct syscall_info *canonical,
+                              struct policy *policy);
+static int
 syscall_check_dispatch_sanity(int dispatch,
                               struct syscall_handler const *const handler,
                               struct syscall_info *actual,
@@ -79,6 +85,8 @@ syscall_handle_divergence(struct syscall_handler const *const handler,
 static void syscall_execute_locally(struct syscall_handler const *const handler,
                                     struct syscall_info *actual, 
                                     struct syscall_info *canonical);
+
+static void terminate();
 
 
 /* ************************************************************************** *
@@ -94,6 +102,10 @@ long monmod_handle_syscall(struct syscall_trace_func_stack *stack)
            SYSCALL_ARG2_REG(stack->regs), SYSCALL_ARG3_REG(stack->regs), 
            SYSCALL_ARG4_REG(stack->regs), SYSCALL_ARG5_REG(stack->regs));
 #endif
+
+	if(is_exiting) {
+		terminate();
+	}
 
 	int s = 0;
 	struct pt_regs *regs = &(stack->regs);
@@ -134,8 +146,15 @@ long monmod_handle_syscall(struct syscall_trace_func_stack *stack)
 		dispatch = handler->enter(&env, handler, &actual, &canonical,
 		                          &handler_scratch_space);
 	}
+	if(policy_is_exempt(conf.policy, canonical.no)) {
+#if VERBOSITY >= 2
+		SAFE_LOGF("Policy \"%s\" exempted system call from "
+		          "cross-checking.\n", conf.policy->name);
+#endif
+		dispatch &= ~DISPATCH_CHECKED;
+		dispatch |= DISPATCH_UNCHECKED;
+	}
 	syscall_check_dispatch_sanity(dispatch, handler, &actual, &canonical);
-
 
 	/* Phase 2: Cross-check system call & arguments with other variants. */
 	if(dispatch & (DISPATCH_CHECKED | DISPATCH_DEFERRED_CHECK)) {
@@ -160,15 +179,22 @@ long monmod_handle_syscall(struct syscall_trace_func_stack *stack)
 	}
 
 	if(dispatch & DISPATCH_NEEDS_REPLICATION) {
+		bool force_send = conf.replication_batch_size == 0;
 #if VERBOSITY >= 3
-		SAFE_LOG("Replicating results.\n");
+		if(is_leader) {
+			SAFE_LOG("Appending replication information to "
+			         "batch.\n");
+		} else {
+			SAFE_LOG("Awaiting replication information from "
+			         "leader.\n");
+		}
 #endif
 		/* Replicates contents of canonical.ret and canonical.args to 
 		   be the same across all nodes. It is the exit handler's 
 		   responsibility to copy this back to the actual results as
 		   approriate. By default, actual.ret = canonical.ret will be
 		   copied. */
-		SAFE_NZ_TRY(replicate_results(&env, &canonical));
+		SAFE_NZ_TRY(replicate_results(&env, &canonical, force_send));
 		actual.ret = canonical.ret;
 	}
 
@@ -413,6 +439,19 @@ void monmod_library_init()
 	}
 
 	env_init(&env, &comm, &conf, own_id);
+	size_t replication_batch_size = conf.replication_batch_size;
+	if(0 == replication_batch_size) {
+		/* For a zero setting, batching is disabled. In this case, the
+		   replication_batch_size effectively only affects the 
+		   preallocated replication buffer size. So we don't have to
+		   reallocate a new buffer for each small replication, we chose
+		   a larger default value. 
+		   (The fact that batching is disabled is enforced by setting
+		   force_send on batch_comm_broadcast_reserved() calls based on
+		   0 == replication_batch_size condition.)*/
+		replication_batch_size = 4096;
+	}
+	init_replication(&env, replication_batch_size);
 	
 	/* The architecture-specific caller of this code issues a
 	   monmod_reprotect call to initialize the module and protect the
@@ -423,19 +462,21 @@ void monmod_library_init()
 void 
 __attribute__((destructor)) 
 __attribute__((section("unprotected")))
-destruct()
+monmod_library_destroy()
 {
-	/* Currently, the destructor is called while the monitor's pages are
-	   protected, so we are restricted to only calling unprotected
-	   functions here. */
+	is_exiting = true;
+	unprotected_funcs.exit(0);  /* any system call that gets us into
+	                               monmod_handle_syscall will do here. */
+}
 
-	unprotected_funcs.close(monmod_log_fd);
-
-	// Close shared memory area.
-	// comm_destroy(&comm);
-
+static void terminate()
+{
+	free_replication();
+	comm_destroy(&comm);
+	SAFE_LOG("Terminating.\n");
+	close(monmod_log_fd);
 	/* Nothing may run after our monitor is destroyed. Without this,
 	   exit code may flush buffers etc without us monitoring this.
 	   FIXME always exits with zero exit code */
-	unprotected_funcs.exit(0);
+	exit(0);
 }

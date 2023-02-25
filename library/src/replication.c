@@ -1,6 +1,33 @@
 #include "replication.h"
+#include "batched_communication.h"
 
-char replication_buffer[REPLICATION_BUFFER_SZ];
+
+/* ************************************************************************** *
+ * Internal Forward Declarations                                              *
+ * ************************************************************************** */
+
+#define CROSS_CHECK_BUFFER_SZ 4096
+char cross_check_buffer[CROSS_CHECK_BUFFER_SZ];
+
+struct batch_communicator *bc = NULL;
+
+static char *serialize_args(size_t *len, struct syscall_info *canonical);
+
+static size_t get_replication_buffer_len(struct syscall_info *canonical);
+
+static int generate_replication_buffer(struct syscall_info *canonical,
+                                       char *into, size_t len);
+
+static int write_back_replication_buffer(struct syscall_info *canonical,
+				         char *replication_buf,
+				         size_t replication_buf_len);
+
+static char *receive_replication_buffer(struct environment *env, size_t *len);
+
+
+/* ************************************************************************** *
+ * Cross-Checking                                                             *
+ * ************************************************************************** */
 
 int cross_check_args(struct environment *env,
                       struct syscall_info *canonical) 
@@ -8,6 +35,12 @@ int cross_check_args(struct environment *env,
 	bool ret = false;
 	char *serialized_args_buf = NULL;
 	size_t serialized_args_buf_len = 0;
+
+	if(env->is_leader) {
+		SAFE_NZ_TRY_EXCEPT(batch_comm_flush(bc),
+		                   return -1);
+	}
+
 	serialized_args_buf = serialize_args(&serialized_args_buf_len,
 	                                     canonical);
 	if(NULL == serialized_args_buf) {
@@ -25,7 +58,7 @@ int cross_check_args(struct environment *env,
 	ret = comm_all_agree(env->comm, env->leader_id,
 	                     cross_check_buf_len,
 			     cross_check_buf);
-	if(replication_buffer != serialized_args_buf) {
+	if(cross_check_buffer != serialized_args_buf) {
 		safe_free(serialized_args_buf, serialized_args_buf_len);
 	}
 	if(0 > ret) {
@@ -54,8 +87,8 @@ char *serialize_args(size_t *len, struct syscall_info *canonical)
 		n_args++;
 	}
 	n += sizeof(uint64_t); // For syscall no
-	out = replication_buffer;
-	if(n > sizeof(replication_buffer)) {
+	out = cross_check_buffer;
+	if(n > sizeof(cross_check_buffer)) {
 		out = safe_malloc(n);
 	}
 	if(NULL == out) {
@@ -109,83 +142,73 @@ void log_args(char *log_buf, size_t max_len,
 	#undef append
 }
 
-int replicate_results(struct environment *env,
-	              struct syscall_info *canonical)
-{
-	size_t replication_buf_len = 0;
-	char *replication_buf = NULL;
 
-	if(env->is_leader) {
-		replication_buf = get_replication_buffer(
-			canonical,
-			&replication_buf_len);
-		if(NULL == replication_buf) {
-			return 1;
-		}
-		NZ_TRY_EXCEPT(comm_broadcast(env->comm, replication_buf_len, 
-		                             replication_buf),
-			      goto abort1);
-	} else {
-		/* We cannot safely use comm_receive_dynamic here, as it calls 
-		   non-reentrant malloc(). */
-		struct peer *leader_peer = NULL;
-		Z_TRY_EXCEPT(leader_peer = 
-		                comm_get_peer(env->comm, env->leader_id),
-			goto abort0);
-		struct message msg;
-		size_t receive_buf_len = 0;
-		NZ_TRY_EXCEPT(comm_receive_header(env->comm, leader_peer,
-		                                  &msg),
-			      goto abort0);
-		if(msg.length > sizeof(replication_buffer)) {
-			receive_buf_len = msg.length;
-			Z_TRY_EXCEPT(replication_buf = 
-			                safe_malloc(receive_buf_len),
-			             goto abort0);
-		} else {
-			receive_buf_len = sizeof(replication_buffer);
-			replication_buf = replication_buffer;
-		}
-		NZ_TRY_EXCEPT(comm_receive_body(env->comm, leader_peer, &msg,
-		                                &receive_buf_len,
-						replication_buf),
-			      goto abort1);
-		if(msg.length != receive_buf_len) {
-			SAFE_WARNF("Advertised message length in header "
-			          "%lu did not match received length %lu.\n",
-				  msg.length, receive_buf_len);
-			goto abort1;
-		}
-		replication_buf_len = msg.length;
-		NZ_TRY_EXCEPT(write_back_replication_buffer(
-					canonical,
-					replication_buf,
-					replication_buf_len),
-			      goto abort1);
+/* ************************************************************************** *
+ * Results Replication                                                        *
+ * ************************************************************************** */
+
+int init_replication(struct environment *env, size_t size)
+{
+	struct peer *leader_peer = NULL;
+	if(!env->is_leader) {
+		Z_TRY(leader_peer = comm_get_peer(env->comm, env->leader_id));
+	}
+	Z_TRY(bc = init_batch_comm(env->comm, leader_peer, size));
+	return 0;
+}
+
+void free_replication()
+{
+	SAFE_NZ_TRY(batch_comm_flush(bc));	
+	free_batch_comm(bc);
+}
+
+int replicate_results(struct environment *env,
+	              struct syscall_info *canonical,
+		      bool force_send)
+{
+	size_t len = 0;
+	size_t recv_len = 0;
+	char *buf = NULL;
+
+	len = get_replication_buffer_len(canonical);
+	if(0 == len) {
+		return 0;  // nothing to replicate
 	}
 
-	if(replication_buf != replication_buffer) {
-		safe_free(replication_buf, replication_buf_len);
+	if(env->is_leader) {
+		SAFE_Z_TRY_EXCEPT(
+			buf = batch_comm_reserve(bc, len),
+			goto abort0);
+		SAFE_NZ_TRY_EXCEPT(
+			generate_replication_buffer(canonical, buf, len),
+			goto abort1);
+		SAFE_NZ_TRY_EXCEPT(
+			batch_comm_broadcast_reserved(bc, force_send),
+			goto abort1);
+	} else {
+		SAFE_Z_TRY_EXCEPT(
+			buf = batch_comm_receive(bc, &recv_len),
+			goto abort1);
+		SAFE_Z_TRY(recv_len == len);  // assert
+		SAFE_NZ_TRY_EXCEPT(
+			write_back_replication_buffer(canonical, buf, len),
+			goto abort1);
 	}
 
 	return 0;
 
 abort1:
-	if(replication_buf != replication_buffer) {
-		safe_free(replication_buf, replication_buf_len);
+	if(env->is_leader) {
+		batch_comm_cancel_reserved(bc);
 	}
 abort0:
 	return 1;
 }
 
-char *get_replication_buffer(struct syscall_info *canonical,
-			     size_t *replication_buf_len)
+static size_t get_replication_buffer_len(struct syscall_info *canonical)
 {
 	size_t n = 0;
-	ssize_t s = 0;
-	size_t written = 0;
-	char *replication_buf = NULL;
-
 	for(size_t i = 0; i < N_SYSCALL_ARGS; i++) {
 		if(!(ARG_FLAG_REPLICATE & canonical->arg_flags[i])) {
 			continue;
@@ -196,42 +219,43 @@ char *get_replication_buffer(struct syscall_info *canonical,
 	if(canonical->ret_flags & ARG_FLAG_REPLICATE) {
 		n += get_serialized_size(&canonical->ret, &canonical->ret_type);
 	}
-	if(0 == n) {
-		return NULL;
-	}
+	return n;
+}
 
-	replication_buf = replication_buffer;
-	if(n > sizeof(replication_buffer)) {
-		replication_buf = safe_malloc(n);
-	}
-	if(NULL == replication_buf) {
-		return NULL;
-	}
+static int generate_replication_buffer(struct syscall_info *canonical,
+                                       char *into, size_t len)
+{
+	ssize_t s = 0;
+	size_t written = 0;
+	SAFE_Z_TRY(into);  // assert
+
 	for(size_t i = 0; i < N_SYSCALL_ARGS; i++) {
 		if(!(ARG_FLAG_REPLICATE & canonical->arg_flags[i])) {
 			continue;
 		}
-		LZ_TRY_EXCEPT(s = serialize_into(&canonical->args[i], 
-		                          &canonical->arg_types[i],
-				          replication_buf + written),
-			      return NULL);
+		SAFE_LZ_TRY_EXCEPT(
+			s = serialize_into(&canonical->args[i], 
+		                           &canonical->arg_types[i],
+			                   into + written),
+			return 1);
 		written += s;
 	}
 	if(canonical->ret_flags & ARG_FLAG_REPLICATE) {
-		LZ_TRY_EXCEPT(s = serialize_into(&canonical->ret,
-				          &canonical->ret_type,
-				          replication_buf + written),
-			      return NULL);
+		SAFE_LZ_TRY_EXCEPT(
+			s = serialize_into(&canonical->ret,
+				           &canonical->ret_type,
+				           into + written),
+			return 1);
 		written += s;
 	}
 
-	*replication_buf_len = written;
-	return replication_buf;
+	SAFE_Z_TRY(len == written);  // assert
+	return 0;
 }
 
-int write_back_replication_buffer(struct syscall_info *canonical,
-				  char *replication_buf,
-				  size_t replication_buf_len)
+static int write_back_replication_buffer(struct syscall_info *canonical,
+				         char *replication_buf,
+				         size_t replication_buf_len)
 {
 	size_t s = 0;
 	size_t consumed = 0;
@@ -240,17 +264,17 @@ int write_back_replication_buffer(struct syscall_info *canonical,
 		if(!(ARG_FLAG_REPLICATE & canonical->arg_flags[i])) {
 			continue;
 		}
-		LZ_TRY(s = deserialize_overwrite(
-				replication_buf + consumed,
-		                &canonical->arg_types[i],
-				&canonical->args[i]));
+		SAFE_LZ_TRY(
+			s = deserialize_overwrite(replication_buf + consumed,
+		                                  &canonical->arg_types[i],
+				                  &canonical->args[i]));
 		consumed += s;
 	}
 	if(canonical->ret_flags & ARG_FLAG_REPLICATE) {
-		LZ_TRY(s = deserialize_overwrite(
-				replication_buf + consumed,
-		                &canonical->ret_type,
-				&canonical->ret));
+		SAFE_LZ_TRY(
+			s = deserialize_overwrite(replication_buf + consumed,
+		                                  &canonical->ret_type,
+		                                  &canonical->ret));
 		consumed += s;
 	}
 

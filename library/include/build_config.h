@@ -48,7 +48,7 @@
  * survivability aspect and allows benchmarking a pure MVEE implementation that
  * terminates upon divergence.
  */
-#define ENABLE_CHECKPOINTING CRIU_CHECKPOINTING 
+#define ENABLE_CHECKPOINTING NO_CHECKPOINTING 
 
 #define MONMOD_SYSFS_PATH "/sys/kernel/monmod"
 #define MONMOD_SYSFS_UNTRACED_SYSCALLS_FILE "/untraced_syscalls"

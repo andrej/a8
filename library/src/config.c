@@ -53,6 +53,19 @@ int parse_config(const char *path, struct config *dest)
 		dest->restore_interval = tmp_int;
 	}
 
+	if(config_lookup_int(&config, "replication_batch_size", &tmp_int)) {
+		dest->replication_batch_size = tmp_int;
+	} else {
+		dest->replication_batch_size = 0;
+	}
+
+	dest->policy = NULL;
+	if(config_lookup_string(&config, "policy", &tmp_str)) {
+		Z_TRY(dest->policy = policy_from_str(tmp_str));
+	} else {
+		Z_TRY(dest->policy = policy_from_str("full"));
+	}
+
 	for(int i = 0; i < n_variants; i++) {
 		Z_TRY(variant_config = config_setting_get_elem(variants_config,
 		                                               i));

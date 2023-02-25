@@ -11,6 +11,7 @@
 
 #include "build_config.h"
 #include "syscall.h"
+#include "custom_syscalls.h"
 
 
 /* ************************************************************************** *

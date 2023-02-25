@@ -2,6 +2,7 @@
 #define CONFIG_H
 
 #include <sys/socket.h>
+#include "policy.h"
 
 #define MAX_N_VARIANTS 8
 #define MAX_N_BREAKPOINTS 4
@@ -42,12 +43,26 @@ struct config {
 	size_t n_variants;
 	struct variant_config variants[MAX_N_VARIANTS];
 	/**
+	 * The cross-checking policy can exempt some non-security critical 
+	 * system calls from cross-checking.
+	 */
+	struct policy *policy;
+	/**
 	 * If set to a positive value, this will reset the variant to the last
 	 * checkpoint after every # restore_interval system calls. Set too low,
 	 * this will lead to an infinite loop. For server-type applications,
 	 * this could potentially be useful as a moving target defense.
 	 */
 	int restore_interval;
+	/**
+	 * If set to > 1, replication buffers are exchanged in batches of up to
+	 * the given size between variants. System call replication information
+	 * is always exchanged when
+	 *  (a) a cross-checked system call occurs (all variants need to be able
+	 *      to advance to the system call)
+	 *  (b) the batch size is reached
+	 */
+	int replication_batch_size;
 };
 
 /**

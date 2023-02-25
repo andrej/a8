@@ -269,6 +269,7 @@ void syscall_handle_divergence(struct syscall_handler const *const handler,
                                struct syscall_info *actual,
                                struct syscall_info *canonical)
 {
+	int s;
 #if !ENABLE_CHECKPOINTING
 	SAFE_LOG("Divergence -- abort!\n");
 #else

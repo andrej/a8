@@ -62,10 +62,10 @@ int init_checkpoint_env(struct checkpoint_env *env,
 	   waiting processes and the main process (for fork checkpointing). 
 	   CRIU checkpointing uses signals exclusively for communication. */
 	void *smem = NULL;
-	Z_TRY(smem = mmap(NULL, page_size, PROT_READ | PROT_WRITE,
+	Z_TRY(smem = mmap(NULL, monmod_page_size, PROT_READ | PROT_WRITE,
 	                  MAP_SHARED | MAP_ANONYMOUS, -1, 0));
 	env->smem = (struct checkpointing_smem *)smem;
-	env->smem_length = page_size;
+	env->smem_length = monmod_page_size;
 	NZ_TRY(sem_init(&env->smem->semaphore, 1, 1));
 #endif
 
@@ -178,11 +178,13 @@ static int
 __attribute ((section ("unprotected")))
 overwrite_instruction(void *loc, void *instr, size_t len)
 {
-	void *page_aligned = (void *)((unsigned long long)loc & ~(page_size-1));
-	NZ_TRY(unprotected_funcs.mprotect(page_aligned, page_size, PROT_WRITE));
+	void *page_aligned = (void *)((unsigned long long)loc 
+	                              & ~(monmod_page_size-1));
+	NZ_TRY(unprotected_funcs.mprotect(page_aligned, monmod_page_size, 
+	                                  PROT_WRITE));
 	unprotected_funcs.memcpy(loc, instr, len);
-	NZ_TRY(unprotected_funcs.mprotect(page_aligned, page_size, PROT_READ |
-	                                                           PROT_EXEC));
+	NZ_TRY(unprotected_funcs.mprotect(page_aligned, monmod_page_size,
+	                                  PROT_READ | PROT_EXEC));
 	return 0;
 }
 

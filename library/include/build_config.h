@@ -11,7 +11,7 @@
  *    - Replication of results
  *    - Adding/removing of descriptor mappings
  */
-#define VERBOSITY 3
+#define VERBOSITY 1
 
 /**
  * CHECK_HASHES_ONLY
@@ -39,7 +39,7 @@
  */
 #define NO_HANDLER_TERMINATES 0 
 
-#define NO_CHECKPOITING
+#define NO_CHECKPOITING 0
 #define FORK_CHECKPOINTING 1
 #define CRIU_CHECKPOINTING 2
 
@@ -49,6 +49,24 @@
  * terminates upon divergence.
  */
 #define ENABLE_CHECKPOINTING NO_CHECKPOINTING 
+
+/**
+ * Since malloc() is non-reentrant, we cannot use it in system call handlers.
+ * If this flag is enabled, a safe mmap-based alternative is enabled. Note,
+ * though, that this is a lot slower than malloc() and preallocated buffers
+ * should be used where possible for performance.
+ */
+#define ENABLE_SAFE_MALLOC 0
+
+/**
+ * This size is only used if batched replication is *not* used. This is the
+ * size of the preallocated buffer used to exchange replication messages.
+ */
+#define PREALLOCATED_REPLICATION_SZ 32768
+
+#define HANDLER_SCRATCH_BUFFER_SZ 32768
+
+#define CROSS_CHECK_BUFFER_SZ 4096
 
 #define MONMOD_SYSFS_PATH "/sys/kernel/monmod"
 #define MONMOD_SYSFS_UNTRACED_SYSCALLS_FILE "/untraced_syscalls"

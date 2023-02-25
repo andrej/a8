@@ -91,7 +91,6 @@ extern const struct syscall_handler * const syscall_handlers_arch[];
 extern const struct syscall_handler * const syscall_handlers_canonical[];
 
 /* See comment in replication.h for replication_buffer. */
-#define HANDLER_SCRATCH_BUFFER_SZ 4096
 extern char handler_scratch_buffer[HANDLER_SCRATCH_BUFFER_SZ];
 
 struct syscall_handler const *get_handler(long no);

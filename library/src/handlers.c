@@ -43,7 +43,7 @@ void *next_preallocated = handler_scratch_buffer;
 		*(size_t *)(next_preallocated + sz) = sz; \
 		next_preallocated += sz + sizeof(size_t); \
 	} else { \
-		*scratch = safe_malloc(sz + sizeof(size_t)); \
+		SAFE_Z_TRY(*scratch = safe_malloc(sz + sizeof(size_t))); \
 		*(size_t *)*scratch = sz + sizeof(size_t); \
 		*scratch = (*scratch) + sizeof(size_t); \
 		if(NULL == scratch) { \
@@ -132,6 +132,16 @@ static inline int get_dispatch_by_path(const char *path)
 
 struct syscall_handler const *get_handler(long no)
 {
+#if VERBOSITY >= 2
+	static size_t leaked = 0;
+	if(leaked < (char*)next_preallocated - handler_scratch_buffer) {
+		SAFE_WARNF("Previous system call handler leaked %ld bytes of "
+		           "scratch memory.\n",
+		           (char *)next_preallocated - handler_scratch_buffer
+			   - leaked);
+		leaked = (char*)next_preallocated - handler_scratch_buffer;
+	}
+#endif
 	const size_t n_handlers =
 		sizeof(syscall_handlers_arch)/sizeof(syscall_handlers_arch[0]);
 	no -= MIN_SYSCALL_NO;
@@ -181,7 +191,7 @@ SYSCALL_EXIT_PROT(default_creates_fd_exit)
 	struct descriptor_info *di;
 	enum descriptor_type type;
 	if(0 > actual->ret) {
-		return;
+		goto done;
 	}
 #if VERBOSITY >= 3
 	SAFE_LOGF("%s adding descriptor.\n", handler->name);
@@ -213,6 +223,8 @@ SYSCALL_EXIT_PROT(default_creates_fd_exit)
 	}
 	di = env_add_local_descriptor(env, local_fd, flags, type);
 	actual->ret = canonical_fd_for(env, di);
+
+done:
 	free_scratch();
 	return;
 }
@@ -716,7 +728,7 @@ SYSCALL_POST_CALL_PROT(fstat)
 SYSCALL_EXIT_PROT(fstat)
 {
 	if(!(dispatch & DISPATCH_NEEDS_REPLICATION)) {
-		return;
+		goto done;
 	}
 	char *normalized_stat = (char *)canonical->args[1];
 	denormalize_stat_struct_into(normalized_stat,
@@ -724,6 +736,7 @@ SYSCALL_EXIT_PROT(fstat)
 	if(NULL != normalized_stat) {
 		free(normalized_stat);
 	}
+done:
 	free_scratch();
 }
 
@@ -1361,7 +1374,7 @@ SYSCALL_EXIT_PROT(epoll_pwait)
 	
 	if(!(dispatch & DISPATCH_NEEDS_REPLICATION)) {
 		// Just in case we ever implement this dispatch type for epolls.
-		return;
+		goto done;
 	}
 
 	int epfd = canonical->args[0];
@@ -1371,7 +1384,7 @@ SYSCALL_EXIT_PROT(epoll_pwait)
 	struct epoll_event *events = (struct epoll_event *)actual->args[1];
 
 	if(0 > n_events) {
-		return;
+		goto done;
 	} else if(n_events > maxevents) {
 		post_call_error();
 	}
@@ -1391,6 +1404,9 @@ SYSCALL_EXIT_PROT(epoll_pwait)
 		memcpy(&events[i].data, &own_event->data.data, 
 		       sizeof(own_event->data.data));
 	}
+
+done:
+	free_scratch();
 }
 
 

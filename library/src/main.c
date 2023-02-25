@@ -464,7 +464,7 @@ void monmod_library_init()
 		   (The fact that batching is disabled is enforced by setting
 		   force_send on batch_comm_broadcast_reserved() calls based on
 		   0 == replication_batch_size condition.)*/
-		replication_batch_size = 4096;
+		replication_batch_size = PREALLOCATED_REPLICATION_SZ;
 	}
 	init_replication(&env, replication_batch_size);
 	

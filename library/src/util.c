@@ -10,6 +10,7 @@
 
 void *safe_malloc(size_t size)
 {
+#if ENABLE_SAFE_MALLOC
 	const long ret = monmod_trusted_syscall(
 		__NR_mmap, 0, size, (long)(PROT_READ | PROT_WRITE),
 		(long)(MAP_PRIVATE | MAP_ANONYMOUS), 0, 0);
@@ -17,10 +18,17 @@ void *safe_malloc(size_t size)
 		return NULL;
 	}
 	return (void *)ret;
+#else
+	SAFE_WARNF("safe_malloc is disabled, but a memory request for " \
+	           "%lu bytes was issued. Enable safe_malloc, or use/increase "\
+		   "preallocated buffers.\n", size);
+	return NULL;
+#endif
 }
 
 void safe_free(void *ptr, size_t size)
 {
+#if ENABLE_SAFE_MALLOC
 	const int ret = monmod_trusted_syscall(
 		SYS_munmap, (long)ptr, (long)size, 0, 0, 0, 0);
 	if(0 > ret) {
@@ -28,6 +36,11 @@ void safe_free(void *ptr, size_t size)
 		          ptr, size);
 		exit(1);
 	}
+#else
+	SAFE_WARNF("Tried to free pointer %p (size %lu), even though "
+	           "safe_malloc is disabled.\n", ptr, size);
+	exit(1);
+#endif
 }
 
 struct _find_mapped_region_bounds_data {

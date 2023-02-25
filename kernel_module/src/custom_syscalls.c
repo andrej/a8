@@ -139,7 +139,7 @@ int sys_monmod_reprotect(struct pt_regs *regs, struct tracee *tracee)
 
 	SYSCALL_NO_REG(regs) = __NR_mprotect;
 #if MONMOD_SKIP_MONITOR_PROTECTION_CALLS
-	SYSCALL_NO_REG(regs) = (unsigned long)-2;
+	SYSCALL_NO_REG(regs) = __NR_getpid;
 #endif
 	SYSCALL_ARG0_REG(regs) = (long)tracee->config.monitor_start;
 	SYSCALL_ARG1_REG(regs) = (long)tracee->config.monitor_len;
@@ -258,6 +258,9 @@ void custom_syscall_enter(struct pt_regs *regs, long id, struct tracee *tracee)
 			return;
 		}
 	}
+	/* Execute a harmless and fast getpid instead of the unknown (to the
+	   kernel) system call. Its return value will be overwriten. */
+	SYSCALL_NO_REG(regs) = __NR_getpid;
 	tracee->entry_info.do_inject_return = true;
 	tracee->entry_info.inject_return = ret;
 }
@@ -265,6 +268,7 @@ void custom_syscall_enter(struct pt_regs *regs, long id, struct tracee *tracee)
 void custom_syscall_exit(struct pt_regs *regs, long return_value,
                          struct tracee *tracee)
 {
+	SYSCALL_NO_REG(regs) = tracee->entry_info.syscall_no;
 	if(tracee->entry_info.do_inject_return) {
 		SYSCALL_RET_REG(regs) = tracee->entry_info.inject_return;
 	}

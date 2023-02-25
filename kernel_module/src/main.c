@@ -52,7 +52,7 @@ static void set_syscall_unprotect_monitor(
 {
 	SYSCALL_NO_REG(regs) = __NR_mprotect;
 #if MONMOD_SKIP_MONITOR_PROTECTION_CALLS
-	SYSCALL_NO_REG(regs) = (unsigned long)-2;
+	SYSCALL_NO_REG(regs) = (unsigned long)__NR_getpid;
 #endif
 	SYSCALL_ARG0_REG(regs) = (long)tracee->config.monitor_start;
 	SYSCALL_ARG1_REG(regs) = (long)tracee->config.monitor_len;
@@ -123,13 +123,11 @@ static void regular_syscall_enter(struct pt_regs *regs, long id,
 	if(syscall_breaks_protection(tracee, regs, id)) {
 		printk(KERN_WARNING "monmod: <%d> system call attempted to "
 		       "alter memory protection of monitor area.\n", pid);
-		/* The following should cause a -ENOSYS return on both x86_64 
-		and aarch64. If we use -1, aarch64 will go through the
-		__sys_trace_return_skipped path (entry.S:719), which will also 
-		report trace_sys_exit(). For consistency with x86_64, which does 
-		not do that, we choose -2, which sould be well out of range as 
-		well and return -ENOSYS on both architectures. */
-		SYSCALL_NO_REG(regs) = (unsigned long)-2;
+		/* Replace the call with a harmless getpid(). We inject an
+		   -EPERM return on exit. */
+		SYSCALL_NO_REG(regs) = (unsigned long)__NR_getpid;
+		tracee->entry_info.do_inject_return = true;
+		tracee->entry_info.inject_return = -EPERM;
 		return;
 	}
 	if(!monmod_syscall_is_active(id)) {
@@ -170,6 +168,9 @@ static void regular_syscall_exit(struct pt_regs *regs,
                                  unsigned long return_value,
 				 struct tracee *tracee)
 {
+	if(tracee->entry_info.do_inject_return) {
+		SYSCALL_RET_REG(regs) = tracee->entry_info.inject_return;
+	}
 #if !MONMOD_SKIP_MONITOR_PROTECTION_CALLS
 	if(__NR_monmod_reprotect == tracee->entry_info.syscall_no) {
 		if(0 != SYSCALL_RET_REG(regs)) {

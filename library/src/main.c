@@ -99,10 +99,10 @@ static void terminate();
 long monmod_handle_syscall(struct syscall_trace_func_stack *stack)
 {
 #if MEASURE_TRACING_OVERHEAD
-	return monmod_trusted_syscall(SYSCALL_NO_REG(regs), 
-           SYSCALL_ARG0_REG(stack->regs), SYSCALL_ARG1_REG(stack->regs), 
-           SYSCALL_ARG2_REG(stack->regs), SYSCALL_ARG3_REG(stack->regs), 
-           SYSCALL_ARG4_REG(stack->regs), SYSCALL_ARG5_REG(stack->regs));
+	return monmod_trusted_syscall(SYSCALL_NO_REG(&stack->regs), 
+           SYSCALL_ARG0_REG(&stack->regs), SYSCALL_ARG1_REG(&stack->regs), 
+           SYSCALL_ARG2_REG(&stack->regs), SYSCALL_ARG3_REG(&stack->regs), 
+           SYSCALL_ARG4_REG(&stack->regs), SYSCALL_ARG5_REG(&stack->regs));
 #endif
 
 	if(is_exiting) {

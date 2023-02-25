@@ -278,12 +278,10 @@ void syscall_handle_divergence(struct syscall_handler const *const handler,
 #if VERBOSITY > 0 && VERBOSITY < 3
 	// Print divergence information if we have not before.
 	if(NULL != handler) {
-		SAFE_LOGF("%s (%ld) -- enter from %p.\n", 
-		          handler->name, actual.no, ret_addr);
+		SAFE_LOGF("%s (%ld)\n", handler->name, actual->no);
 		char log_buf[1024];
 		log_buf[0] = '\0';
-		log_args(log_buf, sizeof(log_buf), &actual, 
-				&canonical);
+		log_args(log_buf, sizeof(log_buf), actual, canonical);
 		SAFE_LOGF_LEN(sizeof(log_buf), "%s", log_buf);
 	}
 #endif

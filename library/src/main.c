@@ -137,7 +137,8 @@ long monmod_handle_syscall(struct syscall_trace_func_stack *stack)
 	if(NULL != handler) {
 		canonical.no = handler->canonical_no;
 	}
-	memcpy(canonical.args, actual.args, sizeof(actual.args));
+	SYSCALL_ARGS_TO_ARRAY(regs, canonical.args);  
+		// will probably be modified
 
 	/* Phase 1: Determine call dispatch type through entry handler. */
 #if VERBOSITY >= 2

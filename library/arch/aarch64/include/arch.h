@@ -36,7 +36,7 @@
 	args[3] = SYSCALL_ARG3_REG(regs); \
 	args[4] = SYSCALL_ARG4_REG(regs); \
 	args[5] = SYSCALL_ARG5_REG(regs); \
-	args[6] = SYSCALL_ARG6_REG(regs); \
+	/* We skip arg 6, as it is unused, for compatibility with x86. */ \
 }
 
 #define UCONTEXT_PC(c) (((ucontext_t *)c)->uc_mcontext.pc)

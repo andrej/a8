@@ -101,29 +101,61 @@ void *next_preallocated = handler_scratch_buffer;
 
 static inline int get_dispatch_by_path(const char *path)
 {
-	// Check path
-	char pathname[PATH_MAX];
-	if(NULL == realpath(path, pathname)) {
+	static struct cache {
+		char key[PATH_MAX];
+		char value[PATH_MAX];
+	} full_path_cache[32] = {};
+	int cache_i = 0;
+	int cache_len = 0;
+	const char *full_path = NULL;
+	char realpath_buf[PATH_MAX];
+
+	// Check for path in cache
+	for(int i = 0; i < cache_len; i++) {
+		if(strlen(path) == strlen(full_path_cache[i].key)
+		   && 0 == strncmp(path, full_path_cache[i].key, PATH_MAX)) {
+			full_path = full_path_cache[i].value;
+		}
+	}
+
+	// Add to cache if not found
+	if(NULL == full_path) {
+		full_path = realpath(path, realpath_buf);
+		if(NULL != full_path) {
+			strncpy(full_path_cache[cache_i].key, path, PATH_MAX);
+			strncpy(full_path_cache[cache_i].value, full_path, 
+			        PATH_MAX);
+			cache_i = (cache_i + 1) %
+			          sizeof(full_path_cache)
+				  /sizeof(full_path_cache[0]);
+			if(cache_i > cache_len) {
+				cache_len = cache_i;
+			}
+		}
+	}
+
+	// Actually handle full_path 
+	if(NULL == full_path) {
+		/* If realpath() errored, it is likely because the path does not
+		   exist. Just dispatch it for everyone and let them handle the
+		   error. */
 		return DISPATCH_EVERYONE | DISPATCH_UNCHECKED;
 	}
-	/* If realpath() errored, it is likely because the path does not
-		exist. Just dispatch it for everyone and let them handle the
-		error. */
 	const char dev_prefix[] = "/dev/";
 	const char proc_prefix[] = "/proc/";
 	const char etc_localtime[] = "/etc/localtime";
 	const char etc_group[] = "/etc/group";
 	const char zoneinfo[] = "/usr/share/zoneinfo/";
-	if(strncmp(pathname, dev_prefix, sizeof(dev_prefix)-1) == 0) {
+	if(strncmp(full_path, dev_prefix, sizeof(dev_prefix)-1) == 0) {
 		return DISPATCH_LEADER | DISPATCH_CHECKED
 		| DISPATCH_NEEDS_REPLICATION;
-	} else if(strncmp(pathname, proc_prefix, sizeof(proc_prefix)-1) == 0
-	          || strncmp(pathname, etc_localtime, sizeof(etc_localtime)-1
+	} else if(strncmp(full_path, proc_prefix, sizeof(proc_prefix)-1) == 0
+	          || strncmp(full_path, etc_localtime, sizeof(etc_localtime)-1
     		      == 0)
-		  || strncmp(pathname, etc_group, sizeof(etc_group)-1) == 0
-		  || strncmp(pathname, zoneinfo, sizeof(zoneinfo)-1) == 0
-		  || NULL != strstr(pathname, "libnss") // FIXME
-		  || NULL != strstr(pathname, "libnsl")
+		  || strncmp(full_path, etc_group, sizeof(etc_group)-1) == 0
+		  || strncmp(full_path, zoneinfo, sizeof(zoneinfo)-1) == 0
+		  || NULL != strstr(full_path, "libnss") // FIXME
+		  || NULL != strstr(full_path, "libnsl")
 		  ) {
 		return DISPATCH_EVERYONE | DISPATCH_UNCHECKED;
 	}

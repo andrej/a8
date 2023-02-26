@@ -6,7 +6,6 @@
  * Internal Forward Declarations                                              *
  * ************************************************************************** */
 
-#define CROSS_CHECK_BUFFER_SZ 4096
 char cross_check_buffer[CROSS_CHECK_BUFFER_SZ];
 
 struct batch_communicator *bc = NULL;

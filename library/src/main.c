@@ -155,11 +155,11 @@ long monmod_handle_syscall(struct syscall_trace_func_stack *stack)
 		                          &handler_scratch_space);
 	}
 	if(policy_is_exempt(conf.policy, &canonical, &env)) {
-#if VERBOSITY >= 2
+#if VERBOSITY >= 3
 		SAFE_LOGF("Policy \"%s\" exempted system call from "
 		          "cross-checking.\n", conf.policy->name);
 #endif
-		dispatch &= ~DISPATCH_CHECKED;
+		dispatch &= ~DISPATCH_CHECKED & ~DISPATCH_DEFERRED_CHECK;
 		dispatch |= DISPATCH_UNCHECKED;
 	}
 	syscall_check_dispatch_sanity(dispatch, handler, &actual, &canonical);
@@ -187,8 +187,7 @@ long monmod_handle_syscall(struct syscall_trace_func_stack *stack)
 	}
 
 	if(dispatch & DISPATCH_NEEDS_REPLICATION) {
-		bool force_send = conf.replication_batch_size == 0;
-#if VERBOSITY >= 3
+#if VERBOSITY >= 4
 		if(is_leader) {
 			SAFE_LOG("Appending replication information to "
 			         "batch.\n");
@@ -202,7 +201,7 @@ long monmod_handle_syscall(struct syscall_trace_func_stack *stack)
 		   responsibility to copy this back to the actual results as
 		   approriate. By default, actual.ret = canonical.ret will be
 		   copied. */
-		SAFE_NZ_TRY(replicate_results(&env, &canonical, force_send));
+		SAFE_NZ_TRY(replicate_results(&env, &canonical));
 		actual.ret = canonical.ret;
 	}
 
@@ -252,7 +251,7 @@ syscall_check_dispatch_sanity(int dispatch,
 		}
 	}
 
-#if VERBOSITY >= 3
+#if VERBOSITY >= 4
 	if(NULL != handler) {
 		syscall_log_buf[0] = '\0';
 		log_args(syscall_log_buf, sizeof(syscall_log_buf), actual, 
@@ -304,7 +303,7 @@ static void syscall_execute_locally(struct syscall_handler const *const handler,
                                     struct syscall_info *actual, 
                                     struct syscall_info *canonical)
 {
-#if VERBOSITY >= 3
+#if VERBOSITY >= 4
 	SAFE_LOGF("Executing syscall no. %ld with (%ld, %ld, %ld, %ld, "
 	          "%ld, %ld)\n",
 		  actual->no, actual->args[0], actual->args[1],
@@ -320,7 +319,7 @@ static void syscall_execute_locally(struct syscall_handler const *const handler,
 	                                     actual->args[5]);
 	canonical->ret = actual->ret;  // Default to the same
 
-#if VERBOSITY >= 3
+#if VERBOSITY >= 4
 		if(-1024 < actual->ret && actual->ret < 0) {
 			SAFE_LOGF("Returned: %ld (potential errno: %s)\n", 
 			          actual->ret, strerror(-actual->ret));
@@ -455,19 +454,7 @@ void monmod_library_init()
 	env_init(&env, &comm);
 	env.leader_id = conf.leader_id;
 	env.is_leader = conf.leader_id == own_id;
-	size_t replication_batch_size = conf.replication_batch_size;
-	if(0 == replication_batch_size) {
-		/* For a zero setting, batching is disabled. In this case, the
-		   replication_batch_size effectively only affects the 
-		   preallocated replication buffer size. So we don't have to
-		   reallocate a new buffer for each small replication, we chose
-		   a larger default value. 
-		   (The fact that batching is disabled is enforced by setting
-		   force_send on batch_comm_broadcast_reserved() calls based on
-		   0 == replication_batch_size condition.)*/
-		replication_batch_size = PREALLOCATED_REPLICATION_SZ;
-	}
-	init_replication(&env, replication_batch_size);
+	init_replication(&env, conf.replication_batch_size);
 	
 	/* The architecture-specific caller of this code issues a
 	   monmod_reprotect call to initialize the module and protect the

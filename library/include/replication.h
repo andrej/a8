@@ -32,13 +32,12 @@ void log_args(char *buf, size_t max_len,
               struct syscall_info *actual,
               struct syscall_info *canonical);
 
-int init_replication(struct environment *env, size_t size);
+int init_replication(struct environment *env, size_t flush_after);
 
 void free_replication();
 
 int replicate_results(struct environment *env,
-                      struct syscall_info *canonical,
-                      bool force_send);
+                      struct syscall_info *canonical);
 
 
 #endif

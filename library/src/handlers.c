@@ -225,7 +225,7 @@ SYSCALL_EXIT_PROT(default_creates_fd_exit)
 	if(0 > actual->ret) {
 		goto done;
 	}
-#if VERBOSITY >= 3
+#if VERBOSITY >= 4
 	SAFE_LOGF("%s adding descriptor.\n", handler->name);
 #endif
 	int flags = 0;
@@ -401,7 +401,7 @@ SYSCALL_EXIT_PROT(close)
 {
 	struct descriptor_info *di = (struct descriptor_info *)*scratch;
 	if(0 == *(int *)&actual->ret) {
-#if VERBOSITY >= 3
+#if VERBOSITY >= 4
 		SAFE_LOGF("close removing descriptor.%s", "\n");
 #endif
 		env_del_descriptor(env, di);
@@ -1022,7 +1022,7 @@ SYSCALL_EXIT_PROT(dup3)
 	if(NULL != di[1]) {
 		/* newfd will override a fd previously opened by the variant. 
 		   old local fd was closed by a successful dup2 call. */
-#if VERBOSITY >= 3
+#if VERBOSITY >= 4
 		SAFE_LOGF("dup3 removing descriptor.%s", "\n");
 #endif
 		env_del_descriptor(env, di[1]);
@@ -1032,7 +1032,7 @@ SYSCALL_EXIT_PROT(dup3)
 	if(is_open_locally(env, di[0])) {
 		local_fd = actual->ret;
 	}
-#if VERBOSITY >= 3
+#if VERBOSITY >= 4
 	SAFE_LOGF("dup3 adding descriptor.%s", "\n");
 #endif
 	Z_TRY_EXCEPT(env_add_descriptor(env, local_fd, newfd, di[0]->flags,

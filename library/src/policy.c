@@ -68,10 +68,11 @@ POLICY_EXEMPT(nonsocket_ro)
 		//case SYSCALL_fadvise64_CANONICAL:
 			return true;
 		case SYSCALL_read_CANONICAL:
-		case SYSCALL_readv_CANONICAL: {
+		case SYSCALL_readv_CANONICAL: 
 		//case SYSCALL_pread64_CANONICAL:
 		//case SYSCALL_select_CANONICAL:
 		//case SYSCALL_poll_CANONICAL:
+		{
 			struct descriptor_info *di;
 			SAFE_NZ_TRY(
 				di = env_get_canonical_descriptor_info(
@@ -83,9 +84,9 @@ POLICY_EXEMPT(nonsocket_ro)
 
 		}
 		//case SYSCALL_futex_CANONICAL:
-		//case SYCSALL_ioctl_CANONICAL:
+		case SYSCALL_ioctl_CANONICAL:
 		case SYSCALL_fcntl_CANONICAL:
-			break;
+			return true;
 		default:
 			return policy_is_exempt_static(base, canonical, env);
 	}
@@ -131,7 +132,7 @@ POLICY_EXEMPT(socket_ro)
 		//case SYSCALL_poll_CANONICAL:
 		case SYSCALL_epoll_wait_CANONICAL:
 		case SYSCALL_epoll_pwait_CANONICAL:
-		//case SYSCALL_recfrom_CANONICAL:
+		case SYSCALL_recvfrom_CANONICAL:
 		//case SYSCALL_recvmsg_CANONICAL:
 		//case SYSCALL_recvmmsg_CANONICAL:
 		case SYSCALL_getsockname_CANONICAL:
@@ -139,7 +140,8 @@ POLICY_EXEMPT(socket_ro)
 		case SYSCALL_getsockopt_CANONICAL:
 			return true;
 		default:
-			return policy_is_exempt_static(base, canonical, env);
+			return policy_is_exempt_static(nonsocket_ro, canonical, 
+			                               env);
 	}
 }
 
@@ -160,6 +162,19 @@ POLICY_EXEMPT(socket_rw)
 			return true;
 		default:
 			return policy_is_exempt_static(socket_ro, canonical,
+			                               env);
+	}
+}
+
+POLICY_EXEMPT(socket_rw_oc)
+{
+	switch(canonical->no) {
+		case SYSCALL_open_CANONICAL:
+		case SYSCALL_openat_CANONICAL:
+		case SYSCALL_close_CANONICAL:
+			return false;
+		default:
+			return policy_is_exempt_static(socket_rw, canonical,
 			                               env);
 	}
 }

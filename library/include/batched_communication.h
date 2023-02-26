@@ -26,6 +26,7 @@ struct batch_communicator {
 	struct peer *recv_peer; /* peer to receive from; 
 	                           for sender, data is broadcast to all */
 	size_t capacity;
+	size_t flush_after;
 	struct batch *current_batch;
 	struct batch_item *current_item;  /* next not-yet-consumed item inside 
 	                               current_batch (in receiver);
@@ -43,7 +44,8 @@ struct batch_communicator {
 
 struct batch_communicator *init_batch_comm(struct communicator *comm, 
                                            struct peer *recv_peer,
-                                           size_t capacity);
+                                           size_t capacity,
+					   size_t flush_after);
 
 void free_batch_comm(struct batch_communicator *bc);
 
@@ -68,7 +70,7 @@ int batch_comm_flush(struct batch_communicator *bc);
  */
 char *batch_comm_reserve(struct batch_communicator *bc, size_t len);
 
-int batch_comm_broadcast_reserved(struct batch_communicator *bc, bool force);
+int batch_comm_broadcast_reserved(struct batch_communicator *bc);
 
 void batch_comm_cancel_reserved(struct batch_communicator *bc);
 

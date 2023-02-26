@@ -146,13 +146,15 @@ void log_args(char *log_buf, size_t max_len,
  * Results Replication                                                        *
  * ************************************************************************** */
 
-int init_replication(struct environment *env, size_t size)
+int init_replication(struct environment *env, size_t flush_after)
 {
 	struct peer *leader_peer = NULL;
 	if(!env->is_leader) {
 		Z_TRY(leader_peer = comm_get_peer(env->comm, env->leader_id));
 	}
-	Z_TRY(bc = init_batch_comm(env->comm, leader_peer, size));
+	Z_TRY(bc = init_batch_comm(env->comm, leader_peer, 
+	                           PREALLOCATED_REPLICATION_SZ, 
+				   flush_after));
 	return 0;
 }
 
@@ -163,8 +165,7 @@ void free_replication()
 }
 
 int replicate_results(struct environment *env,
-	              struct syscall_info *canonical,
-		      bool force_send)
+	              struct syscall_info *canonical)
 {
 	size_t recv_len = 0;
 	char *buf = NULL;
@@ -179,7 +180,7 @@ int replicate_results(struct environment *env,
 			generate_replication_buffer(canonical, buf, len),
 			goto abort1);
 		SAFE_NZ_TRY_EXCEPT(
-			batch_comm_broadcast_reserved(bc, force_send),
+			batch_comm_broadcast_reserved(bc),
 			goto abort1);
 	} else {
 		SAFE_Z_TRY_EXCEPT(

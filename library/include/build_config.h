@@ -6,7 +6,10 @@
  * 0: Nothing at all is printed
  * 1: Errors/warnings are printed
  * 2: Basic information about system call entry/exits is logged
- * 3: Additional information for each system call is logged:
+ * 3: Additional events for system calls are logged
+ *    - Receipt/sending of replication buffers
+ *    - Policy decisions (monitored vs unmonitored)
+ * 4: Detailed information for each system call is logged:
  *    - Arguments and referenced buffers
  *    - Replication of results
  *    - Adding/removing of descriptor mappings

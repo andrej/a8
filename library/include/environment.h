@@ -121,9 +121,7 @@ env_add_local_descriptor(struct environment *env,
 		}
 	}
 	if(DI_FREE != env->descriptors[canonical].flags) {
-#if VERBOSITY >= 3
 		SAFE_WARN("No more space for descriptor mappings.");
-#endif
 		return NULL;
 	}
 	return env_add_descriptor(env, fd, canonical, flags, type);
@@ -134,10 +132,8 @@ static inline int canonical_fd_for(struct environment *env,
 {
 	size_t i = (di - env->descriptors);
 	if(i > MAX_N_DESCRIPTOR_MAPPINGS || !(DI_PRESENT & di->flags)) {
-#if VERBOSITY >= 3
 		SAFE_WARNF("No descriptor mapping with local fd %d registered "
 		          "(%p).\n", di->local_fd, di);
-#endif
 		return -1;
 	}
 	return i;
@@ -150,7 +146,7 @@ env_del_descriptor(struct environment *env, struct descriptor_info *di)
 	if(0 > i) {
 		return 1;
 	}
-#if VERBOSITY >= 3
+#if VERBOSITY >= 4
 	SAFE_LOGF("Removing descriptor mapping %d -> %d.\n", 
 	          i, env->descriptors[i].local_fd);
 #endif
@@ -178,9 +174,7 @@ static inline struct descriptor_info
 {
 	if(0 > fd || fd >= MAX_N_DESCRIPTOR_MAPPINGS
 	   || !(env->descriptors[fd].flags & DI_PRESENT)) {
-#if VERBOSITY >= 3
 		SAFE_WARNF("No such canonical descriptor: %d.\n", fd);
-#endif
 		return NULL;
 	}
 	return &env->descriptors[fd];

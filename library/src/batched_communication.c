@@ -13,13 +13,15 @@
 
 struct batch_communicator *init_batch_comm(struct communicator *comm, 
                                            struct peer *recv_peer,
-                                           size_t capacity)
+                                           size_t capacity,
+					   size_t flush_after)
 {
 	struct batch_communicator *bc = NULL;
 	Z_TRY_EXCEPT(bc = calloc(1, sizeof(*bc) + capacity),
 	             return NULL);
 	bc->comm = comm;
 	bc->recv_peer = recv_peer;
+	bc->flush_after = flush_after;
 	bc->preallocated_batch.capacity = capacity;
 	bc->preallocated_batch.length = 0;
 	bc->current_batch = &bc->preallocated_batch;
@@ -158,7 +160,7 @@ char *batch_comm_reserve(struct batch_communicator *bc, size_t len)
 {
 	const size_t item_len = sizeof(*bc->current_item) + len; 
 	struct batch *b = bc->current_batch;
-	if(bc->current_item + item_len > batch_capacity_end(b)) {
+	if((char*)bc->current_item + item_len > (char*)batch_capacity_end(b)) {
 		/* New item does not fit in current batch. Send out batch. */
 		SAFE_NZ_TRY_EXCEPT(batch_comm_flush(bc),
 		                   return NULL);
@@ -173,10 +175,11 @@ char *batch_comm_reserve(struct batch_communicator *bc, size_t len)
 	return bc->current_item->contents;
 }
 
-int batch_comm_broadcast_reserved(struct batch_communicator *bc, bool force)
+int batch_comm_broadcast_reserved(struct batch_communicator *bc)
 {
 	bc->current_item = next_item(bc->current_item);
-	if(force || bc->current_item >= batch_capacity_end(bc->current_batch)) {
+	if(bc->current_batch->length >= bc->flush_after
+	   || bc->current_item >= batch_capacity_end(bc->current_batch)) {
 		SAFE_NZ_TRY_EXCEPT(batch_comm_flush(bc), return 1);
 		/* "Freeing" in the flush call above resets the current_batch
 		   to an empty preallocated default batch. */

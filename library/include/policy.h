@@ -24,6 +24,7 @@ extern struct policy policies[];
 	X(nonsocket_rw) \
 	X(socket_ro) \
 	X(socket_rw) \
+	X(socket_rw_oc)
 
 #define POLICY_DEF(name) \
 	bool POLICY_IS_EXEMPT_FN(name)(struct syscall_info *canonical, \

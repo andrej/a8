@@ -172,7 +172,7 @@ POLICY_EXEMPT(socket_rw_oc)
 		case SYSCALL_open_CANONICAL:
 		case SYSCALL_openat_CANONICAL:
 		case SYSCALL_close_CANONICAL:
-			return false;
+			return true;
 		default:
 			return policy_is_exempt_static(socket_rw, canonical,
 			                               env);

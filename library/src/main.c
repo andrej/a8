@@ -122,11 +122,14 @@ long monmod_handle_syscall(struct syscall_trace_func_stack *stack)
 	struct timeval tv, rel_tv;
 #endif
 
-#if NO_HANDLER_TERMINATES
-	SAFE_Z_TRY(handler);
-#endif
 #if ENABLE_CHECKPOINTING
 	restore_checkpoint_if_needed(&checkpoint_env, conf.restore_interval);
+#endif
+#if NO_HANDLER_TERMINATES
+	if(NULL == handler) {
+		SAFE_WARNF("No handler for system call %ld.\n", syscall_no);
+		exit(1);
+	}
 #endif
 
 	/* Preparation: Initialize data structures. */

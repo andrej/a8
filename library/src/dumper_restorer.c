@@ -104,6 +104,7 @@ void dumper_restorer_main(struct checkpoint_env *cenv, pid_t child)
 				break;
 			
 		}
+		request = NONE;
 	}
 	exit(0);
 }

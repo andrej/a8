@@ -37,8 +37,7 @@ static void *handle_breakpoint(struct checkpoint_env *env, void *loc);
 static int create_fork_checkpoint(struct checkpoint_env *env,
                                   struct breakpoint *b);
 #elif ENABLE_CHECKPOINTING == CRIU_CHECKPOINTING
-static int create_criu_checkpoint(struct checkpoint_env *env,
-                                  struct breakpoint *b);
+static int create_criu_checkpoint(struct checkpoint_env *env);
 #endif
 static int inject_breakpoint(struct checkpoint_env *env, void *loc, 
                              size_t instr_len, int interval);
@@ -69,31 +68,32 @@ int init_checkpoint_env(struct checkpoint_env *env,
 	NZ_TRY(sem_init(&env->smem->semaphore, 1, 1));
 #endif
 
+	struct sigaction sa;
+	sa.sa_flags = SA_SIGINFO | SA_RESTART;
+	sigemptyset(&sa.sa_mask);
+	sa.sa_sigaction = monmod_handle_signal;
+	signal_env = env;
+
 #if ENABLE_CHECKPOINTING == CRIU_CHECKPOINTING
 	/* Start the dumper/restorer process that can invoke CRIU. This must be
 	   the parent process, as CRIU dumps the children of a process. */
 	env->dumper_restorer_ready = false;
+	NZ_TRY(sigaction(SIGUSR1, &sa, NULL));
 	pid_t child = fork();
 	if(0 != child) {
 		dumper_restorer_main(env, child);
-		exit(0);
-		NZ_TRY(1); /* Should be unreachable. */
+		raise(SIGKILL);
+		return 1; /* Should be unreachable. */
 	}
 #endif
 
 	/* Register our SIGTRAP signal handler for breakpoint handling
 	   (and synchronizing with dumper/restorer parent in case of CRIU
 	   checkpointing). */
-	struct sigaction sa;
-	sa.sa_flags = SA_SIGINFO | SA_RESTART;
-	sigemptyset(&sa.sa_mask);
-	sa.sa_sigaction = monmod_handle_signal;
-	signal_env = env;
 	NZ_TRY(sigaction(SIGTRAP, &sa, NULL));
 
 #if ENABLE_CHECKPOINTING == CRIU_CHECKPOINTING
 	/* Wait for previously forked dumper/restorer to be ready. */
-	NZ_TRY(sigaction(SIGUSR1, &sa, NULL));
 	while(!env->dumper_restorer_ready);
 	env->dumper_restorer_pid = getppid();
 #endif
@@ -140,6 +140,20 @@ int restore_last_checkpoint(struct checkpoint_env *env)
 void restore_checkpoint_if_needed(struct checkpoint_env *env, 
                                   int restore_interval)
 {
+#if ENABLE_CHECKPOINTING == CRIU_CHECKPOINTING
+	/* We cannot successfully create a checkpoint from within the signal
+	   handler in a breakpoint with CRIU. This workaround creates a
+	   checkpoint after system call handler entry after an appropriate
+	   flag was set in the breakpoint beforehand. */
+	if(env->create_checkpoint) {
+#if VERBOSITY >= 2
+		SAFE_LOG("Creating CRIU checkpoint.\n")
+#endif
+		SAFE_NZ_TRY(create_criu_checkpoint(env));
+		env->create_checkpoint = false;
+	}
+#endif
+
 	/* Periodically restore to the last checkpoint, as set in
 	   config.restore_interval. This is used to assess the performance of
 	   the checkpoint/restore mechanism. Otherwise, a restore only takes
@@ -204,10 +218,6 @@ monmod_handle_signal(int sig, siginfo_t *si, void *_context)
 	}
 #if ENABLE_CHECKPOINTING == CRIU_CHECKPOINTING
 	case SIGUSR1: {
-		if(signal_env->dumper_restorer_ready) {
-			/* Unexpected signal. */
-			unprotected_funcs.exit(1);
-		}
 		signal_env->dumper_restorer_ready = true;
 		break;
 	}
@@ -248,8 +258,7 @@ handle_breakpoint(struct checkpoint_env *env, void *loc)
 			NZ_TRY_EXCEPT(create_fork_checkpoint(env, b),
 			              return NULL);
 #elif ENABLE_CHECKPOINTING == CRIU_CHECKPOINTING
-			NZ_TRY_EXCEPT(create_criu_checkpoint(env, b),
-			              return NULL);
+			env->create_checkpoint = true;
 #endif
 			b->hits = 0;
 		}
@@ -392,12 +401,10 @@ create_fork_checkpoint(struct checkpoint_env *cenv, struct breakpoint *b)
 }
 
 #elif ENABLE_CHECKPOINTING == CRIU_CHECKPOINTING
-static int
-__attribute__((section("unprotected")))
-create_criu_checkpoint(struct checkpoint_env *cenv, struct breakpoint *b)
+static int create_criu_checkpoint(struct checkpoint_env *cenv)
 {
-	//cenv->dumper_restorer_ready = false;
-	NZ_TRY(unprotected_funcs.kill(cenv->dumper_restorer_pid, SIGUSR1));
+	cenv->dumper_restorer_ready = false;
+	SAFE_NZ_TRY(kill(cenv->dumper_restorer_pid, SIGUSR1));
 	/* We wait for the CRIU dump to complete. Note that this means the
 	   dump will capture some iteration of the following loop; i.e. we
 	   will resume execution from that loop when a checkpoint is restored.
@@ -405,11 +412,11 @@ create_criu_checkpoint(struct checkpoint_env *cenv, struct breakpoint *b)
 	   restored image out of this loop! */
 	int wait_sig;
 	sigset_t wait_sigset;
-	unprotected_funcs.sigemptyset(&wait_sigset);
-	unprotected_funcs.sigaddset(&wait_sigset, SIGUSR1);
-	unprotected_funcs.sigwait(&wait_sigset, &wait_sig);
+	sigemptyset(&wait_sigset);
+	sigaddset(&wait_sigset, SIGUSR1);
+	sigwait(&wait_sigset, &wait_sig);
 	cenv->last_checkpoint.valid = true;
-	cenv->last_checkpoint.pid = unprotected_funcs.getpid();
+	cenv->last_checkpoint.pid = getpid();
 	return 0;
 }
 #endif

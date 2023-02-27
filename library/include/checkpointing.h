@@ -66,6 +66,7 @@ struct checkpoint_env {
 #elif ENABLE_CHECKPOINTING == CRIU_CHECKPOINTING
 	pid_t dumper_restorer_pid;
 	volatile bool dumper_restorer_ready;
+	bool create_checkpoint;
 #endif
 };
 

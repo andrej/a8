@@ -193,11 +193,6 @@ SYSCALL_ENTER_PROT(default_checked)
 	return DISPATCH_EVERYONE | DISPATCH_CHECKED;
 }
 
-SYSCALL_ENTER_PROT(default_unchecked)
-{
-	return DISPATCH_EVERYONE | DISPATCH_UNCHECKED;
-}
-
 SYSCALL_ENTER_PROT(default_checked_arg1) {
 	canonical->arg_types[0] = IMMEDIATE_TYPE(long);
 	return DISPATCH_EVERYONE | DISPATCH_CHECKED;

@@ -6,7 +6,7 @@
  * in hot code. If we call our functions correctly everywhere, this should not
  * break anything.
  */
-#define MONMOD_SKIP_SANITY_CHECKS 0
+#define MONMOD_SKIP_SANITY_CHECKS 1
 
 /**
  * Log verbosity. Choose 0 for performance.
@@ -18,13 +18,16 @@
  *    logged.
  * 3: All of the above, plus unmonitored system calls are additionally logged.
  */
-#define MONMOD_LOG_VERBOSITY 2
+#define MONMOD_LOG_VERBOSITY 0
 
 /**
  * For benchmarking, memory protection calls for the monitor can be disabled.
  * This makes the system insecure, since the tracee application can write to
  * the monitor address range and hence compromise the monitor.
  */
-#define MONMOD_SKIP_MONITOR_PROTECTION_CALLS 0
+#define MONMOD_MONITOR_UNPROTECTED 0
+#define MONMOD_MONITOR_MPROTECTED 1
+#define MONMOD_MONITOR_FLAG_PROTECTED 2
+#define MONMOD_MONITOR_PROTECTION MONMOD_MONITOR_UNPROTECTED
 
 #endif

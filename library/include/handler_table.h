@@ -8,7 +8,6 @@
 SYSCALL_ENTER_PROT(default_checked);
 SYSCALL_ENTER_PROT(default_checked_arg1);
 SYSCALL_ENTER_PROT(default_arg1_fd);
-SYSCALL_ENTER_PROT(default_unchecked);
 SYSCALL_EXIT_PROT(default_free_scratch);
 SYSCALL_EXIT_PROT(default_creates_fd_exit);
 
@@ -196,6 +195,9 @@ SYSCALL_EXIT_PROT(default_creates_fd_exit);
  X( __NR_exit_group, exit_group, SYSCALL_ENTER(default_checked), \
                                 NULL, \
                                 NULL) \
+ X( __NR_sched_yield, sched_yield, SYSCALL_ENTER(default_checked), \
+                                NULL, \
+                                NULL )
  
 #include "handler_table_prototypes.h"
 

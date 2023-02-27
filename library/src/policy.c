@@ -37,7 +37,7 @@ POLICY_EXEMPT(base)
 		//case SYSCALL_getitimer_CANONICAL:
 		//case SYSCALL_sysinfo_CANONICAL:
 		case SYSCALL_uname_CANONICAL:
-		//case SYSCALL_sched_yield_CANONICAL:
+		case SYSCALL_sched_yield_CANONICAL:
 		//case SYSCALL_nanosleep _CANONICAL:
 			return true;
 		default:

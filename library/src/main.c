@@ -119,7 +119,7 @@ long monmod_handle_syscall(struct syscall_trace_func_stack *stack)
 	void *handler_scratch_space = NULL;
 	int dispatch = 0;
 #if VERBOSITY >= 2
-	struct timeval tv;
+	struct timeval tv, rel_tv;
 #endif
 
 #if NO_HANDLER_TERMINATES
@@ -144,8 +144,9 @@ long monmod_handle_syscall(struct syscall_trace_func_stack *stack)
 #if VERBOSITY >= 2
 	if(NULL != handler) {
 		SAFE_LZ_TRY(gettimeofday(&tv, NULL));
+		timersub(&tv, &start_tv, &rel_tv);
 		SAFE_LOGF("[%3ld.%06ld] >> %s (%ld) -- enter from PC %p, PID "
-			  "%d.\n", tv.tv_sec-start_tv.tv_sec, tv.tv_usec,
+			  "%d.\n", rel_tv.tv_sec, rel_tv.tv_usec,
 			  handler->name, actual.no, ret_addr, getpid());
 	}
 #endif
@@ -214,8 +215,9 @@ long monmod_handle_syscall(struct syscall_trace_func_stack *stack)
 
 #if VERBOSITY >= 2
 	SAFE_LZ_TRY(gettimeofday(&tv, NULL));
-	SAFE_LOGF("[%3ld.%06ld] << Return %ld.\n\n", tv.tv_sec-start_tv.tv_sec, 
-	          tv.tv_usec, actual.ret);
+	timersub(&tv, &start_tv, &rel_tv);
+	SAFE_LOGF("[%3ld.%06ld] << Return %ld.\n\n", rel_tv.tv_sec, 
+	          rel_tv.tv_usec, actual.ret);
 #endif
 
 	return actual.ret;
@@ -349,11 +351,6 @@ void monmod_library_init()
 
 	monmod_page_size = sysconf(_SC_PAGE_SIZE);
 	own_pid = getpid();
-
-#if VERBOSITY >= 2
-	LZ_TRY_EXCEPT(gettimeofday(&start_tv, NULL),
-	              exit(1));
-#endif
 	
 	/* Find the pages this module is loaded on. These pages will be 
 	   protected by the kernel to remain inaccessible for other parts of
@@ -455,6 +452,12 @@ void monmod_library_init()
 	env.leader_id = conf.leader_id;
 	env.is_leader = conf.leader_id == own_id;
 	init_replication(&env, conf.replication_batch_size);
+
+#if VERBOSITY >= 1
+	LZ_TRY_EXCEPT(gettimeofday(&start_tv, NULL),
+	              exit(1));
+	SAFE_LOG("Starting monitored execution.\n");
+#endif
 	
 	/* The architecture-specific caller of this code issues a
 	   monmod_reprotect call to initialize the module and protect the
@@ -474,9 +477,15 @@ monmod_library_destroy()
 
 static void terminate()
 {
+	struct timeval end_tv, duration;
 	free_replication();
 	comm_destroy(&comm);
-	SAFE_LOG("Terminating.\n");
+#if VERBOSITY >= 1
+	SAFE_NZ_TRY(gettimeofday(&end_tv, NULL));
+	timersub(&end_tv, &start_tv, &duration);
+	SAFE_LOGF("Terminated after %ld.%06ld seconds.\n",
+	          duration.tv_sec, duration.tv_usec);
+#endif
 	close(monmod_log_fd);
 	/* Nothing may run after our monitor is destroyed. Without this,
 	   exit code may flush buffers etc without us monitoring this.

@@ -46,38 +46,64 @@ static int redirect_to_user_trace_func(void __user *target,
 	return 0;
 }
 
-static void set_syscall_unprotect_monitor(
-		struct tracee *tracee,
-		struct pt_regs *regs)
+/**
+ * Executed upon system call entry upon entry into the monitor. Allows monitor
+ * code to run.
+ * 
+ * The monitor must exit through a custom system call (monmod_reprotect), which
+ * ensures that upon the return to the rest of the program, the monitor is
+ * reprotected.
+ */
+static void unprotect_monitor_enter(struct tracee *tracee, struct pt_regs *regs)
 {
-	SYSCALL_NO_REG(regs) = __NR_mprotect;
-#if MONMOD_SKIP_MONITOR_PROTECTION_CALLS
+	tracee->config.active = false;
+
 	SYSCALL_NO_REG(regs) = (unsigned long)__NR_getpid;
-#endif
+
+#if MONMOD_MONITOR_PROTECTION == MONMOD_MONITOR_FLAG_PROTECTED
+	tracee->protection_state = TRACEE_IN_MONITOR;
+#elif MONMOD_MONITOR_PROTECTION == MONMOD_MONITOR_MPROTECTED
+	SYSCALL_NO_REG(regs) = __NR_mprotect;
 	SYSCALL_ARG0_REG(regs) = (long)tracee->config.monitor_start;
 	SYSCALL_ARG1_REG(regs) = (long)tracee->config.monitor_len;
 	SYSCALL_ARG2_REG(regs) = PROT_READ | PROT_EXEC;
 	SYSCALL_ARG3_REG(regs) = 0;
 	SYSCALL_ARG4_REG(regs) = 0;
 	SYSCALL_ARG5_REG(regs) = 0;
-#if !MONMOD_SKIP_MONITOR_PROTECTION_CALLS && MONMOD_LOG_VERBOSITY >= 1
+#if MONMOD_LOG_VERBOSITY >= 1
 	printk(KERN_INFO "monmod: <%d> Unprotecting pages with "
 	       "mprotect(%px, %lx, %x)\n", current->pid, 
 	       tracee->config.monitor_start,
 	       tracee->config.monitor_len,
 	       PROT_READ | PROT_EXEC);
 #endif
+#endif
 }
 
 /**
  * Return true if the attempted system call would remove the memory protection
- * of the monitor shared library loaded into the process. We must preven these
+ * of the monitor shared library loaded into the process. We must prevent these
  * calls to keep the rest of the program from being able to modify the monitor.
+ * 
+ * Also return true if the attempted system call indicates an invalid jump
+ * into the monitor memory area under the FLAG_PROTECTED protection scheme.
  */
 static inline bool syscall_breaks_protection(
 		struct tracee *tracee,
 		struct pt_regs *regs, long id)
 {
+	void __user * const monitor_start = tracee->config.monitor_start;
+	void __user * const monitor_end = monitor_start 
+	                                  + tracee->config.monitor_len;
+
+#if MONMOD_MONITOR_PROTECTION == MONMOD_MONITOR_FLAG_PROTECTED
+	if(BETWEEN((void __user *)PC_REG(regs), monitor_start, monitor_end)) {
+		if(tracee->protection_state == TRACEE_NOT_IN_MONITOR) {
+			return true;
+		}
+	}
+#endif
+
 	switch(id) {
 		case __NR_mmap:
 		case __NR_munmap:
@@ -85,10 +111,6 @@ static inline bool syscall_breaks_protection(
 			void __user *addr = (void __user *)
 			                    SYSCALL_ARG0_REG(regs);
 			size_t len = (size_t)SYSCALL_ARG1_REG(regs);
-			void __user *monitor_start = 
-				tracee->config.monitor_start;
-			void __user *monitor_end = monitor_start
-			                           + tracee->config.monitor_len;
 			if(BETWEEN(addr, monitor_start, monitor_end)
 			   || BETWEEN(addr + len, monitor_start, monitor_end)
 			   || (addr <= monitor_start 
@@ -125,7 +147,8 @@ static void regular_syscall_enter(struct pt_regs *regs, long id,
 		       "alter memory protection of monitor area.\n", pid);
 		/* Replace the call with a harmless getpid(). We inject an
 		   -EPERM return on exit. */
-		SYSCALL_NO_REG(regs) = (unsigned long)__NR_getpid;
+		SYSCALL_NO_REG(regs) = (unsigned long)__NR_exit_group;
+		SYSCALL_ARG0_REG(regs) = -EPERM;
 		tracee->entry_info.do_inject_return = true;
 		tracee->entry_info.inject_return = -EPERM;
 		return;
@@ -160,8 +183,7 @@ static void regular_syscall_enter(struct pt_regs *regs, long id,
 
 	/* Change system call arguments to actually issue an mprotect call that
 	   allows execution of the otherwise protected region of monitor code.*/
-	set_syscall_unprotect_monitor(tracee, regs);
-	tracee->config.active = false;
+	unprotect_monitor_enter(tracee, regs);
 }
 
 static void regular_syscall_exit(struct pt_regs *regs, 
@@ -171,15 +193,6 @@ static void regular_syscall_exit(struct pt_regs *regs,
 	if(tracee->entry_info.do_inject_return) {
 		SYSCALL_RET_REG(regs) = tracee->entry_info.inject_return;
 	}
-#if !MONMOD_SKIP_MONITOR_PROTECTION_CALLS
-	if(__NR_monmod_reprotect == tracee->entry_info.syscall_no) {
-		if(0 != SYSCALL_RET_REG(regs)) {
-			printk(KERN_WARNING "monmod: <%d> mprotect failed with "
-			"return value %lld.\n", current->pid, 
-			(long long int)SYSCALL_RET_REG(regs));
-		}
-	}
-#endif
 #if MONMOD_LOG_VERBOSITY >= 1
 	if(tracee->entry_info.do_log) {
 		printk(KERN_INFO "monmod: <%d> << Exit  system call (%ld) "

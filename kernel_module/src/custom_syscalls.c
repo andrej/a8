@@ -52,11 +52,16 @@ int sys_monmod_init(struct pt_regs *regs, struct tracee *tracee)
 		return -EINVAL;
 	}
 
-	tracee->config.active = false; /* until first reprotect call */
 	tracee->config.monitor_start = monitor_start;
 	tracee->config.monitor_len = monitor_len;
 	tracee->config.trusted_addr = trusted_syscall_addr;
 	tracee->config.trace_func_addr = monitor_enter_addr;
+
+	tracee->config.active = false; /* until first reprotect call */
+
+#if MONMOD_MONITOR_PROTECTION == MONMOD_MONITOR_FLAG_PROTECTED
+	tracee->protection_state = TRACEE_UNINITIALIZED;
+#endif
 
 	printk(KERN_INFO "monmod: <%d> Added tracing. Monitor: %px - %px. "
 	       "Trusted syscall address: %px. Trace function address: %px.\n",
@@ -137,20 +142,26 @@ int sys_monmod_reprotect(struct pt_regs *regs, struct tracee *tracee)
 		goto abort1;
 	}
 
-	SYSCALL_NO_REG(regs) = __NR_mprotect;
-#if MONMOD_SKIP_MONITOR_PROTECTION_CALLS
 	SYSCALL_NO_REG(regs) = __NR_getpid;
-#endif
+#if MONMOD_MONITOR_PROTECTION == MONMOD_MONITOR_MPROTECTED
+	SYSCALL_NO_REG(regs) = __NR_mprotect;
 	SYSCALL_ARG0_REG(regs) = (long)tracee->config.monitor_start;
 	SYSCALL_ARG1_REG(regs) = (long)tracee->config.monitor_len;
 	SYSCALL_ARG2_REG(regs) = PROT_READ;
 	SYSCALL_ARG3_REG(regs) = 0;
 	SYSCALL_ARG4_REG(regs) = 0;
 	SYSCALL_ARG5_REG(regs) = 0;
+#endif
 	PC_REG(regs) = (long)info->ret_addr;
+
 	tracee->config.active = true;
 
-#if !MONMOD_SKIP_MONITOR_PROTECTION_CALLS && MONMOD_LOG_VERBOSITY >= 1
+#if MONMOD_MONITOR_PROTECTION == MONMOD_MONITOR_FLAG_PROTECTED
+	tracee->protection_state = TRACEE_NOT_IN_MONITOR;
+#endif
+
+#if MONMOD_MONITOR_PROTECTION == MONMOD_MONITOR_MPROTECTED \
+    && MONMOD_LOG_VERBOSITY >= 1
 	printk(KERN_INFO "monmod: <%d> Reprotecting monitor with "
 	       "mprotect(%px, %lx, %x).\n", current->pid,
 	       (void *)SYSCALL_ARG0_REG(regs), 
@@ -182,7 +193,7 @@ void sys_monmod_reprotect_exit(struct pt_regs *regs, struct tracee *tracee)
 	}
 
 	mprotect_return_value = (unsigned long)SYSCALL_RET_REG(regs);
-#if !MONMOD_SKIP_MONITOR_PROTECTION_CALLS
+#if MONMOD_MONITOR_PROTECTION == MONMOD_MONITOR_MPROTECTED
 	if(0 != mprotect_return_value) {
 		printk(KERN_WARNING "monmod: <%d> mprotect failed with return "
 		       "value %ld.\n", current->pid, mprotect_return_value);
@@ -195,9 +206,11 @@ void sys_monmod_reprotect_exit(struct pt_regs *regs, struct tracee *tracee)
 		   call entry.
 		   This also overwrites the system call return register. */
 		memcpy(regs, &info.reprotect_stack.regs, sizeof(*regs));
+		tracee->entry_info.do_inject_return = false;
 	}
 
-#if !MONMOD_SKIP_MONITOR_PROTECTION_CALLS && MONMOD_LOG_VERBOSITY >= 1
+#if MONMOD_MONITOR_PROTECTION == MONMOD_MONITOR_MPROTECTED \
+    && MONMOD_LOG_VERBOSITY >= 1
 	printk(KERN_INFO "monmod: <%d> mprotect returned with %ld, returning "
 	       "to address %px with return value %lld.\n", current->pid, 
 	       mprotect_return_value, info.ret_addr, 
@@ -260,7 +273,9 @@ void custom_syscall_enter(struct pt_regs *regs, long id, struct tracee *tracee)
 	}
 	/* Execute a harmless and fast getpid instead of the unknown (to the
 	   kernel) system call. Its return value will be overwriten. */
-	SYSCALL_NO_REG(regs) = __NR_getpid;
+	if(id == SYSCALL_NO_REG(regs)) {
+		SYSCALL_NO_REG(regs) = __NR_getpid;
+	}
 	tracee->entry_info.do_inject_return = true;
 	tracee->entry_info.inject_return = ret;
 }
@@ -268,14 +283,14 @@ void custom_syscall_enter(struct pt_regs *regs, long id, struct tracee *tracee)
 void custom_syscall_exit(struct pt_regs *regs, long return_value,
                          struct tracee *tracee)
 {
-	SYSCALL_NO_REG(regs) = tracee->entry_info.syscall_no;
-	if(tracee->entry_info.do_inject_return) {
-		SYSCALL_RET_REG(regs) = tracee->entry_info.inject_return;
-	}
 	switch(tracee->entry_info.syscall_no) {
 		case __NR_monmod_reprotect: {
 			sys_monmod_reprotect_exit(regs, tracee);
 			break;
 		}
+	}
+	SYSCALL_NO_REG(regs) = tracee->entry_info.syscall_no;
+	if(tracee->entry_info.do_inject_return) {
+		SYSCALL_RET_REG(regs) = tracee->entry_info.inject_return;
 	}
 }

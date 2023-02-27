@@ -3,13 +3,19 @@
 *
 !*.*
 !*/
+!Makefile
 
 # Other ignores:
 *.o
 *.d
 *.ko
+*.so
 *.log
 *.img
 kernel_module/build/*
 kernel_module/test_suite/build/*
 dependencies/*
+
+# perf reports
+*.data
+*.data.old

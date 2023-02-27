@@ -42,11 +42,22 @@ enum tracee_info_state {
 	TRACEE_INFO_STALE
 };
 
+#if MONMOD_MONITOR_PROTECTION == MONMOD_MONITOR_FLAG_PROTECTED
+enum tracee_protection_state {
+	TRACEE_UNINITIALIZED = 0,
+	TRACEE_IN_MONITOR,
+	TRACEE_NOT_IN_MONITOR
+};
+#endif
+
 struct tracee {
 	enum tracee_info_state state;
 	pid_t pid;
 	struct monmod_tracee_config config;
 	struct intercepted_syscall entry_info;
+#if MONMOD_MONITOR_PROTECTION == MONMOD_MONITOR_FLAG_PROTECTED
+	enum tracee_protection_state protection_state;
+#endif
 };
 
 

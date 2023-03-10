@@ -16,17 +16,19 @@ static inline struct sockaddr_in get_test_sockaddr(in_port_t port)
 
 PARALLEL_TEST(simple_conn_setup_teardown, 2)
 {
+	const int port1 = 3729;
+	const int port2 = 3730;
 	struct sockaddr_in addrs[] = {
 		get_test_sockaddr(3729),
 		get_test_sockaddr(3730)
 	};
 	struct communicator comm;
 	ON_THREAD(0) {
-		ASSERT_EQ(comm_init(&comm, 0, (struct sockaddr *)&addrs[0]), 0);
+		ASSERT_EQ(comm_init(&comm, 0, (struct sockaddr *)&addrs[0]), port1);
 	}
 	BARRIER();
 	ON_THREAD(1) {
-		ASSERT_EQ(comm_init(&comm, 1, (struct sockaddr *)&addrs[1]), 0);
+		ASSERT_EQ(comm_init(&comm, 1, (struct sockaddr *)&addrs[1]), port2);
 		ASSERT_EQ(comm_connect(&comm, 0, (struct sockaddr *)&addrs[0]), 0);
 	}
 	BARRIER(); // accept() (in thread 0) will block if no connect() (from thread 1) issued
@@ -43,18 +45,20 @@ PARALLEL_TEST(failing_conn_setup, 2)
 	/* This test is supposed to fail because we are trying to connect in 
 	   the wrong order: Lower-ID nodes must connect first, since they will
 	   act as server. */
+	const int port1 = 3727;
+	const int port2 = 3728;
 	struct sockaddr_in addrs[] = {
-		get_test_sockaddr(3727),
-		get_test_sockaddr(3728)
+		get_test_sockaddr(port1),
+		get_test_sockaddr(port2)
 	};
 	struct communicator comm;
 	ON_THREAD(1) {
-		ASSERT_EQ(comm_init(&comm, 1, (struct sockaddr *)&addrs[1]), 0);
+		ASSERT_EQ(comm_init(&comm, 1, (struct sockaddr *)&addrs[1]), port1);
 		ASSERT_NEQ(comm_connect(&comm, 0, (struct sockaddr *)&addrs[0]), 0);
 	}
 	BARRIER();
 	ON_THREAD(0) {
-		ASSERT_EQ(comm_init(&comm, 0, (struct sockaddr *)&addrs[0]), 0);
+		ASSERT_EQ(comm_init(&comm, 0, (struct sockaddr *)&addrs[0]), port2);
 	}
 	BARRIER();
 	ASSERT_EQ(comm_destroy(&comm), 0);
@@ -63,10 +67,15 @@ PARALLEL_TEST(failing_conn_setup, 2)
 
 PARALLEL_TEST(conn_setup_send_teardown, 3)
 {
+	const int ports[] = {
+		3731,
+		3732,
+		3733
+	};
 	struct sockaddr_in addrs[] = {
-		get_test_sockaddr(3731),
-		get_test_sockaddr(3732),
-		get_test_sockaddr(3733)
+		get_test_sockaddr(ports[0]),
+		get_test_sockaddr(ports[1]),
+		get_test_sockaddr(ports[2])
 	};
 	struct communicator comm;
 	char recvbuf[128];
@@ -78,13 +87,13 @@ PARALLEL_TEST(conn_setup_send_teardown, 3)
 	long test3 = -42;
 
 	ON_THREAD(0) {
-		ASSERT_EQ(comm_init(&comm, 0, (struct sockaddr *)&addrs[0]), 0);
+		ASSERT_EQ(comm_init(&comm, 0, (struct sockaddr *)&addrs[0]), ports[0]);
 	}
 	ON_THREAD(1) {
-		ASSERT_EQ(comm_init(&comm, 1, (struct sockaddr *)&addrs[1]), 0);
+		ASSERT_EQ(comm_init(&comm, 1, (struct sockaddr *)&addrs[1]), ports[1]);
 	}
 	ON_THREAD(2) {
-		ASSERT_EQ(comm_init(&comm, 2, (struct sockaddr *)&addrs[2]), 0);
+		ASSERT_EQ(comm_init(&comm, 2, (struct sockaddr *)&addrs[2]), ports[2]);
 	}
 	// TODO: tests to make sure we cannot double-initialize
 	BARRIER();  // make sure all servers are started before we attempt to connect
@@ -148,10 +157,15 @@ PARALLEL_TEST(conn_setup_send_teardown, 3)
 
 PARALLEL_TEST(comm_broadcast, 3)
 {
+	const int ports[] = {
+		3734,
+		3735,
+		3736
+	};
 	struct sockaddr_in addrs[] = {
-		get_test_sockaddr(3734),
-		get_test_sockaddr(3735),
-		get_test_sockaddr(3736)
+		get_test_sockaddr(ports[0]),
+		get_test_sockaddr(ports[1]),
+		get_test_sockaddr(ports[2])
 	};
 	struct communicator comms[3] = {};
 
@@ -160,13 +174,13 @@ PARALLEL_TEST(comm_broadcast, 3)
 	const char testbuf[] = "Hello, World.\n";
 
 	ON_THREAD(0) {
-		ASSERT_EQ(comm_init(&comms[0], 0, (struct sockaddr *)&addrs[0]), 0);
+		ASSERT_EQ(comm_init(&comms[0], 0, (struct sockaddr *)&addrs[0]), ports[0]);
 	}
 	ON_THREAD(1) {
-		ASSERT_EQ(comm_init(&comms[1], 1, (struct sockaddr *)&addrs[1]), 0);
+		ASSERT_EQ(comm_init(&comms[1], 1, (struct sockaddr *)&addrs[1]), ports[1]);
 	}
 	ON_THREAD(2) {
-		ASSERT_EQ(comm_init(&comms[2], 2, (struct sockaddr *)&addrs[2]), 0);
+		ASSERT_EQ(comm_init(&comms[2], 2, (struct sockaddr *)&addrs[2]), ports[2]);
 	}
 
 	BARRIER();
@@ -238,12 +252,16 @@ PARALLEL_TEST(recover_from_missized_message_buffer_receive, 2)
 	char recvbuf2[sizeof(test)] = {};
 	size_t recvn;
 	
+	const int ports[] = {
+		45321,
+		45322
+	};
 	struct sockaddr_in addrs[] = {
-		get_test_sockaddr(45321),
-		get_test_sockaddr(45322)
+		get_test_sockaddr(ports[0]),
+		get_test_sockaddr(ports[1])
 	};
 	struct communicator comm;
-	ASSERT_EQ(comm_init(&comm, THREAD_NUM(), (struct sockaddr *)&addrs[THREAD_NUM()]), 0);
+	ASSERT_EQ(comm_init(&comm, THREAD_NUM(), (struct sockaddr *)&addrs[THREAD_NUM()]), ports[THREAD_NUM()]);
 	BARRIER();
 	const int other_id = (THREAD_NUM()+1)%2;
 	ASSERT_EQ(comm_connect(&comm, other_id, (struct sockaddr *)&addrs[other_id]), 0);
@@ -298,7 +316,7 @@ PARALLEL_TEST(all_agree_many_nodes, nnodes)
 	struct communicator comm;
 	for(int i = 0; i < nnodes; i++) {
 		ON_THREAD(i) {
-			ASSERT_EQ(comm_init(&comm, i, (struct sockaddr *)&addrs[i]), 0);
+			ASSERT_EQ(comm_init(&comm, i, (struct sockaddr *)&addrs[i]), port_base + i);
 		}
 	}
 	BARRIER();

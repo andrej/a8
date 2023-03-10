@@ -8,7 +8,8 @@
 
 struct policy {
 	const char *name;
-	bool (*is_exempt)(struct syscall_info *, struct environment *);
+	bool (*is_exempt)(const struct syscall_info * const, 
+	                  const struct environment * const);
 };
 
 extern struct policy policies[];
@@ -27,15 +28,16 @@ extern struct policy policies[];
 	X(socket_rw_oc)
 
 #define POLICY_DEF(name) \
-	bool POLICY_IS_EXEMPT_FN(name)(struct syscall_info *canonical, \
-	                               struct environment *env);
+	bool POLICY_IS_EXEMPT_FN(name)( \
+		const struct syscall_info * const canonical, \
+		const struct environment * const env);
 POLICIES(POLICY_DEF)
 #undef POLICY_DEF
 
 struct policy *policy_from_str(const char *str);
 static inline bool policy_is_exempt(struct policy *policy, 
                                     struct syscall_info *canonical,
-				    struct environment *env)
+				    const struct environment *env)
 {
 	if(NULL == policy) {
 		return false;

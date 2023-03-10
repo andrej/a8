@@ -11,8 +11,8 @@
                                             + sizeof(*i) \
                                             + (i)->length))
 
-struct batch_communicator *init_batch_comm(struct communicator *comm, 
-                                           struct peer *recv_peer,
+struct batch_communicator *init_batch_comm(const struct communicator *comm, 
+                                           const struct peer *recv_peer,
                                            size_t capacity,
 					   size_t flush_after)
 {

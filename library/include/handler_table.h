@@ -48,21 +48,27 @@ SYSCALL_EXIT_PROT(default_creates_fd_exit);
  X( __NR_mprotect, mprotect,    SYSCALL_ENTER(default_checked), \
                                 NULL, \
                                 NULL ) /*TODO*/ \
- X( __NR_getpid,   getpid,      SYSCALL_ENTER(default_checked), \
-                                NULL, \
-                                NULL  ) \
- X( __NR_getppid,  getppid,     SYSCALL_ENTER(default_checked), \
-                                NULL, \
-                                NULL ) \
  X( __NR_read,     read,        SYSCALL_ENTER(read), \
                                 NULL, \
                                 SYSCALL_EXIT(read) ) \
+ X( __NR_pread,    pread,       SYSCALL_ENTER(pread), \
+                                NULL, \
+                                SYSCALL_EXIT(pread) ) \
+ X( __NR_pread64,  pread64,     SYSCALL_ENTER(pread), \
+                                NULL, \
+                                SYSCALL_EXIT(pread) ) \
  X( __NR_readv,    readv,       SYSCALL_ENTER(readv), \
                                 NULL, \
                                 SYSCALL_EXIT(readv) ) \
  X( __NR_write,    write,       SYSCALL_ENTER(write), \
                                 NULL, \
                                 SYSCALL_EXIT(write) ) \
+ X( __NR_pwrite,   pwrite,      SYSCALL_ENTER(pwrite), \
+                                NULL, \
+                                SYSCALL_EXIT(pwrite) ) \
+ X( __NR_pwrite64, pwrite64,     SYSCALL_ENTER(pwrite), \
+                                NULL, \
+                                SYSCALL_EXIT(pwrite) ) \
  X( __NR_writev,   writev,      SYSCALL_ENTER(writev), \
                                 NULL, \
                                 SYSCALL_EXIT(writev) ) \
@@ -123,6 +129,9 @@ SYSCALL_EXIT_PROT(default_creates_fd_exit);
  X( __NR_socket,   socket,      SYSCALL_ENTER(socket), \
                                 NULL, \
                                 SYSCALL_EXIT(default_creates_fd_exit) ) \
+ X( __NR_socketpair, socketpair, SYSCALL_ENTER(socketpair), \
+                                NULL, \
+                                SYSCALL_EXIT(socketpair) ) \
  X( __NR_getsockopt,getsockopt, SYSCALL_ENTER(getsockopt), \
                                 NULL, \
                                 SYSCALL_EXIT(default_free_scratch) ) \
@@ -197,7 +206,37 @@ SYSCALL_EXIT_PROT(default_creates_fd_exit);
                                 NULL) \
  X( __NR_sched_yield, sched_yield, SYSCALL_ENTER(default_checked), \
                                 NULL, \
-                                NULL )
+                                NULL ) \
+ X( __NR_mkdir,     mkdir,      SYSCALL_ENTER(mkdir), \
+                                NULL, \
+                                SYSCALL_EXIT(default_free_scratch) ) \
+ X( __NR_mkdirat,   mkdirat,    SYSCALL_ENTER(mkdirat), \
+                                NULL, \
+                                SYSCALL_EXIT(default_free_scratch) ) \
+ X( __NR_getpid,    getpid,     SYSCALL_ENTER(getpid), \
+                                NULL, \
+                                NULL ) \
+ X( __NR_getppid,   getppid,    SYSCALL_ENTER(getppid), \
+                                NULL, \
+                                NULL ) \
+ X( __NR_fork,      fork,       SYSCALL_ENTER(fork), \
+                                NULL, \
+                                SYSCALL_EXIT(clone) ) \
+ X( __NR_clone,     clone,      SYSCALL_ENTER(clone), \
+                                NULL, \
+                                SYSCALL_EXIT(clone) ) \
+ X( __NR_wait,      wait,       SYSCALL_ENTER(wait), \
+                                NULL, \
+                                SYSCALL_EXIT(default_free_scratch) ) \
+ X( __NR_waitpid,   waitpid,    SYSCALL_ENTER(waitpid), \
+                                NULL, \
+                                SYSCALL_EXIT(default_free_scratch) ) \
+ X( __NR_wait3,     wait3,      SYSCALL_ENTER(wait3), \
+                                NULL, \
+                                SYSCALL_EXIT(default_free_scratch) ) \
+ X( __NR_wait4,     wait4,      SYSCALL_ENTER(wait4), \
+                                NULL, \
+                                SYSCALL_EXIT(default_free_scratch) ) \
  
 #include "handler_table_prototypes.h"
 

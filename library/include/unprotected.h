@@ -9,8 +9,16 @@
 #include <sys/epoll.h>
 #include <signal.h>
 
-#include "init.h"
+#include "library_init.h"
 #include "environment.h"
+#include "monitor.h"
+
+/* The following two are defined in the main.lds linker script and capture the
+   start and end address of any functions marked section("unprotected").
+   Functions in this section will remain accessible even when the rest of the
+   monitor is memory-protected. */
+void __unprotected_start();
+void __unprotected_end();
 
 /* Since the PLT is inside the protected monitor, unprotected code cannot
    indirectly call other functions through the PLT (it would lead to a 
@@ -31,6 +39,9 @@ struct unprotected_funcs {
    // environment.h
    typeof(checkpointed_environment_fix_up) *checkpointed_environment_fix_up;
 
+   // monitor.h
+   typeof(monitor_destroy) *monitor_destroy;
+
    // unistd.h
    pid_t (* fork)(void);
    pid_t (* getpid)(void);
@@ -48,7 +59,7 @@ struct unprotected_funcs {
    // custom_syscalls.h
    int (* monmod_init)(pid_t, void *, size_t, void *, void *);
 
-   // init.h
+   // library_init.h
    typeof(monmod_unprotected_reprotect) *monmod_unprotected_reprotect;
 
    // semaphore.h

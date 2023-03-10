@@ -8,8 +8,6 @@
 
 char cross_check_buffer[CROSS_CHECK_BUFFER_SZ];
 
-struct batch_communicator *bc = NULL;
-
 static char *serialize_args(size_t *len, struct syscall_info *canonical);
 
 static size_t get_replication_buffer_len(struct syscall_info *canonical);
@@ -21,22 +19,23 @@ static int write_back_replication_buffer(struct syscall_info *canonical,
 				         char *replication_buf,
 				         size_t replication_buf_len);
 
-static char *receive_replication_buffer(struct environment *env, size_t *len);
+static char *receive_replication_buffer(const struct monitor * const monitor, 
+                                        size_t *len);
 
 
 /* ************************************************************************** *
  * Cross-Checking                                                             *
  * ************************************************************************** */
 
-int cross_check_args(struct environment *env,
+int cross_check_args(const struct monitor * const monitor,
                       struct syscall_info *canonical) 
 {
 	bool ret = false;
 	char *serialized_args_buf = NULL;
 	size_t serialized_args_buf_len = 0;
 
-	if(env->is_leader) {
-		SAFE_NZ_TRY_EXCEPT(batch_comm_flush(bc),
+	if(monitor->is_leader) {
+		SAFE_NZ_TRY_EXCEPT(batch_comm_flush(monitor->batch_comm),
 		                   return -1);
 	}
 
@@ -54,7 +53,7 @@ int cross_check_args(struct environment *env,
 	char * const cross_check_buf = (char * const)serialized_args_buf;
 	size_t cross_check_buf_len = serialized_args_buf_len;
 #endif
-	ret = comm_all_agree(env->comm, env->leader_id,
+	ret = comm_all_agree(&monitor->comm, monitor->leader_id,
 	                     cross_check_buf_len,
 			     cross_check_buf);
 	if(cross_check_buffer != serialized_args_buf) {
@@ -146,45 +145,47 @@ void log_args(char *log_buf, size_t max_len,
  * Results Replication                                                        *
  * ************************************************************************** */
 
-int init_replication(struct environment *env, size_t flush_after)
+int replication_init(struct monitor * const monitor, size_t flush_after)
 {
-	struct peer *leader_peer = NULL;
-	if(!env->is_leader) {
-		Z_TRY(leader_peer = comm_get_peer(env->comm, env->leader_id));
+	const struct peer *leader_peer = NULL;
+	if(!monitor->is_leader) {
+		Z_TRY(leader_peer = comm_get_peer(&monitor->comm, 
+		                                  monitor->leader_id));
 	}
-	Z_TRY(bc = init_batch_comm(env->comm, leader_peer, 
-	                           PREALLOCATED_REPLICATION_SZ, 
-				   flush_after));
+	Z_TRY(monitor->batch_comm = init_batch_comm(&monitor->comm, leader_peer, 
+	                                            PREALLOCATED_REPLICATION_SZ, 
+				                    flush_after));
 	return 0;
 }
 
-void free_replication()
+void replication_destroy(struct monitor * const monitor)
 {
-	SAFE_NZ_TRY(batch_comm_flush(bc));	
-	free_batch_comm(bc);
+	SAFE_NZ_TRY(batch_comm_flush(monitor->batch_comm));	
+	free_batch_comm(monitor->batch_comm);
 }
 
-int replicate_results(struct environment *env,
+int replicate_results(const struct monitor * const monitor,
 	              struct syscall_info *canonical)
 {
 	size_t recv_len = 0;
 	char *buf = NULL;
 
-	if(env->is_leader) {
+	if(monitor->is_leader) {
 		size_t len = 0;
 		len = get_replication_buffer_len(canonical);
 		SAFE_Z_TRY_EXCEPT(
-			buf = batch_comm_reserve(bc, len),
+			buf = batch_comm_reserve(monitor->batch_comm, len),
 			goto abort0);
 		SAFE_NZ_TRY_EXCEPT(
 			generate_replication_buffer(canonical, buf, len),
 			goto abort1);
 		SAFE_NZ_TRY_EXCEPT(
-			batch_comm_broadcast_reserved(bc),
+			batch_comm_broadcast_reserved(monitor->batch_comm),
 			goto abort1);
 	} else {
 		SAFE_Z_TRY_EXCEPT(
-			buf = batch_comm_receive(bc, &recv_len),
+			buf = batch_comm_receive(monitor->batch_comm, 
+			                         &recv_len),
 			goto abort1);
 		SAFE_NZ_TRY_EXCEPT(
 			write_back_replication_buffer(canonical, buf, recv_len),
@@ -194,8 +195,8 @@ int replicate_results(struct environment *env,
 	return 0;
 
 abort1:
-	if(env->is_leader) {
-		batch_comm_cancel_reserved(bc);
+	if(monitor->is_leader) {
+		batch_comm_cancel_reserved(monitor->batch_comm);
 	}
 abort0:
 	return 1;

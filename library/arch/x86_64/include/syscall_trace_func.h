@@ -1,7 +1,7 @@
 #ifndef SYSCALL_TRACE_FUNC_H
 #define SYSCALL_TRACE_FUNC_H
 
-#include <asm/ptrace.h>
+#include <asm/ptrace.h>  // pt_regs
 
 struct syscall_trace_func_stack {
 	struct pt_regs regs;

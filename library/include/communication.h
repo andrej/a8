@@ -35,12 +35,17 @@ struct __attribute__((packed)) message {
 /**
  * comm_init - Initialize communicator, including server startup. Must be called
  * before any other uses of the communicator.
+ * 
+ * If 0 is passed for the sin_port field of own_addr, a random port is picked.
+ * This port is returned from the function. On error, a negative value is
+ * returned.
  */
 int comm_init(struct communicator *comm, int own_id, struct sockaddr *own_addr);
 int comm_destroy(struct communicator *comm);
 
 static inline
-struct peer *comm_get_peer(struct communicator *comm, int peer_id)
+const struct peer *
+comm_get_peer(const struct communicator * const comm, int peer_id)
 {
 	for(size_t i = 0; i < comm->n_peers; i++) {
 		if(peer_id == comm->peers[i].id) {
@@ -49,6 +54,9 @@ struct peer *comm_get_peer(struct communicator *comm, int peer_id)
 	}
 	return NULL;
 }
+
+/* Return modifiable peer pointer. */
+#define comm_get_peer_ref(...) ((struct peer *)comm_get_peer(__VA_ARGS__))
 
 /**
  * comm_connect - Establish a bidirectional connection with peer with ID 
@@ -62,19 +70,18 @@ int comm_connect(struct communicator *comm, int peer_id,
 int comm_disconnect(struct communicator *comm, int peer_id);
 int comm_disconnect_all(struct communicator *comm);
 
-int comm_send(struct communicator *comm, int peer_id, size_t n, 
+int comm_send(const struct communicator * const comm, int peer_id, size_t n, 
               const char *buf);
 #define comm_send_p(comm, peer_id, val) comm_send(comm, peer_id, \
                                                   sizeof(val), (char *)&(val))
 
-int comm_receive_header(struct communicator *comm, 
-                        struct peer *peer,
+int comm_receive_header(const struct communicator * const comm, 
+                        const struct peer *peer,
                         struct message *msg);
 
-int comm_receive_body(struct communicator *comm,
-                     struct peer *peer,
-                     struct message *msg,
-                     size_t *n, char *buf);
+int comm_receive_body(const struct communicator * const comm,
+                      const struct peer *peer, struct message *msg,
+                      size_t *n, char *buf);
 
 /**
  * comm_receive_partial - Same as comm_receive except for differing behavior
@@ -86,8 +93,8 @@ int comm_receive_body(struct communicator *comm,
  * (2) Returns 0 to indicate a successful partial read, i.e. even if parts of 
  *     the message had to be thrown away due to larger size.
  */
-int comm_receive_partial(struct communicator *comm, int peer_id, size_t *n, 
-                         char *buf);
+int comm_receive_partial(const struct communicator * const comm, int peer_id, 
+                         size_t *n, char *buf);
 
 /**
  * comm_receive - Receives the next message of up to *n bytes from peer_id into 
@@ -104,7 +111,7 @@ int comm_receive_partial(struct communicator *comm, int peer_id, size_t *n,
  * will be flushed. A warning will be printed and an error return value of 1
  * returned -- this differs from the behavior of comm_receive_partial.
  */
-int comm_receive(struct communicator *comm, int peer_id, size_t *n, 
+int comm_receive(const struct communicator * const comm, int peer_id, size_t *n, 
                  char *buf);
 #define comm_receive_p(comm, peer_id, val) ({ \
 	int retval = 0; \
@@ -122,13 +129,14 @@ int comm_receive(struct communicator *comm, int peer_id, size_t *n,
  * comm_receive_dynamic - Receive arbitrary-length data into an appropriately
  * sized dynamically allocated buffer.
  */
-int comm_receive_dynamic(struct communicator *comm, int peer_id, size_t *n,
-                         char **buf);
+int comm_receive_dynamic(const struct communicator * const comm, int peer_id, 
+                         size_t *n, char **buf);
 
 /**
  * comm_broadcast - Call comm_send for the given buffer for each connected peer.
  */
-int comm_broadcast(struct communicator *comm, size_t n, const char *buf);
+int comm_broadcast(const struct communicator * const comm, size_t n, 
+                   const char *buf);
 #define comm_broadcast_p(comm, val) comm_broadcast(comm, sizeof(val), \
                                                    (char *)&(val))
 
@@ -143,8 +151,8 @@ int comm_broadcast(struct communicator *comm, size_t n, const char *buf);
  * receives all buffers and compares them; if identical, it broadcasts 1 to all
  * nodes, 0 otherwise. 
  */
-int comm_all_agree(struct communicator *comm, int leader_id, size_t n, 
-                   const char *buf);
+int comm_all_agree(const struct communicator * const comm, int leader_id, 
+                   size_t n, const char *buf);
 #define comm_all_agree_p(comm, leader_id, val) \
 		comm_all_agree(comm, leader_id, sizeof(val), (char *)&(val))
 

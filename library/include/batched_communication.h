@@ -22,9 +22,9 @@ struct __attribute__((packed)) batch {  // sent over network
 };
 
 struct batch_communicator {
-	struct communicator *comm;
-	struct peer *recv_peer; /* peer to receive from; 
-	                           for sender, data is broadcast to all */
+	const struct communicator *comm;
+	const struct peer *recv_peer; /* peer to receive from; 
+	                                 for sender, data is broadcast to all */
 	size_t capacity;
 	size_t flush_after;
 	struct batch *current_batch;
@@ -42,8 +42,8 @@ struct batch_communicator {
  * API Funtions                                                               *
  * ************************************************************************** */
 
-struct batch_communicator *init_batch_comm(struct communicator *comm, 
-                                           struct peer *recv_peer,
+struct batch_communicator *init_batch_comm(const struct communicator *comm, 
+                                           const struct peer *recv_peer,
                                            size_t capacity,
 					   size_t flush_after);
 

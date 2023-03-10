@@ -7,6 +7,8 @@
 #include <sys/time.h>
 #include <sys/epoll.h>
 #include <sys/resource.h>
+#include <linux/sched.h>  // for clone()
+#include <sched.h> // for clone()
 #include <limits.h>
 
 #include "util.h"
@@ -241,6 +243,7 @@ SYSCALL_EXIT_PROT(default_creates_fd_exit)
 	switch(canonical->no) {
 		case SYSCALL_socket_CANONICAL:
 		case SYSCALL_accept4_CANONICAL:
+		case SYSCALL_socketpair_CANONICAL:
 			type = SOCKET_DESCRIPTOR;
 			break;
 		case SYSCALL_epoll_create_CANONICAL:
@@ -260,6 +263,7 @@ SYSCALL_EXIT_PROT(default_free_scratch)
 {
 	free_scratch();
 }
+
 
 /* ************************************************************************** *
  * brk                                                                        *
@@ -484,7 +488,7 @@ SYSCALL_ENTER_PROT(read)
 		   ref_types[0] = BUFFER_TYPE((size_t)canonical->args[2]);
 	canonical->arg_flags[1] = ARG_FLAG_WRITE_ONLY | ARG_FLAG_REPLICATE;
 
-	/* Argument 3*/
+	/* Argument 3 */
 	canonical->arg_types[2] = IMMEDIATE_TYPE(ssize_t);
 	
 	/* Return Type*/
@@ -500,6 +504,30 @@ SYSCALL_ENTER_PROT(read)
 SYSCALL_EXIT_PROT(read)
 {
 	free_scratch();
+}
+
+
+/* ************************************************************************** *
+ * pread                                                                      * 
+ *                                                                            *
+ * ssize_t pread(int fd, void *buf, size_t count, off_t offset);              *
+ * ************************************************************************** */
+
+SYSCALL_ENTER_PROT(pread)
+{
+	/* Identical to read except for additional offset argument, hence
+	   we redirect to read handlers. */
+	int read_dispatch = 
+		SYSCALL_ENTER(read)(env, handler, actual, canonical, scratch);
+
+	canonical->arg_types[3] = IMMEDIATE_TYPE(off_t);
+
+	return read_dispatch;
+}
+
+SYSCALL_EXIT_PROT(pread)
+{
+	SYSCALL_EXIT(read)(env, handler, dispatch, actual, canonical, scratch);
 }
 
 
@@ -602,6 +630,30 @@ SYSCALL_ENTER_PROT(write)
 SYSCALL_EXIT_PROT(write)
 {
 	free_scratch();
+}
+
+
+/* ************************************************************************** *
+ * pwrite                                                                     * 
+ *                                                                            *
+ * ssize_t pwrite(int fd, const void *buf, size_t count, off_t offset);       *
+ * ************************************************************************** */
+
+SYSCALL_ENTER_PROT(pwrite)
+{
+	/* Identical to write except for additional offset argument, hence
+	   we redirect to write handlers. */
+	int write_dispatch = 
+		SYSCALL_ENTER(write)(env, handler, actual, canonical, scratch);
+
+	canonical->arg_types[3] = IMMEDIATE_TYPE(off_t);
+
+	return write_dispatch;
+}
+
+SYSCALL_EXIT_PROT(pwrite)
+{
+	SYSCALL_EXIT(write)(env, handler, dispatch, actual, canonical, scratch);
 }
 
 
@@ -766,6 +818,7 @@ SYSCALL_EXIT_PROT(fstat)
 done:
 	free_scratch();
 }
+
 
 /* ************************************************************************** *
  * fstatat                                                                 * 
@@ -1084,6 +1137,72 @@ SYSCALL_ENTER_PROT(socket)
 	}
 	return DISPATCH_LEADER | DISPATCH_CHECKED
 		| DISPATCH_NEEDS_REPLICATION;
+}
+
+
+/* ************************************************************************** *
+ * socketpair                                                                 *
+ * int socketpair(int domain, int type, int protocol, int sv[2]);             *
+ * ************************************************************************** */
+
+SYSCALL_ENTER_PROT(socketpair)
+{
+	alloc_scratch(sizeof(struct type));
+	struct type *buffer_type = (struct type *)*scratch;
+	int domain = actual->args[0];
+	canonical->arg_types[0] = IMMEDIATE_TYPE(int);
+	canonical->arg_types[1] = IMMEDIATE_TYPE(int);
+	canonical->arg_types[2] = IMMEDIATE_TYPE(int);
+	canonical->arg_types[3] = POINTER_TYPE(buffer_type);
+	*buffer_type            = BUFFER_TYPE(sizeof(int) * 2);
+	if(domain == AF_UNIX) {
+		return DISPATCH_EVERYONE | DISPATCH_CHECKED;
+	}
+	canonical->arg_flags[3] = ARG_FLAG_REPLICATE;
+	canonical->ret_flags = ARG_FLAG_REPLICATE;
+	return DISPATCH_LEADER | DISPATCH_CHECKED
+	        | DISPATCH_NEEDS_REPLICATION;
+}
+
+SYSCALL_EXIT_PROT(socketpair)
+{
+	struct descriptor_info *di[2];
+	if(0 > actual->ret) {
+		goto done;
+	}
+
+#if VERBOSITY >= 4
+	SAFE_LOGF("%s adding descriptor.\n", handler->name);
+#endif
+
+	int flags = 0;
+	int local_fd[2] = {-1, -1};
+	int *actual_fds = (int *)actual->args[3];
+	if(dispatch & DISPATCH_EVERYONE) {
+		flags |= DI_OPENED_LOCALLY;
+		local_fd[0] = actual_fds[0];
+		local_fd[1] = actual_fds[1];
+	} else if(env->is_leader) {
+		flags |= DI_OPENED_ON_LEADER;
+		local_fd[0] = actual_fds[0];
+		local_fd[1] = actual_fds[1];
+	} else {
+		flags = DI_OPENED_ON_LEADER;
+	}
+	if(dispatch & DISPATCH_UNCHECKED) {
+		flags |= DI_UNCHECKED;
+	}
+	di[0] = env_add_local_descriptor(env, local_fd[0], flags, 
+	                                 SOCKET_DESCRIPTOR);
+	di[1] = env_add_local_descriptor(env, local_fd[1], flags, 
+	                                 SOCKET_DESCRIPTOR);
+
+	actual_fds[0] = canonical_fd_for(env, di[0]);
+	actual_fds[1] = canonical_fd_for(env, di[1]);
+
+done:
+	free_scratch();
+	return;
 }
 
 
@@ -1538,6 +1657,7 @@ SYSCALL_ENTER_PROT(getsockopt)
 	return dispatch_leader_if_needed(di, DISPATCH_CHECKED);
 }
 
+
 /* ************************************************************************** *
  * setsockopt                                                                 * 
  *                                                                            *
@@ -1689,4 +1809,162 @@ SYSCALL_ENTER_PROT(getsockname)
 	canonical->ret_type = IMMEDIATE_TYPE(int);
 	canonical->ret_flags = ARG_FLAG_REPLICATE;
 	return dispatch_leader_if_needed(di, DISPATCH_CHECKED);
+}
+
+
+/* ************************************************************************** *
+ * mkdir                                                                      *
+ * int mkdir(const char *pathname, mode_t mode);                              *
+ * ************************************************************************** */
+
+SYSCALL_ENTER_PROT(mkdir)
+{
+	/* Redirect to mkdirat handlers. */
+	canonical->args[2] = canonical->args[1];
+	canonical->args[1] = canonical->args[0];
+	canonical->args[0] = AT_FDCWD;
+	canonical->no = SYSCALL_mkdirat_CANONICAL;
+	return SYSCALL_ENTER(mkdirat)(env, handler, actual, canonical, scratch);
+}
+
+
+/* ************************************************************************** *
+ * mkdirat                                                                    *
+ * int mkdirat(int dirfd, const char *pathname, mode_t mode);                 *
+ * ************************************************************************** */
+
+SYSCALL_ENTER_PROT(mkdirat)
+{
+	alloc_scratch(sizeof(struct type));
+	struct type *string_type = (struct type*)*scratch;
+	canonical->arg_types[0] = DESCRIPTOR_TYPE();
+	canonical->arg_types[1] = POINTER_TYPE(string_type);
+	*string_type            = STRING_TYPE();
+	return DISPATCH_CHECKED | DISPATCH_EVERYONE;
+}
+
+
+/* ************************************************************************** *
+ * getpid                                                                     *
+ *                                                                            *
+ * pid_t getpid(void)                                                         *
+ * ************************************************************************** */
+
+SYSCALL_ENTER_PROT(getpid)
+{
+	actual->ret = env->pid;
+	return DISPATCH_SKIP;
+}
+
+
+/* ************************************************************************** *
+ * getppid                                                                     *
+ *                                                                            *
+ * pid_t getpid(void)                                                         *
+ * ************************************************************************** */
+
+SYSCALL_ENTER_PROT(getppid)
+{
+	actual->ret = env->ppid;
+	return DISPATCH_SKIP;
+}
+
+
+/* ************************************************************************** *
+ * fork                                                                       *
+ * pid_t fork(void)                                                           *
+ * ************************************************************************** */
+
+SYSCALL_ENTER_PROT(fork)
+{
+	/* Forward to clone() handler.
+	   See glibc sysdeps/unix/sysv/linux/arch-fork.h */
+	const int flags = CLONE_CHILD_SETTID | CLONE_CHILD_CLEARTID | SIGCHLD;
+	canonical->no = SYSCALL_clone_CANONICAL;
+	canonical->args[0] = flags;
+	canonical->args[1] = 0;
+	canonical->args[2] = (unsigned long)NULL;
+	canonical->args[3] = (unsigned long)NULL;  // FIXME
+	return SYSCALL_ENTER(clone)(env, handler, actual, canonical, scratch);
+}
+
+
+/* TODO: There is a newer clone3 interface not implemented in the kernel we 
+   use. */
+
+/* ************************************************************************** *
+ * clone                                                                      *
+ *                                                                            *
+ * SYSCALL_DEFINE5(clone, unsigned long, clone_flags, unsigned long, newsp,   *
+ *		 int __user *, parent_tidptr,                                 *
+ *		 unsigned long, tls,                                          *
+ *		 int __user *, child_tidptr)                                  *
+ * ************************************************************************** */
+
+SYSCALL_ENTER_PROT(clone)
+{
+	struct clone_ref_types {
+		struct type parent_tidptr_type;
+		struct type child_tidptr_type;
+	};
+	alloc_scratch(sizeof(struct clone_ref_types));
+	struct clone_ref_types *ref_types = (struct clone_ref_types *)*scratch;
+	canonical->arg_types[0] = IMMEDIATE_TYPE(unsigned long);
+	canonical->arg_types[1] = IMMEDIATE_TYPE(unsigned long);
+	/* Just check newsp for NULL vs non-NULL since stack pointers are going
+	   to be different between architectures. */
+	canonical->args[1] = (0 == canonical->args[1] ? 0 : 1);
+	canonical->arg_types[2] = POINTER_TYPE(&ref_types->parent_tidptr_type);
+	ref_types->parent_tidptr_type = IMMEDIATE_TYPE(pid_t);
+	canonical->arg_types[3] = IMMEDIATE_TYPE(unsigned long);
+	canonical->arg_types[4] = POINTER_TYPE(&ref_types->child_tidptr_type);
+	ref_types->child_tidptr_type = IMMEDIATE_TYPE(pid_t);
+	return DISPATCH_EVERYONE | DISPATCH_CHECKED;
+}
+
+SYSCALL_EXIT_PROT(clone)
+{
+
+}
+
+
+/* ************************************************************************** *
+ * wait                                                                       *
+ * pid_t wait(int *wstatus)                                                   *
+ * ************************************************************************** */
+
+SYSCALL_ENTER_PROT(wait)
+{
+	alloc_scratch(sizeof(struct type));
+	struct type *buffer_type = (struct type *)*scratch;
+	canonical->arg_types[0] = POINTER_TYPE(buffer_type);
+	*buffer_type            = BUFFER_TYPE(sizeof(int));
+	return DISPATCH_EVERYONE | DISPATCH_CHECKED;
+}
+
+
+/* ************************************************************************** *
+ * waitpid                                                                    *
+ * pid_t waitpid(pid_t pid, int *wstatus, int options)                        *
+ * ************************************************************************** */
+
+SYSCALL_ENTER_PROT(waitpid)
+{
+	alloc_scratch(sizeof(struct type));
+	struct type *buffer_type = (struct type *)*scratch;
+	canonical->arg_types[0] = IMMEDIATE_TYPE(pid_t);
+	canonical->arg_types[1] = POINTER_TYPE(buffer_type);
+	*buffer_type            = BUFFER_TYPE(sizeof(int));
+	canonical->arg_types[2] = IMMEDIATE_TYPE(int);
+	return DISPATCH_EVERYONE | DISPATCH_CHECKED;
+}
+
+SYSCALL_ENTER_PROT(wait3)
+{
+	return 0;
+}
+
+SYSCALL_ENTER_PROT(wait4)
+{
+	return 0;
 }

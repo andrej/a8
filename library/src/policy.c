@@ -7,8 +7,8 @@ struct policy policies[] = {
 };
 
 #define POLICY_EXEMPT(X) bool POLICY_IS_EXEMPT_FN(X)( \
-			      struct syscall_info *canonical, \
-			      struct environment *env)
+			      const struct syscall_info * const canonical, \
+			      const struct environment * const env)
 
 POLICY_EXEMPT(full)
 {
@@ -73,10 +73,11 @@ POLICY_EXEMPT(nonsocket_ro)
 		//case SYSCALL_select_CANONICAL:
 		//case SYSCALL_poll_CANONICAL:
 		{
-			struct descriptor_info *di;
+			const struct descriptor_info *di;
 			SAFE_NZ_TRY(
 				di = env_get_canonical_descriptor_info(
-						env, canonical->args[0]));
+						(struct environment *)env, 
+						canonical->args[0]));
 			if(SOCKET_DESCRIPTOR == di->type) {
 				return false;
 			}
@@ -106,10 +107,11 @@ POLICY_EXEMPT(nonsocket_rw)
 		//case SYSCALL_pwrite64_CANONICAL:
 		//case SYSCALL_pwritev_CANONICAL:
 		{
-			struct descriptor_info *di;
+			const struct descriptor_info *di;
 			SAFE_NZ_TRY(
 				di = env_get_canonical_descriptor_info(
-						env, canonical->args[0]));
+						(struct environment *)env, 
+						canonical->args[0]));
 			if(SOCKET_DESCRIPTOR == di->type) {
 				return false;
 			}

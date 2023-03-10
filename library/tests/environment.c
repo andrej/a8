@@ -7,23 +7,29 @@ TEST(environment)
 	struct environment env = {};
 	struct descriptor_info *di = NULL;
 	ASSERT_EQ(env.n_descriptors, 0);
-	ASSERT_NEQ(di = env_add_local_descriptor(&env, 1, 0), NULL);
-	can1 = di->canonical_fd;
+	ASSERT_NEQ(di = env_add_local_descriptor(&env, 1, 0, 
+	                                         SOCKET_DESCRIPTOR),
+		   NULL);
+	can1 = canonical_fd_for(&env, di);
 	di = env_get_local_descriptor_info(&env, 1);
 	ASSERT_NEQ(di, NULL);
 	//ASSERT_EQ(di->canonical_fd, 0);
 	ASSERT_EQ(di->local_fd, 1);
 	ASSERT_EQ(di->flags, 0);
 
-	ASSERT_NEQ(env_add_local_descriptor(&env, 2, DI_OPENED_LOCALLY), NULL);
+	ASSERT_NEQ(env_add_local_descriptor(&env, 2, DI_OPENED_LOCALLY,
+	                                    SOCKET_DESCRIPTOR),
+		   NULL);
 	di = env_get_local_descriptor_info(&env, 2);
 	ASSERT_NEQ(di, NULL);
 	//ASSERT_EQ(di->canonical_fd, 1);
 	ASSERT_EQ(di->local_fd, 2);
 	ASSERT_EQ(di->flags, DI_OPENED_LOCALLY);
 
-	ASSERT_NEQ(di = env_add_descriptor(&env, 4, 3, DI_OPENED_ON_LEADER), NULL);
-	can3 = di->canonical_fd;
+	ASSERT_NEQ(di = env_add_descriptor(&env, 4, 3, DI_OPENED_ON_LEADER, 
+	                                   SOCKET_DESCRIPTOR), 
+		   NULL);
+	can3 = canonical_fd_for(&env, di);
 	di = env_get_canonical_descriptor_info(&env, 3);
 	ASSERT_NEQ(di, NULL);
 	//ASSERT_EQ(di->canonical_fd, 3);
@@ -48,7 +54,7 @@ TEST(epoll_infos_list)
 	struct environment env = {};
 	struct epoll_data_info *info = NULL;
 
-	env_init(&env, NULL, NULL, 0);
+	env_init(&env, NULL);
 	ASSERT_EQ(0, append_epoll_data_info(&env, 
 			(struct epoll_data_info){1, 2, {0x2}}));
 	ASSERT_EQ(0, append_epoll_data_info(&env, 

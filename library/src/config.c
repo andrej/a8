@@ -59,11 +59,10 @@ int parse_config(const char *path, struct config *dest)
 		dest->replication_batch_size = 0;
 	}
 
-	dest->policy = NULL;
 	if(config_lookup_string(&config, "policy", &tmp_str)) {
-		Z_TRY(dest->policy = policy_from_str(tmp_str));
+		strncpy(dest->policy, tmp_str, sizeof(dest->policy));
 	} else {
-		Z_TRY(dest->policy = policy_from_str("full"));
+		strncpy(dest->policy, "full", sizeof(dest->policy));
 	}
 
 	for(int i = 0; i < n_variants; i++) {

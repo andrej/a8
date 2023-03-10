@@ -1,6 +1,6 @@
 #include <stdlib.h>
 #include "util.h"
-#include "init.h"
+#include "library_init.h"
 
 void __attribute__((constructor)) monmod_do_init() 
 {

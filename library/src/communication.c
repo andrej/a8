@@ -14,7 +14,7 @@
 #define WELCOME_MESSAGE_SIZE (sizeof(struct message) + sizeof(uint64_t))
 
 static inline
-int sanity_checks(struct communicator *comm)
+int sanity_checks(const struct communicator * const comm)
 {
 	if(NULL == comm || 0 > comm->self.id || 0 > comm->n_peers
 	   || MAX_N_PEERS < comm->n_peers) {
@@ -134,7 +134,7 @@ static int delete_peer(struct communicator *comm, int id)
 {
 	struct peer *peer = NULL;
 	struct peer *peer_end = comm->peers + MAX_N_PEERS;
-	if(NULL == (peer = comm_get_peer(comm, id))) {
+	if(NULL == (peer = comm_get_peer_ref(comm, id))) {
 		return 1;
 	}
 	// Everything after the deleted peer moves up
@@ -156,7 +156,7 @@ int comm_init(struct communicator *comm, int own_id, struct sockaddr *own_addr)
 {
 	struct sockaddr_in *own_addr_in = (struct sockaddr_in *)own_addr;
 	in_port_t own_port = own_addr_in->sin_port;
-	NZ_TRY(init_vma_redirect());
+	NZ_TRY_EXCEPT(init_vma_redirect(), return -1);
 	if(0 > own_id) {
 		WARN("own_id < 0");
 		return 1;
@@ -167,9 +167,20 @@ int comm_init(struct communicator *comm, int own_id, struct sockaddr *own_addr)
 	struct sockaddr_in *sa = (struct sockaddr_in *)&comm->self.addr;
 	sa->sin_family = AF_INET;
 	sa->sin_port = own_port;
-	LZ_TRY(comm->self.fd = 
-		start_server(own_addr_in->sin_port));
-	return 0;
+	LZ_TRY_EXCEPT(comm->self.fd = 
+		      start_server(own_addr_in->sin_port),
+		      return -1);
+	if(0 == own_addr_in->sin_port) {
+		struct sockaddr_in own_name = {};
+		socklen_t own_name_len = sizeof(own_name);
+		LZ_TRY_EXCEPT(getsockname(comm->self.fd, 
+		                          (struct sockaddr *)&own_name,
+					  &own_name_len),
+					  return -1);
+		Z_TRY_EXCEPT(own_name_len == sizeof(own_name), return -1);
+		own_port = ntohs(own_name.sin_port);
+	}
+	return own_port;
 }
 
 int comm_destroy(struct communicator *comm)
@@ -198,7 +209,7 @@ int comm_connect(struct communicator *comm, int peer_id, struct sockaddr *sa)
 	}
 
 	// Check if we have a pending connection with the target ID.
-	if(NULL != (peer = comm_get_peer(comm, peer_id))) {
+	if(NULL != (peer = comm_get_peer_ref(comm, peer_id))) {
 		if(peer->status != PEER_PENDING) {
 			WARNF("Peer %d already connected.\n", peer_id);
 			return 1;
@@ -248,7 +259,7 @@ abort:
 
 int comm_disconnect(struct communicator *comm, int peer_id)
 {
-	struct peer *peer;
+	const struct peer *peer;
 	NZ_TRY(sanity_checks(comm));
 	if(0 >= comm->n_peers || 0 > peer_id) {
 		return 1;
@@ -273,10 +284,10 @@ int comm_disconnect_all(struct communicator *comm)
 	return ret;
 }
 
-int comm_send(struct communicator *comm, int peer_id, size_t n, 
+int comm_send(const struct communicator * const comm, int peer_id, size_t n, 
               const char *buf)
 {
-	struct peer *peer;
+	const struct peer *peer;
 	size_t len = sizeof(struct message) + n;
 	char msg_buf[len];
 	struct message *msg = (struct message *)&msg_buf;
@@ -291,8 +302,8 @@ int comm_send(struct communicator *comm, int peer_id, size_t n,
 	return 0;
 }
 
-int comm_receive_header(struct communicator *comm, 
-                        struct peer *peer,
+int comm_receive_header(const struct communicator * const comm, 
+                        const struct peer *peer,
                         struct message *msg)
 {
 	// Get peer info
@@ -305,10 +316,10 @@ int comm_receive_header(struct communicator *comm,
 	return 0;
 }
 
-int comm_receive_body(struct communicator *comm,
-                     struct peer *peer,
-                     struct message *msg,
-                     size_t *n, char *buf)
+int comm_receive_body(const struct communicator * const comm,
+                      const struct peer *peer,
+                      struct message *msg,
+                      size_t *n, char *buf)
 {
 	size_t read_n = 0;
 	const size_t msg_length = msg->length;
@@ -325,10 +336,10 @@ int comm_receive_body(struct communicator *comm,
 	return 0;
 }
 
-int comm_receive_partial(struct communicator *comm, int peer_id, size_t *n,
-                         char *buf)
+int comm_receive_partial(const struct communicator * const comm, int peer_id, 
+                         size_t *n, char *buf)
 {
-	struct peer *peer;
+	const struct peer *peer;
 	struct message msg = {};
 	size_t read_n = 0;
 
@@ -346,7 +357,7 @@ int comm_receive_partial(struct communicator *comm, int peer_id, size_t *n,
 	return 0;
 }
 
-int comm_receive(struct communicator *comm, int peer_id, size_t *n,
+int comm_receive(const struct communicator * const comm, int peer_id, size_t *n,
 		 char *buf)
 {
 	size_t n_msg = *n;
@@ -361,9 +372,9 @@ int comm_receive(struct communicator *comm, int peer_id, size_t *n,
 	return 0;
 }
 
-int comm_receive_dynamic(struct communicator *comm, int peer_id, size_t *n,
-                         char **buf) {
-	struct peer *peer;
+int comm_receive_dynamic(const struct communicator * const comm, int peer_id, 
+                         size_t *n, char **buf) {
+	const struct peer *peer;
 	struct message msg = {};
 	size_t read_n = 0;
 	char *recv_buf = NULL;
@@ -385,7 +396,8 @@ int comm_receive_dynamic(struct communicator *comm, int peer_id, size_t *n,
 	return 0;
 }
 
-int comm_broadcast(struct communicator *comm, size_t n, const char *buf)
+int comm_broadcast(const struct communicator * const comm, size_t n, 
+                   const char *buf)
 {
 	int ret = 0;
 	sanity_checks(comm);
@@ -397,8 +409,8 @@ int comm_broadcast(struct communicator *comm, size_t n, const char *buf)
 	return ret;
 }
 
-int comm_all_agree(struct communicator *comm, int leader_id, size_t n, 
-                   const char *buf)
+int comm_all_agree(const struct communicator * const comm, int leader_id, 
+                   size_t n, const char *buf)
 {
 	int tmp = 0;
 	long ret = 1;

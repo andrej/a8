@@ -33,7 +33,7 @@ TEST(writev)
 	canonical.args[2] = actual.args[2];
 
 	struct environment env = {};
-	env_init(&env, NULL, NULL, 0);
+	env_init(&env, NULL);
 	const struct syscall_handler *handler = get_handler(__NR_writev);
 
 	ASSERT_NEQ(handler, NULL);

@@ -2,7 +2,6 @@
 #define CONFIG_H
 
 #include <sys/socket.h>
-#include "policy.h"
 
 #define MAX_N_VARIANTS 8
 #define MAX_N_BREAKPOINTS 4
@@ -46,7 +45,7 @@ struct config {
 	 * The cross-checking policy can exempt some non-security critical 
 	 * system calls from cross-checking.
 	 */
-	struct policy *policy;
+	char policy[64];
 	/**
 	 * If set to a positive value, this will reset the variant to the last
 	 * checkpoint after every # restore_interval system calls. Set too low,

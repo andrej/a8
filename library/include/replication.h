@@ -12,7 +12,7 @@
 #include "serialization.h"
 #include "communication.h"
 #include "handlers.h"
-#include "environment.h"
+#include "monitor.h"
 
 /**
  * Compare serialized arguments in `canonical` with other instances. This may
@@ -25,18 +25,18 @@
  * A negative return value indicates an error, such as network communication
  * error, during cross-checking.
  */
-int cross_check_args(struct environment *env,
+int cross_check_args(const struct monitor * const monitor,
                      struct syscall_info *canonical);
 
 void log_args(char *buf, size_t max_len, 
               struct syscall_info *actual,
               struct syscall_info *canonical);
 
-int init_replication(struct environment *env, size_t flush_after);
+int replication_init(struct monitor * const monitor, size_t flush_after);
 
-void free_replication();
+void replication_destroy(struct monitor *monitor);
 
-int replicate_results(struct environment *env,
+int replicate_results(const struct monitor * const monitor,
                       struct syscall_info *canonical);
 
 

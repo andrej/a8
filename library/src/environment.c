@@ -8,14 +8,12 @@
 #include "util.h"
 #include "unprotected.h"
 
-void env_init(struct environment *env, 
-              struct communicator *comm)
+void env_init(struct environment *env, bool is_leader)
 {
-	if(NULL != comm) {
-		env->comm = comm;
-	}
-
 	env->epoll_data_infos = (struct epoll_data_infos){};
+	env->pid = getpid();
+	env->ppid = getppid();
+	env->is_leader = is_leader;
 
 	// stdin
 	env_add_descriptor(env, 0, 0, DI_OPENED_ON_LEADER, 
@@ -107,11 +105,16 @@ checkpointed_environment_fix_up(struct environment *env)
 	   reference the same epoll structure in the kernel. We must recreate
 	   the epoll as a new structure via epoll_create() and epoll_ctl(). */
 
-	for(size_t i = 0; i < env->n_descriptors; i++) {
-		struct descriptor_info * const di = &env->descriptors[i];
+	size_t i = 0;
+	list_for_each(env->descriptors, i) {
+		if(!list_item_is_occupied(env->descriptors, i)) {
+			continue;
+		}
+		struct descriptor_info * const di = 
+			list_get_i(env->descriptors, i);
 		int new_fd = 0;
 		const int old_fd = di->local_fd;
-		const int canonical_fd = di - env->descriptors; 
+		const int canonical_fd = di - env->descriptors.items; 
 			// TODO add bounds check
 		int s = 0;
 		if(di->type != EPOLL_DESCRIPTOR ||
@@ -134,7 +137,7 @@ checkpointed_environment_fix_up(struct environment *env)
 				continue;
 			}
 			const struct descriptor_info *fd_di = 
-				&env->descriptors[j->fd];
+				list_get_i(env->descriptors, j->fd);
 				// TODO add bounds check
 			s = unprotected_funcs.epoll_ctl(
 				new_fd, EPOLL_CTL_ADD, fd_di->local_fd,

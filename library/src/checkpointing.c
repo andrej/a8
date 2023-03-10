@@ -16,7 +16,7 @@
 #include "trap_instr.h"
 #include "syscall.h"
 #include "syscall_trace_func.h"
-#include "init.h"
+#include "library_init.h"
 #include "unprotected.h"
 #include "environment.h"
 #include "globals.h"

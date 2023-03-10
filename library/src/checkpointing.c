@@ -49,10 +49,12 @@ static int inject_breakpoint(struct checkpoint_env *env, void *loc,
  * ************************************************************************** */
 
 int init_checkpoint_env(struct checkpoint_env *env, 
+                        struct environment *tracee_env,
                         struct variant_config *config,
 			void *monitor_start,
 			size_t protected_len)
 {
+	env->tracee_env = tracee_env;
 	env->monitor_start = monitor_start;
 	env->protected_len = protected_len;
 
@@ -328,6 +330,8 @@ create_fork_checkpoint(struct checkpoint_env *cenv, struct breakpoint *b)
 		   it succeeds -- in both cases after the call, the child is
 		   gone). */
 		unprotected_funcs.kill(cenv->last_checkpoint.pid, SIGKILL);
+		int status;
+		unprotected_funcs.waitpid(cenv->last_checkpoint.pid, &status, 0);
 	}
 
 	/* Set message in shared memory to CHECKPOINT_HOLD before fork() to
@@ -341,7 +345,8 @@ create_fork_checkpoint(struct checkpoint_env *cenv, struct breakpoint *b)
 	pid_t child = 0;
 	LZ_TRY(child = unprotected_funcs.fork());
 	if(0 == child) {
-		s = unprotected_funcs.checkpointed_environment_fix_up(&env);
+		s = unprotected_funcs.checkpointed_environment_fix_up(
+				cenv->tracee_env);
 		if(0 != s) {
 			return 1;
 		}
@@ -383,6 +388,8 @@ create_fork_checkpoint(struct checkpoint_env *cenv, struct breakpoint *b)
 			case CHECKPOINT_RESTORE: {
 				smem_put(&cenv->smem->semaphore, 
 				         cenv->smem->done_flag = true);
+				/* TODO: might need to update PID in 
+				         tracee_env->pid */
 				unprotected_funcs
 					.monmod_unprotected_reprotect();
 				return 0; /* resume execution out of 

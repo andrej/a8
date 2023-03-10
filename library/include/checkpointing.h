@@ -10,6 +10,7 @@
 #include <semaphore.h>
 #include "config.h"
 #include "trap_instr.h"
+#include "environment.h"
 
 struct checkpoint {
 	bool valid;
@@ -51,6 +52,7 @@ struct checkpointing_smem {
 })
 
 struct checkpoint_env {
+	struct environment *tracee_env;
 	struct checkpoint last_checkpoint;
 	struct breakpoint *in_breakpoint; /* if non-null, we are single stepping
 	                                     after hitting this breakpoint */
@@ -71,6 +73,7 @@ struct checkpoint_env {
 };
 
 int init_checkpoint_env(struct checkpoint_env *env,
+                        struct environment *tracee_env,
                         struct variant_config *config,
 			void *monitor_start,
 			size_t protected_len);

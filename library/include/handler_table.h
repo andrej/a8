@@ -8,8 +8,8 @@
 SYSCALL_ENTER_PROT(default_checked);
 SYSCALL_ENTER_PROT(default_checked_arg1);
 SYSCALL_ENTER_PROT(default_arg1_fd);
-SYSCALL_EXIT_PROT(default_free_scratch);
-SYSCALL_EXIT_PROT(default_creates_fd_exit);
+SYSCALL_EXIT_PROT(default_creates_fd);
+
 
 #define SYSCALLS(X) \
 /* ************************************************************************* *\
@@ -26,16 +26,16 @@ SYSCALL_EXIT_PROT(default_creates_fd_exit);
                                 NULL ) \
  X( __NR_access,   access,      SYSCALL_ENTER(access), \
                                 NULL, \
-                                SYSCALL_EXIT(default_free_scratch) ) \
+                                SYSCALL_EXIT(access) ) \
  X( __NR_faccessat, faccessat,  SYSCALL_ENTER(faccessat), \
                                 NULL, \
-                                SYSCALL_EXIT(default_free_scratch) ) \
+                                SYSCALL_EXIT(faccessat) ) \
  X( __NR_open,     open,        SYSCALL_ENTER(open), \
                                 NULL, \
-                                SYSCALL_EXIT(default_creates_fd_exit) ) \
+                                SYSCALL_EXIT(open) ) \
  X( __NR_openat,   openat,      SYSCALL_ENTER(openat), \
                                 NULL, \
-                                SYSCALL_EXIT(default_creates_fd_exit) ) \
+                                SYSCALL_EXIT(openat) ) \
  X( __NR_close,    close,       SYSCALL_ENTER(close), \
                                 NULL, \
                                 SYSCALL_EXIT(close) ) \
@@ -45,7 +45,7 @@ SYSCALL_EXIT_PROT(default_creates_fd_exit);
  X( __NR_munmap,   munmap,      SYSCALL_ENTER(munmap), \
                                 NULL, \
                                 NULL ) \
- X( __NR_mprotect, mprotect,    SYSCALL_ENTER(default_checked), \
+ X( __NR_mprotect, mprotect,    SYSCALL_ENTER(mprotect), \
                                 NULL, \
                                 NULL ) /*TODO*/ \
  X( __NR_read,     read,        SYSCALL_ENTER(read), \
@@ -73,7 +73,7 @@ SYSCALL_EXIT_PROT(default_creates_fd_exit);
                                 NULL, \
                                 SYSCALL_EXIT(writev) ) \
  X( __NR_stat,     stat,        SYSCALL_ENTER(stat), \
-                                SYSCALL_POST_CALL(fstatat), \
+                                SYSCALL_POST_CALL(stat), \
                                 SYSCALL_EXIT(stat)) \
  X( __NR_fstat,    fstat,       SYSCALL_ENTER(fstat), \
                                 SYSCALL_POST_CALL(fstat), \
@@ -101,10 +101,10 @@ SYSCALL_EXIT_PROT(default_creates_fd_exit);
                                 NULL) \
  X( __NR_getgroups,getgroups,   SYSCALL_ENTER(getgroups), \
                                 NULL, \
-                                SYSCALL_EXIT(default_free_scratch)) \
+                                SYSCALL_EXIT(getgroups)) \
  X( __NR_setgroups,setgroups,   SYSCALL_ENTER(setgroups), \
                                 NULL, \
-                                SYSCALL_EXIT(default_free_scratch) ) \
+                                SYSCALL_EXIT(setgroups) ) \
  X( __NR_time,     time,        SYSCALL_ENTER(time), \
                                 NULL, \
                                 SYSCALL_EXIT(time)) \
@@ -128,34 +128,34 @@ SYSCALL_EXIT_PROT(default_creates_fd_exit);
                                 NULL ) /* TODO */ \
  X( __NR_socket,   socket,      SYSCALL_ENTER(socket), \
                                 NULL, \
-                                SYSCALL_EXIT(default_creates_fd_exit) ) \
- X( __NR_socketpair, socketpair, SYSCALL_ENTER(socketpair), \
+                                SYSCALL_EXIT(socket) ) \
+ X( __NR_socketpair,socketpair, SYSCALL_ENTER(socketpair), \
                                 NULL, \
                                 SYSCALL_EXIT(socketpair) ) \
  X( __NR_getsockopt,getsockopt, SYSCALL_ENTER(getsockopt), \
                                 NULL, \
-                                SYSCALL_EXIT(default_free_scratch) ) \
+                                SYSCALL_EXIT(getsockopt) ) \
  X( __NR_setsockopt,setsockopt, SYSCALL_ENTER(setsockopt), \
                                 NULL, \
-                                SYSCALL_EXIT(default_free_scratch) ) \
- X( __NR_fcntl,    fcntl,       SYSCALL_ENTER(default_arg1_fd), \
+                                SYSCALL_EXIT(setsockopt) ) \
+ X( __NR_fcntl,    fcntl,       SYSCALL_ENTER(fcntl), \
                                 NULL, \
-                                NULL ) /*TODO*/ \
- X( __NR_connect,  connect,     SYSCALL_ENTER(default_arg1_fd), \
+                                SYSCALL_EXIT(fcntl) ) /*TODO*/ \
+ X( __NR_connect,  connect,     SYSCALL_ENTER(connect), \
                                 NULL, \
-                                NULL ) /*TODO*/ \
- X( __NR_bind,     bind,        SYSCALL_ENTER(default_arg1_fd), \
+                                SYSCALL_EXIT(connect) ) /*TODO*/ \
+ X( __NR_bind,     bind,        SYSCALL_ENTER(bind), \
                                 NULL, \
-                                NULL ) /*TODO*/ \
- X( __NR_listen,   listen,      SYSCALL_ENTER(default_arg1_fd), \
+                                SYSCALL_EXIT(bind) ) /*TODO*/ \
+ X( __NR_listen,   listen,      SYSCALL_ENTER(listen), \
                                 NULL, \
-                                NULL ) /*TODO*/ \
- X( __NR_epoll_create, epoll_create, SYSCALL_ENTER(epoll_create), \
+                                SYSCALL_EXIT(listen) ) /*TODO*/ \
+ X( __NR_epoll_create,epoll_create, SYSCALL_ENTER(epoll_create), \
                                 NULL, \
-                                SYSCALL_EXIT(default_creates_fd_exit) ) \
- X( __NR_epoll_create1, epoll_create1, SYSCALL_ENTER(epoll_create1), \
+                                SYSCALL_EXIT(epoll_create) ) \
+ X( __NR_epoll_create1,epoll_create1, SYSCALL_ENTER(epoll_create1), \
                                 NULL, \
-                                SYSCALL_EXIT(default_creates_fd_exit) ) \
+                                SYSCALL_EXIT(epoll_create1) ) \
  X( __NR_epoll_ctl,epoll_ctl,   SYSCALL_ENTER(epoll_ctl), \
                                 NULL, \
                                 SYSCALL_EXIT(epoll_ctl) ) \
@@ -167,37 +167,37 @@ SYSCALL_EXIT_PROT(default_creates_fd_exit);
                                 SYSCALL_EXIT(epoll_pwait) ) \
  X( __NR_accept4,  accept4,     SYSCALL_ENTER(accept4), \
                                 NULL, \
-                                SYSCALL_EXIT(default_creates_fd_exit) ) /*TODO*/ \
- X( __NR_shutdown, shutdown,    SYSCALL_ENTER(default_arg1_fd), \
+                                SYSCALL_EXIT(accept4) ) /*TODO*/ \
+ X( __NR_shutdown, shutdown,    SYSCALL_ENTER(shutdown), \
                                 NULL, \
-                                NULL) /*TODO*/ \
+                                SYSCALL_EXIT(shutdown)) /*TODO*/ \
  X( __NR_rt_sigaction, rt_sigaction, SYSCALL_ENTER(default_checked_arg1), \
                                 NULL, \
                                 NULL) /*TODO*/ \
  X( __NR_rt_sigprocmask, rt_sigprocmask, SYSCALL_ENTER(rt_sigprocmask), \
                                 NULL, \
-                                SYSCALL_EXIT(default_free_scratch)) \
- X( __NR_ioctl,    ioctl,       SYSCALL_ENTER(default_arg1_fd), \
+                                SYSCALL_EXIT(rt_sigprocmask)) \
+ X( __NR_ioctl,    ioctl,       SYSCALL_ENTER(ioctl), \
                                 NULL, \
-                                NULL) /*TODO*/\
- X( __NR_recvfrom, recvfrom,    SYSCALL_ENTER(default_arg1_fd), \
+                                SYSCALL_EXIT(ioctl)) /*TODO*/\
+ X( __NR_recvfrom, recvfrom,    SYSCALL_ENTER(recvfrom), \
                                 NULL, \
-                                NULL) /*TODO*/\
+                                SYSCALL_EXIT(recvfrom)) /*TODO*/\
  X( __NR_sendfile, sendfile,    SYSCALL_ENTER(sendfile), \
                                 NULL, \
-                                NULL) \
+                                SYSCALL_EXIT(sendfile)) \
  X( __NR_getrlimit, getrlimit,  SYSCALL_ENTER(getrlimit), \
                                 NULL, \
-                                SYSCALL_EXIT(default_free_scratch) ) \
+                                SYSCALL_EXIT(getrlimit) ) \
  X( __NR_setrlimit, setrlimit,  SYSCALL_ENTER(setrlimit), \
                                 NULL, \
-                                SYSCALL_EXIT(default_free_scratch) ) \
+                                SYSCALL_EXIT(setrlimit) ) \
  X( __NR_getsockname, getsockname,  SYSCALL_ENTER(getsockname), \
                                 NULL, \
-                                SYSCALL_EXIT(default_free_scratch)) \
+                                SYSCALL_EXIT(getsockname)) \
  X( __NR_getpeername, getpeername,  SYSCALL_ENTER(getsockname), \
                                 NULL, \
-                                SYSCALL_EXIT(default_free_scratch)) /* TODO */ \
+                                SYSCALL_EXIT(getsockname)) /* TODO */ \
  X( __NR_exit,      exit,       SYSCALL_ENTER(default_checked), \
                                 NULL, \
                                 NULL) \
@@ -209,10 +209,10 @@ SYSCALL_EXIT_PROT(default_creates_fd_exit);
                                 NULL ) \
  X( __NR_mkdir,     mkdir,      SYSCALL_ENTER(mkdir), \
                                 NULL, \
-                                SYSCALL_EXIT(default_free_scratch) ) \
+                                SYSCALL_EXIT(mkdir) ) \
  X( __NR_mkdirat,   mkdirat,    SYSCALL_ENTER(mkdirat), \
                                 NULL, \
-                                SYSCALL_EXIT(default_free_scratch) ) \
+                                SYSCALL_EXIT(mkdirat) ) \
  X( __NR_getpid,    getpid,     SYSCALL_ENTER(getpid), \
                                 NULL, \
                                 NULL ) \
@@ -221,22 +221,22 @@ SYSCALL_EXIT_PROT(default_creates_fd_exit);
                                 NULL ) \
  X( __NR_fork,      fork,       SYSCALL_ENTER(fork), \
                                 NULL, \
-                                SYSCALL_EXIT(clone) ) \
+                                SYSCALL_EXIT(fork) ) \
  X( __NR_clone,     clone,      SYSCALL_ENTER(clone), \
                                 NULL, \
                                 SYSCALL_EXIT(clone) ) \
  X( __NR_wait,      wait,       SYSCALL_ENTER(wait), \
                                 NULL, \
-                                SYSCALL_EXIT(default_free_scratch) ) \
+                                SYSCALL_EXIT(wait) ) \
  X( __NR_waitpid,   waitpid,    SYSCALL_ENTER(waitpid), \
                                 NULL, \
-                                SYSCALL_EXIT(default_free_scratch) ) \
+                                SYSCALL_EXIT(waitpid) ) \
  X( __NR_wait3,     wait3,      SYSCALL_ENTER(wait3), \
                                 NULL, \
-                                SYSCALL_EXIT(default_free_scratch) ) \
+                                SYSCALL_EXIT(wait3) ) \
  X( __NR_wait4,     wait4,      SYSCALL_ENTER(wait4), \
                                 NULL, \
-                                SYSCALL_EXIT(default_free_scratch) ) \
+                                SYSCALL_EXIT(wait4) ) \
  
 #include "handler_table_prototypes.h"
 

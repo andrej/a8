@@ -7,6 +7,7 @@
 #include <semaphore.h>
 #include <stdlib.h>
 #include <sys/epoll.h>
+#include <sys/wait.h>
 #include <signal.h>
 
 #include "library_init.h"
@@ -75,6 +76,7 @@ struct unprotected_funcs {
 
    // signal.h
    typeof(kill) *kill;
+   typeof(waitpid) *waitpid;
    typeof(sigemptyset) *sigemptyset;
    typeof(sigaddset) *sigaddset;
    typeof(sigwait) *sigwait;

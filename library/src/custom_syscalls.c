@@ -42,5 +42,5 @@ int monmod_destroy()
 		WARNF("monmod_destroy failed with return code %d.\n", ret);
 		monmod_exit(2);
 	}
-	return 0; /* should never return; system call kills process*/
+	return 0; /* should never return; system call kills process */
 }

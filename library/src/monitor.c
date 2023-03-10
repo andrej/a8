@@ -16,6 +16,7 @@
 #include "unprotected.h"
 #include "replication.h"
 
+
 /* ************************************************************************** *
  * Global Variables                                                           *
  * ************************************************************************** */
@@ -45,7 +46,8 @@ syscall_check_dispatch_sanity(int dispatch,
                               struct syscall_info *canonical);
 
 static void
-syscall_handle_divergence(struct syscall_handler const *const handler,
+syscall_handle_divergence(struct monitor * const monitor,
+	                  const struct syscall_handler * const handler,
                           struct syscall_info *actual,
                           struct syscall_info *canonical);
 
@@ -74,6 +76,23 @@ int monitor_init(struct monitor *monitor, int own_id, struct config *conf)
 	Z_TRY(monitor->policy = policy_from_str(conf->policy));
 
 	Z_TRY_EXCEPT(own_variant_conf = get_variant(conf, own_id), exit(1));
+
+	/* Find the pages this module is loaded on. These pages will be 
+	   protected by the kernel to remain inaccessible for other parts of
+	   the program. */
+	NZ_TRY_EXCEPT(find_mapped_region_bounds(&monmod_library_init, 
+	                                        &monitor_start, &monitor_len),
+		      exit(1));
+
+	/* Sanity check that our linker script worked and, after loading,
+	   the "unprotected" section is the very last page-aligned sub-section
+	   of the loaded executable segment. */
+	Z_TRY_EXCEPT(monitor_len == (monitor_len & ~(monmod_page_size-1))
+	             && __unprotected_end == monitor_start + monitor_len
+	             && (void *)__unprotected_start > monitor_start 
+	             && (void *)__unprotected_start < monitor_start+monitor_len,
+		     exit(1));
+	protected_len = (void *)__unprotected_start - monitor_start;
 
 	/* Initialize Individual Basic Monitoring Components */
 	env_init(&monitor->env, monitor->is_leader);
@@ -111,31 +130,15 @@ int monitor_init(struct monitor *monitor, int own_id, struct config *conf)
 	   the monitor is registered: CRIU checkpointing forks a new
 	   dumper/restorer parent process, and the child process is the one
 	   that should register to be monitored. */
-	NZ_TRY_EXCEPT(init_checkpoint_env(&checkpoint_env,
+	NZ_TRY_EXCEPT(init_checkpoint_env(&monitor->checkpoint_env,
+	                                  &monitor->env,
 	                                  own_variant_conf,
 	                                  monitor_start, protected_len),
 	              exit(1));
-	env.pid = getpid();
+	monitor->env.pid = getpid();
 #endif
 
 	/* -- Register Tracing With Kernel Module -- */
-
-	/* Find the pages this module is loaded on. These pages will be 
-	   protected by the kernel to remain inaccessible for other parts of
-	   the program. */
-	NZ_TRY_EXCEPT(find_mapped_region_bounds(&monmod_library_init, 
-	                                        &monitor_start, &monitor_len),
-		      exit(1));
-
-	/* Sanity check that our linker script worked and, after loading,
-	   the "unprotected" section is the very last page-aligned sub-section
-	   of the loaded executable segment. */
-	Z_TRY_EXCEPT(monitor_len == (monitor_len & ~(monmod_page_size-1))
-	             && __unprotected_end == monitor_start + monitor_len
-	             && (void *)__unprotected_start > monitor_start 
-	             && (void *)__unprotected_start < monitor_start+monitor_len,
-		     exit(1));
-	protected_len = (void *)__unprotected_start - monitor_start;
 
 	NZ_TRY_EXCEPT(monmod_init(monitor->env.pid, 
 	                          monitor_start, 
@@ -221,7 +224,8 @@ long monitor_handle_syscall(struct monitor * const monitor,
 #endif
 
 #if ENABLE_CHECKPOINTING
-	restore_checkpoint_if_needed(&checkpoint_env, conf.restore_interval);
+	restore_checkpoint_if_needed(&monitor->checkpoint_env, 
+	                             monitor->conf.restore_interval);
 #endif
 #if NO_HANDLER_TERMINATES
 	if(NULL == handler) {
@@ -270,7 +274,8 @@ long monitor_handle_syscall(struct monitor * const monitor,
 	if(dispatch & (DISPATCH_CHECKED | DISPATCH_DEFERRED_CHECK)) {
 		SAFE_LZ_TRY(s = cross_check_args(monitor, &canonical));
 		if(0 == s) {
-			syscall_handle_divergence(handler, &actual, &canonical);
+			syscall_handle_divergence(monitor,
+			                          handler, &actual, &canonical);
 		}
 	}
 
@@ -302,10 +307,8 @@ long monitor_handle_syscall(struct monitor * const monitor,
 		/* Replicates contents of canonical.ret and canonical.args to 
 		   be the same across all nodes. It is the exit handler's 
 		   responsibility to copy this back to the actual results as
-		   approriate. By default, actual.ret = canonical.ret will be
-		   copied. */
+		   appropriate. */
 		SAFE_NZ_TRY(replicate_results(monitor, &canonical));
-		actual.ret = canonical.ret;
 	}
 
 	/* Phase 4: Run exit handlers, potentially denormalizing results. */
@@ -369,7 +372,8 @@ syscall_check_dispatch_sanity(int dispatch,
 }
 
 static
-void syscall_handle_divergence(struct syscall_handler const *const handler,
+void syscall_handle_divergence(struct monitor * const monitor,
+	                       struct syscall_handler const *const handler,
                                struct syscall_info *actual,
                                struct syscall_info *canonical)
 {
@@ -390,8 +394,8 @@ void syscall_handle_divergence(struct syscall_handler const *const handler,
 	}
 #endif
 #if ENABLE_CHECKPOINTING
-	if(checkpoint_env.last_checkpoint.valid) {
-		s = restore_last_checkpoint(&checkpoint_env);
+	if(monitor->checkpoint_env.last_checkpoint.valid) {
+		s = restore_last_checkpoint(&monitor->checkpoint_env);
 		if(0 != s) {
 			SAFE_WARNF("Checkpoint restoration failed with "
 			          "exit code %d.\n", s);

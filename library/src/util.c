@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <link.h>
 #include <elf.h>
+#include <fcntl.h>
 
 #include "syscall.h"
 #include "util.h"
@@ -88,3 +89,20 @@ int find_mapped_region_bounds(void * const needle,
 	*len = d.len;
 	return ret;
 }
+
+int open_log_file(unsigned long maj, unsigned long min)
+{
+	char log_file_path[128];
+	snprintf(log_file_path, sizeof(log_file_path), MONMOD_LOG_FILE,
+	         maj, min);
+	if(0 > (monmod_log_fd = open(log_file_path, O_WRONLY | O_APPEND 
+	                             | O_CREAT | O_TRUNC, 0664)))
+	{
+		WARNF("unable to open log file at %s: %s\n",
+		      log_file_path,
+		      strerror(errno));
+		return 1;
+	}
+	return 0;
+}
+

@@ -5,6 +5,7 @@
 #include <unistd.h>
 #include <sys/syscall.h>
 #include <sys/time.h>
+#include <netinet/in.h>
 
 #include "monitor.h"
 #include "syscall_trace_func.h"
@@ -15,6 +16,7 @@
 #include "arch.h"
 #include "unprotected.h"
 #include "replication.h"
+#include "communication.h"
 
 
 /* ************************************************************************** *
@@ -56,133 +58,6 @@ static void syscall_execute_locally(struct syscall_handler const *const handler,
                                     struct syscall_info *canonical);
 
 static void terminate(struct monitor * const monitor);
-
-
-/* ************************************************************************** *
- * Initialization                                                             *
- * ************************************************************************** */
-
-int monitor_init(struct monitor *monitor, int own_id, struct config *conf)
-{
-	struct variant_config *own_variant_conf;
-	void *monitor_start = NULL;
-	size_t monitor_len = 0, protected_len = 0;
-
-	memset(monitor, 0, sizeof(monitor));
-
-	monitor->own_id = own_id;
-	monitor->leader_id = conf->leader_id;
-	monitor->is_leader = conf->leader_id == own_id;
-	Z_TRY(monitor->policy = policy_from_str(conf->policy));
-
-	Z_TRY_EXCEPT(own_variant_conf = get_variant(conf, own_id), exit(1));
-
-	/* Find the pages this module is loaded on. These pages will be 
-	   protected by the kernel to remain inaccessible for other parts of
-	   the program. */
-	NZ_TRY_EXCEPT(find_mapped_region_bounds(&monmod_library_init, 
-	                                        &monitor_start, &monitor_len),
-		      exit(1));
-
-	/* Sanity check that our linker script worked and, after loading,
-	   the "unprotected" section is the very last page-aligned sub-section
-	   of the loaded executable segment. */
-	Z_TRY_EXCEPT(monitor_len == (monitor_len & ~(monmod_page_size-1))
-	             && __unprotected_end == monitor_start + monitor_len
-	             && (void *)__unprotected_start > monitor_start 
-	             && (void *)__unprotected_start < monitor_start+monitor_len,
-		     exit(1));
-	protected_len = (void *)__unprotected_start - monitor_start;
-
-	/* Initialize Individual Basic Monitoring Components */
-	env_init(&monitor->env, monitor->is_leader);
-#if MEASURE_TRACING_OVERHEAD
-	/* If we are only interested in measuring the tracing overhead, register
-	   the monitor now and exit, before setting up any of the network
-	   connections or checkpointing environment. */
-	NZ_TRY_EXCEPT(monmod_init(env.pid, 
-	                          monitor_start, 
-	                          protected_len,
-	                          &monmod_syscall_trusted_addr,
-	                          &monmod_syscall_trace_enter),
-	              exit(1));
-	return 0;
-#endif
-
-	LZ_TRY_EXCEPT(comm_init(&monitor->comm, own_id, 
-	                        &own_variant_conf->addr), 
-	              exit(1));
-	for(size_t i = 0; i < conf->n_variants; i++) {
-		if(conf->variants[i].id == own_id) {
-			continue;
-		}
-		NZ_TRY_EXCEPT(comm_connect(&monitor->comm, conf->variants[i].id, 
-		                           &conf->variants[i].addr),
-		              exit(1));
-	}
-
-	NZ_TRY_EXCEPT(replication_init(monitor, conf->replication_batch_size),
-	              exit(1));
-
-	/* Checkpointing */
-#if ENABLE_CHECKPOINTING
-	/* The checkpointing environment needs to be initialized before 
-	   the monitor is registered: CRIU checkpointing forks a new
-	   dumper/restorer parent process, and the child process is the one
-	   that should register to be monitored. */
-	NZ_TRY_EXCEPT(init_checkpoint_env(&monitor->checkpoint_env,
-	                                  &monitor->env,
-	                                  own_variant_conf,
-	                                  monitor_start, protected_len),
-	              exit(1));
-	monitor->env.pid = getpid();
-#endif
-
-	/* -- Register Tracing With Kernel Module -- */
-
-	NZ_TRY_EXCEPT(monmod_init(monitor->env.pid, 
-	                          monitor_start, 
-	                          protected_len,
-	                          &monmod_syscall_trusted_addr,
-	                          &monmod_syscall_trace_enter),
-	              exit(1));
-
-#if VERBOSITY >= 1
-	LZ_TRY_EXCEPT(gettimeofday(&monitor->start_tv, NULL),
-	              exit(1));
-	SAFE_LOGF("Starting monitored execution of process %d.\n",
-	          monitor->env.pid);
-#endif
-
-	return 0;
-}
-
-int
-__attribute__((section("unprotected")))
-monitor_destroy(struct monitor *monitor)
-{
-	monitor->is_exiting = true;
-	unprotected_funcs.exit(0);  /* any system call that gets us into
-	                               monmod_handle_syscall will do here. */
-}
-
-static void terminate(struct monitor * const monitor)
-{
-	struct timeval end_tv, duration;
-	replication_destroy(monitor);
-	comm_destroy(&monitor->comm);
-#if VERBOSITY >= 1
-	SAFE_NZ_TRY(gettimeofday(&end_tv, NULL));
-	timersub(&end_tv, &start_tv, &duration);
-	SAFE_LOGF("Terminated after %ld.%06ld seconds.\n",
-	          duration.tv_sec, duration.tv_usec);
-#endif
-	close(monmod_log_fd);
-	/* Nothing may run after our monitor is destroyed. Without this,
-	   exit code may flush buffers etc without us monitoring this.
-	   FIXME always exits with zero exit code */
-	exit(0);
-}
 
 
 /* ************************************************************************** *
@@ -435,4 +310,272 @@ static void syscall_execute_locally(struct syscall_handler const *const handler,
 			SAFE_LOGF("Returned: %ld\n", actual->ret);
 		}
 #endif
+}
+
+
+/* ************************************************************************** *
+ * Initialization                                                             *
+ * ************************************************************************** */
+
+void register_monitor_in_kernel(struct monitor *monitor) {
+	void *monitor_start = NULL; 
+	size_t monitor_len = 0, protected_len = 0;
+
+	/* Find the pages this module is loaded on. These pages will be 
+	   protected by the kernel to remain inaccessible for other parts of
+	   the program. */
+	SAFE_NZ_TRY(find_mapped_region_bounds(&monmod_library_init, 
+	                                      &monitor_start, &monitor_len));
+
+	/* Sanity check that our linker script worked and, after loading,
+	   the "unprotected" section is the very last page-aligned sub-section
+	   of the loaded executable segment. */
+	SAFE_Z_TRY(monitor_len == (monitor_len & ~(monmod_page_size-1))
+	           && __unprotected_end == monitor_start + monitor_len
+	           && (void *)__unprotected_start > monitor_start 
+	           && (void *)__unprotected_start < monitor_start+monitor_len);
+	protected_len = (void *)__unprotected_start - monitor_start;
+
+	monitor->start = monitor_start;
+	monitor->len = monitor_len;
+	monitor->protected_len = protected_len;
+
+	SAFE_NZ_TRY(monmod_init(monitor->env.pid, 
+	                        monitor_start, 
+	                        protected_len,
+	                        &monmod_syscall_trusted_addr,
+	                        &monmod_syscall_trace_enter));
+}
+
+int monitor_init_comm(struct monitor *monitor, int own_id, struct config *conf)
+{
+	struct variant_config *own_variant_conf;
+	SAFE_Z_TRY(own_variant_conf = get_variant(conf, own_id));
+
+	SAFE_LZ_TRY(comm_init(&monitor->comm, own_id, 
+	                      &own_variant_conf->addr));
+	for(size_t i = 0; i < conf->n_variants; i++) {
+		if(conf->variants[i].id == own_id) {
+			continue;
+		}
+		SAFE_NZ_TRY(comm_connect(&monitor->comm, conf->variants[i].id, 
+		                         &conf->variants[i].addr));
+	}
+	return 0;
+}
+
+int monitor_init(struct monitor *monitor, int own_id, struct config *conf)
+{
+	struct variant_config *own_variant_conf;
+
+	memset(monitor, 0, sizeof(monitor));
+
+	monitor->own_id = own_id;
+	monitor->leader_id = conf->leader_id;
+	monitor->is_leader = conf->leader_id == own_id;
+	monitor->conf = *conf;
+	monitor->ancestry = 0;
+	SAFE_Z_TRY(monitor->policy = policy_from_str(conf->policy));
+
+	SAFE_Z_TRY(own_variant_conf = get_variant(conf, own_id));
+
+	/* Connect everyone to everyone. */
+	SAFE_NZ_TRY(monitor_init_comm(monitor, own_id, conf));
+
+	env_init(&monitor->env, monitor->is_leader);
+
+
+	/* Initialize Individual Basic Monitoring Components */
+#if MEASURE_TRACING_OVERHEAD
+	/* If we are only interested in measuring the tracing overhead, register
+	   the monitor now and exit, before setting up any of the network
+	   connections or checkpointing environment. */
+	register_monitor_in_kernel(monitor);
+	return 0;
+#endif
+
+	SAFE_NZ_TRY(replication_init(monitor, conf->replication_batch_size));
+
+	/* Checkpointing */
+#if ENABLE_CHECKPOINTING
+	/* The checkpointing environment needs to be initialized before 
+	   the monitor is registered: CRIU checkpointing forks a new
+	   dumper/restorer parent process, and the child process is the one
+	   that should register to be monitored. */
+	SAFE_NZ_TRY(init_checkpoint_env(&monitor->checkpoint_env,
+	                           &monitor->env,
+	                           own_variant_conf,
+	                           monitor->start, monitor->protected_len));
+	monitor->env.pid = getpid();
+#endif
+
+	/* -- Register Tracing With Kernel Module -- */
+	register_monitor_in_kernel(monitor);
+
+#if VERBOSITY >= 1
+	SAFE_LZ_TRY(gettimeofday(&monitor->start_tv, NULL));
+	SAFE_LOGF("Starting monitored execution of process %d.\n",
+	          monitor->env.pid);
+#endif
+
+	return 0;
+}
+
+int
+__attribute__((section("unprotected")))
+monitor_destroy(struct monitor *monitor)
+{
+	monitor->is_exiting = true;
+	unprotected_funcs.exit(0);  /* any system call that gets us into
+	                               monmod_handle_syscall will do here. */
+}
+
+static void terminate(struct monitor * const monitor)
+{
+	struct timeval end_tv, duration;
+	replication_destroy(monitor);
+	comm_destroy(&monitor->comm);
+#if VERBOSITY >= 1
+	SAFE_NZ_TRY(gettimeofday(&end_tv, NULL));
+	timersub(&end_tv, &start_tv, &duration);
+	SAFE_LOGF("Terminated after %ld.%06ld seconds.\n",
+	          duration.tv_sec, duration.tv_usec);
+#endif
+	close(monmod_log_fd);
+	/* Nothing may run after our monitor is destroyed. Without this,
+	   exit code may flush buffers etc without us monitoring this.
+	   FIXME always exits with zero exit code */
+	exit(0);
+}
+
+
+/* ************************************************************************** *
+ * Monitor Cloning                                                            *
+ * ************************************************************************** */
+
+int monitor_arbitrate_child_comm(struct monitor *parent_monitor,
+                                 struct communicator *child_comm);
+
+int monitor_child_fix_up(struct monitor *monitor,
+                         struct communicator *child_comm)
+{
+	const pid_t pid = getpid();
+	// Open a new log file for this child.
+	close(monmod_log_fd);
+	NZ_TRY_EXCEPT(open_log_file(monitor->own_id, monitor->ancestry), 
+	              exit(0));
+	monitor->env.pid = pid;
+	monitor->env.ppid = getppid();
+	memset(&monitor->env.children, 0, sizeof(monitor->env.children));
+	SAFE_NZ_TRY(comm_destroy(&monitor->comm));
+	monitor->comm = *child_comm;
+
+	/* Register tracing in new child. */
+	register_monitor_in_kernel(monitor);
+
+	return 0;
+}
+
+int monitor_arbitrate_child_comm(struct monitor *parent_monitor,
+                                 struct communicator *child_comm)
+{
+	struct arbitration_msg {
+		uint64_t n_variants;
+		uint64_t variant_ports[];
+	};
+
+	/* Everyone starts a new server. */
+	struct sockaddr_in own_addr = { .sin_family = AF_INET,
+	                                .sin_addr = INADDR_ANY,
+					.sin_port = 0 };
+	uint64_t own_port;
+	SAFE_LZ_TRY(own_port = comm_init(child_comm, 
+	                                 parent_monitor->own_id, 
+	                                 (struct sockaddr *)&own_addr));
+	uint64_t variant_ports[parent_monitor->conf.n_variants];
+
+	/* We let everyone know the new ports for the servers we just 
+	   started using the existing parent connection. */
+	if(!parent_monitor->is_leader) {
+		/* Everyone but the leader tells the leader their new server's 
+		   port. */
+		size_t outbound_sz = sizeof(struct arbitration_msg)
+		                     + sizeof(uint64_t);
+		char outbound_buf[outbound_sz];
+		struct arbitration_msg *outbound = 
+			(struct arbitration_msg *)outbound_buf;
+		size_t received_sz = sizeof(struct arbitration_msg)
+		                     + parent_monitor->conf.n_variants 
+				       * sizeof(uint64_t);
+		char received_buf[received_sz];
+		struct arbitration_msg *received = 
+			(struct arbitration_msg *)received_buf;
+		outbound->n_variants = 1;
+		outbound->variant_ports[0] = (uint64_t)own_port;
+		SAFE_NZ_TRY(comm_send(&parent_monitor->comm, 
+		                      parent_monitor->leader_id,
+		                      outbound_sz, outbound_buf));
+		SAFE_NZ_TRY(comm_receive(&parent_monitor->comm, 
+		                         parent_monitor->leader_id,
+		                         &received_sz, received_buf));
+		// Sanity checks
+		SAFE_Z_TRY(received_sz == sizeof(received_buf)
+		           && received->n_variants 
+			      == parent_monitor->conf.n_variants);
+		memcpy(variant_ports, received->variant_ports,
+		       sizeof(variant_ports));
+	} else {
+		/* The leader broadcasts the set of new ports.*/
+		size_t received_sz = sizeof(struct arbitration_msg)
+		                     + sizeof(uint64_t);
+		char received_buf[received_sz];
+		struct arbitration_msg *received =
+			(struct arbitration_msg *)received_buf;
+		size_t outbound_sz = sizeof(struct arbitration_msg)
+		                     + parent_monitor->conf.n_variants
+				       * sizeof(uint64_t);
+		char outbound_buf[outbound_sz];
+		struct arbitration_msg *outbound =
+			(struct arbitration_msg *)outbound_buf;
+		outbound->n_variants = parent_monitor->conf.n_variants;
+		for(int i = 0; i < parent_monitor->conf.n_variants; i++) {
+			int id = parent_monitor->conf.variants[i].id;
+			if(id == parent_monitor->leader_id) {
+				outbound->variant_ports[i] =
+					own_port;
+			} else {
+				SAFE_NZ_TRY(comm_receive(&parent_monitor->comm,
+				                         id, &received_sz,
+							 received_buf));
+				// Sanity checks
+				SAFE_Z_TRY(received->n_variants == 1 &&
+				           received_sz == sizeof(received_buf));
+				outbound->variant_ports[i] =
+					received->variant_ports[0];
+			}
+		}
+		SAFE_NZ_TRY(comm_broadcast(&parent_monitor->comm, outbound_sz,
+		                           outbound_buf));
+		memcpy(variant_ports, outbound->variant_ports,
+		       sizeof(variant_ports));
+	}
+
+	/* Finally, connect everyone to everyone on the new negotiated ports. */
+	for(size_t i = 0; i < parent_monitor->conf.n_variants; i++) {
+		struct sockaddr_in child_addr =  {};
+		if(parent_monitor->conf.variants[i].id 
+		   == parent_monitor->own_id) {
+			continue;
+		}
+		child_addr.sin_family = AF_INET;
+		child_addr.sin_addr = 
+			((struct sockaddr_in *)&parent_monitor
+			                       ->conf.variants[i].addr)
+			->sin_addr;
+		child_addr.sin_port = variant_ports[i];
+		NZ_TRY(comm_connect(child_comm, 
+		                    parent_monitor->conf.variants[i].id, 
+		                    (struct sockaddr *)&child_addr));
+	}
+	return 0;
 }

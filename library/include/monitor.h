@@ -22,16 +22,43 @@ struct monitor {
 	struct environment env;
 	struct policy *policy;
 	struct timeval start_tv;
+	unsigned long ancestry;  // just for log numbers
+	void *start;  // start address
+	size_t len;  // code pages length
+	size_t protected_len;  // length of protected code pages
 #if ENABLE_CHECKPOINTING
 	struct checkpoint_env checkpoint_env;
 #endif
 };
 
+long monitor_handle_syscall(struct monitor * const monitor,
+                            struct syscall_trace_func_stack * const stack);
+
+void register_monitor_in_kernel();
+
 int monitor_init(struct monitor *monitor, int own_id, struct config *conf);
 
 int monitor_destroy(struct monitor *monitor);
 
-long monitor_handle_syscall(struct monitor * const monitor,
-                            struct syscall_trace_func_stack * const stack);
+/**
+ * Negotiates new connections bertween all variants on available open ports and
+ * initializes those connections in a new communicator, child_comm.
+ * 
+ * Must be called simulatenously in all variants.
+ */
+int monitor_arbitrate_child_comm(struct monitor *parent_monitor,
+                                 struct communicator *child_comm);
+
+/**
+ * Initializes the child monitor pointed to by `monitor` to be a close
+ * replica of `parent_monitor`, with the following changes:
+ *  - The logging timestamp is reset to zero.
+ *  - The communicator passed in is used instead.
+ *  - The PIDs are adjusted to the new child PIDs.
+ * 
+ * Used in fork/clone handlers.
+ */
+int monitor_child_fix_up(struct monitor *monitor, 
+                         struct communicator *child_comm);
 
 #endif

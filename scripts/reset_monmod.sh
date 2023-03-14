@@ -16,6 +16,7 @@ echo 1 > /sys/kernel/monmod/active
 # - clone (arm64: 220, x86_64: -)
 # - clone3 (arm64: -, x86_64: 435)
 # - waitid (arm64: 95, x86_64: 247)
+# - set_robust_list (arm64: 99, x86_64: )
 # 
 # Some of these are issued by unprotected code in the breakpointing routine;
 # monitoring as we are creating a checkpoint can cause issues
@@ -29,9 +30,9 @@ then
 35
 130
 202
-435
 62
 247
+273
 " > /sys/kernel/monmod/untraced_syscalls
 else
 	echo "
@@ -42,7 +43,7 @@ else
 129
 133
 98
-220
 95
+99
 " > /sys/kernel/monmod/untraced_syscalls
 fi

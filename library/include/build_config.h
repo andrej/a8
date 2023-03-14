@@ -14,7 +14,7 @@
  *    - Replication of results
  *    - Adding/removing of descriptor mappings
  */
-#define VERBOSITY 1
+#define VERBOSITY 4
 
 /**
  * CHECK_HASHES_ONLY
@@ -51,7 +51,7 @@
  * survivability aspect and allows benchmarking a pure MVEE implementation that
  * terminates upon divergence.
  */
-#define ENABLE_CHECKPOINTING NO_CHECKPOINTING 
+#define ENABLE_CHECKPOINTING FORK_CHECKPOINTING 
 
 /**
  * Since malloc() is non-reentrant, we cannot use it in system call handlers.
@@ -77,6 +77,6 @@
 #define MONMOD_SYSFS_TRUSTED_ADDR_FILE "/%d/trusted_addr"
 #define MONMOD_SYSFS_TRACE_FUNC_ADDR_FILE "/%d/trace_func_addr"
 #define MONMOD_SYSFS_ACTIVE_FILE "/active"
-#define MONMOD_LOG_FILE "./monmod%d.log"
+#define MONMOD_LOG_FILE "./monmod_%lu_%lu.log"
 
 #endif

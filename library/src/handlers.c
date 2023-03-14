@@ -17,6 +17,8 @@
 #include "serialization.h"
 #include "handler_data_types.h"
 #include "environment.h"
+#include "monitor.h"
+#include "globals.h"
 
 #include "handler_table_definitions.h"
 #include "handlers_support.h"
@@ -1919,35 +1921,66 @@ SYSCALL_EXIT_PROT(fork)
 
 /* ************************************************************************** *
  * clone                                                                      *
- * SYSCALL_DEFINE5(clone, unsigned long, clone_flags, unsigned long, newsp,   *
- *		 int __user *, parent_tidptr,                                 *
- *		 unsigned long, tls,                                          *
- *		 int __user *, child_tidptr)                                  *
+ * long clone(unsigned long flags, void *child_stack,                         *
+ *            void *ptid, void *ctid,                                         * 
+ *            struct pt_regs *regs);                                          * 
  * ************************************************************************** */
 
 SYSCALL_ENTER_PROT(clone)
 {
-	struct clone_ref_types {
-		struct type parent_tidptr_type;
-		struct type child_tidptr_type;
-	};
-	alloc_scratch(sizeof(struct clone_ref_types));
-	struct clone_ref_types *ref_types = (struct clone_ref_types *)*scratch;
+	alloc_scratch(sizeof(struct communicator));
+	struct communicator *child_comm = (struct communicator *)*scratch;
+
+	unsigned long flags = actual->args[0];
+	void *child_stack = (void *)actual->args[1];
+
+	/* We currently only support fork()-like semantics for clone. Anything
+	   else will be rejected. */
+	if(flags & (CLONE_FILES | CLONE_IO | CLONE_FS | CLONE_NEWIPC 
+                    | CLONE_NEWNET | CLONE_NEWNS | CLONE_NEWPID
+		    | CLONE_NEWUSER | CLONE_NEWUTS | CLONE_PARENT
+		    | CLONE_PARENT_SETTID /*| CLONE_PID*/ | CLONE_SIGHAND
+		    /*| CLONE_STOPPED*/ | CLONE_SYSVSEM | CLONE_THREAD 
+		    | CLONE_VFORK | CLONE_VM ) )
+	{
+		return DISPATCH_ERROR;
+	}
+	if(0 != child_stack) {
+		return DISPATCH_ERROR;
+	}
+
 	canonical->arg_types[0] = IMMEDIATE_TYPE(unsigned long);
 	canonical->arg_types[1] = IMMEDIATE_TYPE(unsigned long);
 	/* Just check newsp for NULL vs non-NULL since stack pointers are going
 	   to be different between architectures. */
 	canonical->args[1] = (0 == canonical->args[1] ? 0 : 1);
-	canonical->arg_types[2] = POINTER_TYPE(&ref_types->parent_tidptr_type);
-	ref_types->parent_tidptr_type = IMMEDIATE_TYPE(pid_t);
-	canonical->arg_types[3] = IMMEDIATE_TYPE(unsigned long);
-	canonical->arg_types[4] = POINTER_TYPE(&ref_types->child_tidptr_type);
-	ref_types->child_tidptr_type = IMMEDIATE_TYPE(pid_t);
+
+	/* Before we actually fork in to two processes, use the old process to
+	   establish a new child monitor. This child monitor will overwrite the
+	   default monitor in the child process after the clone() call is
+	   completed, and will be thrown away in the parent process. */
+	SAFE_NZ_TRY_EXCEPT(monitor_arbitrate_child_comm(&monitor, child_comm),
+	                   return DISPATCH_ERROR);
+
 	return DISPATCH_EVERYONE | DISPATCH_CHECKED;
 }
 
 SYSCALL_EXIT_PROT(clone)
 {
+	struct communicator *child_comm = (struct communicator *)*scratch;
+
+	pid_t child_pid = (pid_t)actual->ret;
+	monitor.ancestry++;  // just for log numbers
+	if(0 != child_pid) {
+		/* In parent: add child PID to environment. */
+		SAFE_NZ_TRY(comm_destroy(child_comm));
+		// SAFE_Z_TRY(env_add_local_pid_info(env, child_pid));
+	} else {
+		/* In child: Use previosly created child_monitor as our new
+		   default monitor. */
+		monitor.ancestry *= 100; // just for log numbers
+		SAFE_NZ_TRY(monitor_child_fix_up(&monitor, child_comm));
+	}
 	free_scratch();
 }
 

@@ -76,7 +76,7 @@ struct environment {
 	   is the canonical file descriptor number, pointing to flags and 
 	   the corresponding locally-opened file descriptor. */
 	struct descriptor_info_list descriptors;
-	struct pid_info_list direct_children;
+	struct pid_info_list children;
 	pid_t pid;
 	pid_t ppid;
 	struct epoll_data_infos epoll_data_infos;
@@ -196,14 +196,16 @@ static inline struct descriptor_info
 }
 
 static inline struct pid_info 
-*add_pid_info(struct environment *env, pid_t canonical_pid, pid_t local_pid)
+*env_add_pid_info(struct environment *env, pid_t canonical_pid, pid_t local_pid)
 {
+	// TODO Not implemented
 	return NULL;
 }
 
 static inline struct pid_info
-*add_local_pid_info(struct environment *env, pid_t local_pid)
+*env_add_local_pid_info(struct environment *env, pid_t local_pid)
 {
+	// TODO Not implemented
 	return NULL;
 }
 

@@ -1,7 +1,6 @@
 #define _GNU_SOURCE
 #include <stdlib.h>
 #include <errno.h>
-#include <fcntl.h>
 #include <unistd.h>
 #include <sys/syscall.h>
 #include <sys/user.h>
@@ -60,8 +59,6 @@ void monmod_library_init()
 	struct config conf = {};
 	pid_t own_pid = 0;
 	const char *config_path, *own_id_str;
-	char log_file_path[128];
-	char tmp_path[128];
 
 	init_unprotected();
 
@@ -89,16 +86,7 @@ void monmod_library_init()
 	NZ_TRY_EXCEPT(parse_config(config_path, &conf), exit(1));
 
 	/* Open log file. */
-	snprintf(log_file_path, sizeof(log_file_path), MONMOD_LOG_FILE,
-	         own_id);
-	if(0 > (monmod_log_fd = open(log_file_path, O_WRONLY | O_APPEND 
-	                             | O_CREAT | O_TRUNC, 0664)))
-	{
-		WARNF("unable to open log file at %s: %s\n",
-		      MONMOD_LOG_FILE,
-		      strerror(errno));
-		exit(1);
-	}
+	NZ_TRY_EXCEPT(open_log_file(own_id, 0), exit(1));
 
 	/* Initialize monitor; from this point forward, tracing is enabled. */
 	SAFE_NZ_TRY(monitor_init(&monitor, own_id, &conf));

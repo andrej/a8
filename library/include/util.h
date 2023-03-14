@@ -119,4 +119,13 @@ void safe_free(void *ptr, size_t size);
 int find_mapped_region_bounds(void * const needle, 
                               void **start, size_t *len);
 
+/**
+ * Open a new global log file, truncating an existing file in case it already 
+ * exists. Returns 0 on success. maj and min are identification numbers that 
+ * are currently used as follows: maj is the ID used in the configuration 
+ * file for the variant, and min is an ID that adds a digit for every spawned
+ * child.
+ */
+int open_log_file(unsigned long maj, unsigned long min);
+
 #endif

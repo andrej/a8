@@ -30,9 +30,9 @@ then
 	dbg_cmd="gdb --args env"
 fi
 
-LD_LIBRARY_PATH="${script_dir}/../dependencies/libconfig-install/lib:\
-${script_dir}/../dependencies/criu-install/lib/${arch}-linux-gnu:\
-${LD_LIBRARY_PATH}" \
-${dbg_cmd} \
-LD_PRELOAD="${lib}":${LD_PRELOAD} \
-MONMOD_ID=${id} MONMOD_CONFIG="${config}" $@
+LD_LIBRARY_PATH="$monmod_root/dependencies/libconfig-install/lib":\
+"$monmod_root/dependencies/criu-install/lib/$arch-linux-gnu":\
+$LD_LIBRARY_PATH \
+$dbg_cmd \
+LD_PRELOAD="$lib":$LD_PRELOAD \
+MONMOD_ID=$id MONMOD_CONFIG="$config" $@

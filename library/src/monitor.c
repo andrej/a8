@@ -31,7 +31,6 @@ struct monitor monitor;
  * ************************************************************************** */
 
 char syscall_log_buf[1024];
-struct timeval start_tv;
 
 
 /* ************************************************************************** *
@@ -124,7 +123,7 @@ long monitor_handle_syscall(struct monitor * const monitor,
 #if VERBOSITY >= 2
 	if(NULL != handler) {
 		SAFE_LZ_TRY(gettimeofday(&tv, NULL));
-		timersub(&tv, &start_tv, &rel_tv);
+		timersub(&tv, &monitor->start_tv, &rel_tv);
 		SAFE_LOGF("[%3ld.%06ld] >> %s (%ld) -- enter from PC %p, PID "
 			  "%d.\n", rel_tv.tv_sec, rel_tv.tv_usec,
 			  handler->name, actual.no, ret_addr, getpid());
@@ -195,7 +194,7 @@ long monitor_handle_syscall(struct monitor * const monitor,
 
 #if VERBOSITY >= 2
 	SAFE_LZ_TRY(gettimeofday(&tv, NULL));
-	timersub(&tv, &start_tv, &rel_tv);
+	timersub(&tv, &monitor->start_tv, &rel_tv);
 	SAFE_LOGF("[%3ld.%06ld] << Return %ld.\n\n", rel_tv.tv_sec, 
 	          rel_tv.tv_usec, actual.ret);
 #endif
@@ -437,7 +436,7 @@ static void terminate(struct monitor * const monitor)
 	comm_destroy(&monitor->comm);
 #if VERBOSITY >= 1
 	SAFE_NZ_TRY(gettimeofday(&end_tv, NULL));
-	timersub(&end_tv, &start_tv, &duration);
+	timersub(&end_tv, &monitor->start_tv, &duration);
 	SAFE_LOGF("Terminated after %ld.%06ld seconds.\n",
 	          duration.tv_sec, duration.tv_usec);
 #endif

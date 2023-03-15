@@ -53,10 +53,7 @@ The built kernel module will be in `kernel_module/build/monmod.ko` if successful
 
 ### Prerequisite 
 
-A configuration file is used to describe which hosts will participate in the multi variant exectuion. Some example configuration files (for our benchmarks) are already
-present in `experiments/configs/`.
-
-It looks something like this (see `experiments/configs/*.ini`):
+A configuration file is used to describe which hosts will participate in the multi variant exectuion.  It looks something like this:
 
 	leader_id = 1;
 	variants = (

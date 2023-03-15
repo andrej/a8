@@ -1,5 +1,6 @@
 #include <assert.h>
 #include <stdlib.h>
+#include <stddef.h>
 #include <sys/uio.h>
 #include <fcntl.h>
 #include <sys/stat.h>
@@ -1449,6 +1450,24 @@ done:
 }
 
 
+/* ************************************************************************** *
+ * eventfd2                                                                   *
+ * int eventfd2(unsigned int initval, int flags);                             *
+ * ************************************************************************** */
+
+SYSCALL_ENTER_PROT(eventfd2)
+{
+	canonical->arg_types[0] = IMMEDIATE_TYPE(int);
+	canonical->arg_types[1] = IMMEDIATE_TYPE(int);
+	return DISPATCH_EVERYONE | DISPATCH_CHECKED;
+}
+
+SYSCALL_EXIT_PROT(eventfd2)
+{
+	return redirect_exit(default_creates_fd);
+}
+
+
 /* ************************************************************************** * 
  * sendfile                                                                   *
  * ssize_t sendfile(int out_fd, int in_fd, off_t *offset, size_t count);      *
@@ -1822,6 +1841,123 @@ SYSCALL_ENTER_PROT(getsockname)
 SYSCALL_EXIT_PROT(getsockname)
 {
 	write_back_canonical_return();
+	free_scratch();
+}
+
+
+/* ************************************************************************** *
+ * sendmsg                                                                    *
+ * ssize_t sendmsg(int socket, const struct msghdr *message, int flags);      *
+ * ************************************************************************** */
+
+SYSCALL_ENTER_PROT(sendmsg)
+{
+	struct msghdr *msghdr = (struct msghdr *)actual->args[1];
+
+	/* Allocate scratch space to store our type descriptions for the
+	   fields inside struct msghdr. We will need a variable amount of space
+	   in order to describe the struct iovecs, depending on their count. For
+	   the list of iovecs, we will need a buffer_reference type that
+	   describes the pointer from the struct msghdr to the list of iovecs.
+	   Then, for each iovec, we need a reference type for the buffer it
+	   points to, and two types (the pointer to that buffer and the 
+	   buffer itself). */
+	struct sendmsg_scratch {
+		struct type msghdr_type;
+		struct buffer_reference msghdr_refs[2];
+		struct type msg_iov_ptr_type; // struct iovec * msghdr.msg_iov
+		struct type msg_iov_type; // struct iovec (*msghdr.msg_iov)
+		struct type msg_control_ptr_type; // void * msghdr.msg_control
+		struct type msg_control_type; // void (*msghdr.msg_control)
+		struct buffer_reference *addl_refs;
+		struct type *addl_types;
+	};
+	int n_addl_refs = msghdr->msg_iovlen;
+	int n_addl_types = 2 * msghdr->msg_iovlen;
+	alloc_scratch(sizeof(struct sendmsg_scratch)
+		      + sizeof(struct buffer_reference) * n_addl_refs
+	              + sizeof(struct type) * n_addl_types);
+	struct sendmsg_scratch *_scratch = (struct sendmsg_scratch *)*scratch;
+	_scratch->addl_refs = (struct buffer_reference *)
+	                      ((char *)_scratch + sizeof(*_scratch));
+	_scratch->addl_types = (struct type *) ((char *)_scratch->addl_refs
+	                       + sizeof(struct buffer_reference) * n_addl_refs);
+
+	if((msghdr->msg_namelen != 0
+	    && msghdr->msg_namelen != sizeof(struct sockaddr))
+	   || msghdr->msg_controllen != 0) {
+		// Currently not supported.
+		return DISPATCH_ERROR;
+	}
+
+
+	/* ----
+	   Argument 1
+	   ---- */
+
+	struct descriptor_info *di = get_di(0);
+	remap_fd(di, 0);
+	canonical->arg_types[0] = DESCRIPTOR_TYPE();
+
+	/* ----
+	   Argument 2
+	   ---- */
+
+	/* Describe struct msghdr * argument:
+	   It is a pointer to ... */
+	canonical->arg_types[1] = POINTER_TYPE(&_scratch->msghdr_type);
+	/* ... a buffer of the size of a struct msghdr ... */
+	_scratch->msghdr_type   = BUFFER_TYPE(sizeof(struct msghdr),
+	                                      2,
+					      _scratch->msghdr_refs);
+	/* ... containing tow things:
+	   (1) at offset msg_iov, ... */
+	_scratch->msghdr_refs[0] = BUFFER_REF(offsetof(struct msghdr, msg_iov),
+	                                      &_scratch->msg_iov_ptr_type);
+	/* (1) ... a pointer ... */
+	_scratch->msg_iov_ptr_type = POINTER_TYPE(&_scratch->msg_iov_type);
+	/* (1) ... to a buffer of a dynamic number of struct iovecs ... */
+	_scratch->msg_iov_type = BUFFER_TYPE(sizeof(struct iovec) 
+	                                     * msghdr->msg_iovlen,
+					     msghdr->msg_iovlen,
+					     _scratch->addl_refs);
+	/* ... and
+	   (2) at offset msg_control, ... */
+	_scratch->msghdr_refs[1] = BUFFER_REF(offsetof(struct msghdr, 
+	                                               msg_control),
+	                                      &_scratch->msg_control_ptr_type);
+	/* (2) ... a pointer ... */
+	_scratch->msg_control_ptr_type = 
+		POINTER_TYPE(&_scratch->msg_control_ptr_type);
+	/* (2) ... to something we currently do not support and hence ignore */
+	_scratch->msg_control_type = IGNORE_TYPE();
+
+	/* Now, for the list of iovecs, each iovec contains references to other
+	   buffers: */
+	for(int i = 0; i < msghdr->msg_iovlen; i++) {
+		const struct iovec * const iov = &msghdr->msg_iov[i];
+		_scratch->addl_refs[i] = 
+			BUFFER_REF(sizeof(struct iovec) * i
+			           + offsetof(struct iovec, iov_base),
+				   &_scratch->addl_types[2*i]);
+		_scratch->addl_types[2*i] = 
+			POINTER_TYPE(&_scratch->addl_types[2*i+1]);
+		_scratch->addl_types[2*i+1] =
+			BUFFER_TYPE(iov->iov_len);
+	}
+
+	/* ----
+	   Argument 3
+	   ---- */
+	canonical->arg_types[2] = IMMEDIATE_TYPE(int);
+
+	canonical->ret_flags = ARG_FLAG_REPLICATE;
+
+	return DISPATCH_CHECKED | DISPATCH_LEADER | DISPATCH_NEEDS_REPLICATION;
+}
+
+SYSCALL_EXIT_PROT(sendmsg)
+{
 	free_scratch();
 }
 

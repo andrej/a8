@@ -69,7 +69,7 @@
 
 #define HANDLER_SCRATCH_BUFFER_SZ 32768
 
-#define CROSS_CHECK_BUFFER_SZ 4096
+#define CROSS_CHECK_BUFFER_SZ 8192
 
 #define MONMOD_SYSFS_PATH "/sys/kernel/monmod"
 #define MONMOD_SYSFS_UNTRACED_SYSCALLS_FILE "/untraced_syscalls"

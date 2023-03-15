@@ -95,6 +95,7 @@ enum deserialize_approach {
 #define POINTER_TYPE(pointee_typ) (struct type)\
 	{POINTER, .pointer = {pointee_typ}}
 #define BUFFER_TYPE(...) (struct type){BUFFER, .buffer = {__VA_ARGS__}}
+#define BUFFER_REF(...) (struct buffer_reference){__VA_ARGS__}
 #define STRING_TYPE() (struct type){STRING}
 #define DESCRIPTOR_TYPE() (struct type){DESCRIPTOR, .immediate = {sizeof(int)}}
 

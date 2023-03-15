@@ -165,6 +165,9 @@ SYSCALL_EXIT_PROT(default_creates_fd);
  X( __NR_epoll_pwait,epoll_pwait,SYSCALL_ENTER(epoll_pwait), \
                                 SYSCALL_POST_CALL(epoll_pwait), \
                                 SYSCALL_EXIT(epoll_pwait) ) \
+ X( __NR_eventfd2, eventfd2,    SYSCALL_ENTER(eventfd2), \
+                                NULL, \
+                                SYSCALL_EXIT(eventfd2)) \
  X( __NR_accept4,  accept4,     SYSCALL_ENTER(accept4), \
                                 NULL, \
                                 SYSCALL_EXIT(accept4) ) /*TODO*/ \
@@ -198,6 +201,9 @@ SYSCALL_EXIT_PROT(default_creates_fd);
  X( __NR_getpeername, getpeername,  SYSCALL_ENTER(getsockname), \
                                 NULL, \
                                 SYSCALL_EXIT(getsockname)) /* TODO */ \
+ X( __NR_sendmsg,   sendmsg,    SYSCALL_ENTER(sendmsg), \
+                                NULL, \
+                                SYSCALL_EXIT(sendmsg)) \
  X( __NR_exit,      exit,       SYSCALL_ENTER(default_checked), \
                                 NULL, \
                                 NULL) \

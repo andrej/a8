@@ -111,11 +111,17 @@ all variants.
    Verify it is loaded by checking for a "monmod: module loaded" message in 
    `/var/log/syslog`.
 
+2. (Optional) Add the `scripts` folder to your PATH for convenience.
 
-2. Run the target program:  
+   ```
+   export PATH=/path/to/monmod/scripts:$PATH
+   ```
+
+
+3. Run the target program:  
    
    ```
-   ./scripts/run.sh <id> <config_file> <target program> <arg 1> <...> <arg n>
+   monmod_run.sh <ID> <config file> <target program> <program args ...>
    ```
 
    > **Note:** This is a convenience wrapper that will load the monmod shared library
@@ -132,12 +138,14 @@ all variants.
    > ```
 
 As the program runs, if the monitor is compiled with a positive `VERBOSITY`
-value, the library will log useful information to `monmod0.log`, `monmod1.log` ...,
-(the number is the ID of the machine in the configuration file).
+value, the library will log useful information to `monmod_0_0.log`, `monmod_1_0.log` ...,
+(the first number is the ID of the machine in the configuration file, and the second number increases as the program spawns child processes which are monitored separately).
 
 If the kernel module was compiled with a positive `VERBOSITY` value, it will 
 print its logging information to `/var/log/syslog`. (May require root 
 privileges to read.)
+
+_More examples of running monmod for some benchmarks are given in the [benchmarks repository](https://github.com/andrej/monmod-benchmarks/)._
 
 ### Resetting the kernel module
     
@@ -159,55 +167,6 @@ sudo rmmod monmod
 sudo insmod kernel_module/build/monmod.ko
 ```
    
-
-### Benchmarking
-
-There are microbenchmarks for three system calls from previous work in
-`experiments/microbenchmarks`. To time their native speed, use
-the `time` command. For benchmarking it with our system, use one of the
-`experiments/configs`.
-
-For benchmarking `lighttpd1.4`, first, clone and build Alex's version of
-lighttpd, found [here](https://github.com/balexios/lighttpd1.4), and the
-`wrk` client tool, found [here](https://github.com/balexios/wrk). In the
-following, we assume you cloned, followed the build instructions, and
-installed in `/path/to/alex_lighttpd` and `/path/to/alex_wrk`. Then,
-you will need to adjust the path to your path of `monmod` installation in
-`experiments/lighttpd_config/basic_lighttpd_static_4KB.conf`. Replace
-`/path/to/monmod` with the directory in which you cloned and built monmod.
-
-Then you should be ready to run. For a native baseline (no monitoring):
-
-```
-/path/to/alex_lighttpd/sbin/lighttpd -D -f /path/to/monmod/experiments/lighttpd_config/basic_lighttpd_static_4KB.conf
-```
-   
-The sever will run until you terminate it with CTRL-C. From another machine,
-run the benchmarking client to get some numbers:
-
-```
-/path/to/alex_wrk/wrk -c10 -t1 -d10s http://<IP where you started server>:3000/index.html
-```
-
-The `-c` flag determines the number of connections for the benchmark, `-t` the
-number of concurrent threads, and `-d` the duration.
-
-Then, with a native baseline, you can compare it to an execution in the multi-
-variant execution environment. Adjust the settings as necessary for your
-benchmark in `experiments/configs/eiger_blackforest_lighttpd.ini`, or one
-of the other configuration files. Then, on each machine (from lower to higher
-ID) run:
-
-```
-/path/to/monmod/scripts/run.sh <ID> <configuration file> /path/to/alex_lighttpd/sbin/lighttpd -D -f /path/to/monmod/experiments/lighttpd_config/basic_lighttpd_static_4KB.conf
-```
-
-For example:
-
-```
-./scripts/run.sh 0 ./experiments/configs/eiger_blackforest_lighttpd.ini ~/alex_lighttpd/install/sbin/lighttpd -D -f ./experiments/lighttpd_config/basic_lighttpd_static_4KB.conf
-```
-
 ### Known Issues / To-Dos
 
  - The `sigreturn` system call cannot currently be monitored.

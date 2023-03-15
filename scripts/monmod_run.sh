@@ -1,8 +1,15 @@
 #!/bin/sh
 
-script_dir=$(dirname $0)
-lib=${script_dir}/../library/build/libmonmod.so
+script_dir=$(realpath $(dirname $0))
+monmod_root=$(realpath "$script_dir/..")
+lib="$monmod_root/library/build/libmonmod.so"
 arch=$(uname -m)
+
+if [ "$#" -lt 3 -o ! "$1" -eq "$1" -o ! -f "$2"  ]
+then
+	echo "Usage: $0 <ID> <config path> <command> ...\n"
+	return 1
+fi
 
 id=$1
 config=$2

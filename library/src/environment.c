@@ -37,7 +37,7 @@ struct epoll_data_info *get_epoll_data_info_for(struct environment *env,
 		(struct epoll_data_info *)env->epoll_data_infos.head;
 	while(NULL != info) {
 		if(info->epfd == epfd && info->fd == fd
-		   && (info->data.events & events)) {
+		   && (info->event.events & events)) {
 			return info;
 		}
 		info = info->next;
@@ -45,9 +45,46 @@ struct epoll_data_info *get_epoll_data_info_for(struct environment *env,
 	return NULL;
 }
 
+struct epoll_data_info *purge_epoll_data_fd(struct environment *env, int fd)
+{
+	struct epoll_data_info *info =
+		(struct epoll_data_info *)env->epoll_data_infos.head;
+	struct epoll_data_info *next;
+	/* FIXME: The current implementation does not address the following 
+	   subtlety:
+
+	   Will closing a file descriptor cause it to be removed from
+           all epoll interest lists?
+
+           Yes, but be aware of the following point.  A file descriptor
+           is a reference to an open file description (see open(2)).
+           Whenever a file descriptor is duplicated via dup(2), dup2(2),
+           fcntl(2) F_DUPFD, or fork(2), a new file descriptor referring
+           to the same open file description is created.  An open file
+           description continues to exist until all file descriptors
+           referring to it have been closed.
+
+           A file descriptor is removed from an interest list only after
+           all the file descriptors referring to the underlying open
+           file description have been closed. */
+	while(NULL != info) {
+		next = info->next;
+		if(info->fd == fd) {
+			remove_epoll_data_info(env, info);
+		}
+		info = next;
+	}
+}
+
 int append_epoll_data_info(struct environment *env, 
                            struct epoll_data_info info)
 {
+	if(NULL != 
+	   get_epoll_data_info_for(env, info.epfd, info.fd, info.event.events)){
+		SAFE_WARNF("An epoll_info entry for (%d, %d, %x) already "
+		           "exists.\n", info.epfd, info.fd, info.event.events);
+		return 1;
+	}
 	struct epoll_data_info *to_insert = malloc(sizeof(info));
 	if(NULL == to_insert) {
 		return 1;
@@ -141,7 +178,7 @@ checkpointed_environment_fix_up(struct environment *env)
 				// TODO add bounds check
 			s = unprotected_funcs.epoll_ctl(
 				new_fd, EPOLL_CTL_ADD, fd_di->local_fd,
-				&j->data);
+				&j->event);
 			if(0 != s) {
 				SAFE_WARNF("epoll_ctl failed for fd %d while "
 				          "trying to recreate epoll %d\n",

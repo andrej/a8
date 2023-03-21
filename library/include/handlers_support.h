@@ -22,6 +22,18 @@
 	actual->args[arg_i] = (di)->local_fd; \
 }
 
+#define get_pid_info(arg_i) ({ \
+	struct pid_info *pi = env_get_pid_info(env, canonical->args[arg_i]); \
+	if(NULL == pi) { \
+		return DISPATCH_ERROR; \
+	} \
+	pi; \
+})
+
+#define remap_pid(pi, arg_i) { \
+	actual->args[arg_i] = (pi)->local_pid; \
+}
+
 #define alloc_scratch(sz) { \
 	if(sz < handler_scratch_buffer + sizeof(handler_scratch_buffer)  \
 	            - (char *)next_preallocated) { \
@@ -71,10 +83,7 @@
 })
 
 #define post_call_error() { \
-	if(actual->ret >= 0) { \
-		actual->ret = -ENOSYS; \
-	} \
-	return; \
+	return 1; \
 }
 
 #define write_back_canonical_return() \

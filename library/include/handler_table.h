@@ -232,17 +232,23 @@ SYSCALL_EXIT_PROT(default_creates_fd);
                                 NULL, \
                                 SYSCALL_EXIT(clone) ) \
  X( __NR_wait,      wait,       SYSCALL_ENTER(wait), \
-                                NULL, \
+                                SYSCALL_POST_CALL(wait), \
                                 SYSCALL_EXIT(wait) ) \
  X( __NR_waitpid,   waitpid,    SYSCALL_ENTER(waitpid), \
-                                NULL, \
+                                SYSCALL_POST_CALL(waitpid), \
                                 SYSCALL_EXIT(waitpid) ) \
  X( __NR_wait3,     wait3,      SYSCALL_ENTER(wait3), \
-                                NULL, \
+                                SYSCALL_POST_CALL(wait3), \
                                 SYSCALL_EXIT(wait3) ) \
  X( __NR_wait4,     wait4,      SYSCALL_ENTER(wait4), \
-                                NULL, \
+                                SYSCALL_POST_CALL(wait4), \
                                 SYSCALL_EXIT(wait4) ) \
+ X( __NR_setitimer, setitimer,  SYSCALL_ENTER(setitimer), \
+                                NULL, \
+                                SYSCALL_EXIT(setitimer) ) \
+ X( __NR_kill,      kill,       SYSCALL_ENTER(kill), \
+                                NULL, \
+                                NULL ) \
  
 #include "handler_table_prototypes.h"
 

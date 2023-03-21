@@ -8,6 +8,7 @@
 #include <sys/time.h>
 #include <sys/epoll.h>
 #include <sys/resource.h>
+#include <sys/wait.h>
 #include <linux/sched.h>  // for clone()
 #include <sched.h> // for clone()
 #include <limits.h>
@@ -84,7 +85,7 @@ SYSCALL_EXIT_PROT(default_creates_fd)
 	struct descriptor_info *di;
 	enum descriptor_type type;
 	if(0 > actual->ret) {
-		return;
+		return 0;
 	}
 #if VERBOSITY >= 4
 	SAFE_LOGF("%s adding descriptor.\n", handler->name);
@@ -116,7 +117,8 @@ SYSCALL_EXIT_PROT(default_creates_fd)
 			break;
 	}
 	di = env_add_local_descriptor(env, local_fd, flags, type);
-	actual->ret = canonical_fd_for(env, di);
+	actual->ret = env_canonical_fd_for(env, di);
+	return 0;
 }
 
 
@@ -183,6 +185,7 @@ SYSCALL_EXIT_PROT(faccessat)
 {
 	write_back_canonical_return();
 	free_scratch();
+	return 0;
 }
 
 
@@ -275,12 +278,14 @@ SYSCALL_EXIT_PROT(close)
 {
 	struct descriptor_info *di = (struct descriptor_info *)*scratch;
 	write_back_canonical_return();
-	if(0 == *(int *)&actual->ret) {
+	if(0 == (int)actual->ret) {
 #if VERBOSITY >= 4
 		SAFE_LOGF("close removing descriptor.%s", "\n");
 #endif
 		env_del_descriptor(env, di);
+		purge_epoll_data_fd(env, env_canonical_fd_for(env, di));
 	}
+	return 0;
 }
 
 
@@ -392,6 +397,7 @@ SYSCALL_EXIT_PROT(read)
 {
 	write_back_canonical_return();
 	free_scratch();
+	return 0;
 }
 
 
@@ -479,6 +485,7 @@ SYSCALL_EXIT_PROT(readv)
 {
 	write_back_canonical_return();
 	free_scratch();
+	return 0;
 }
 
 
@@ -514,6 +521,7 @@ SYSCALL_EXIT_PROT(write)
 {
 	write_back_canonical_return();
 	free_scratch();
+	return 0;
 }
 
 
@@ -594,6 +602,7 @@ SYSCALL_EXIT_PROT(writev)
 {
 	write_back_canonical_return();
 	free_scratch();
+	return 0;
 }
 
 
@@ -630,6 +639,7 @@ SYSCALL_EXIT_PROT(stat)
 	actual->args[0] = actual->args[1];
 	actual->args[1] = actual->args[2];
 	actual->args[1] = actual->args[2];
+	return 0;
 }
 
 
@@ -700,6 +710,7 @@ SYSCALL_EXIT_PROT(fstat)
 	}
 done:
 	free_scratch();
+	return 0;
 }
 
 
@@ -774,6 +785,7 @@ SYSCALL_EXIT_PROT(fstatat)
 		free(normalized_stat);
 	}
 	free_scratch();
+	return 0;
 }
 
 
@@ -827,8 +839,8 @@ SYSCALL_EXIT_PROT(time)
 		*s->orig_tloc = ret;
 	}
 	actual->ret = ret;
-
 	free_scratch();
+	return 0;
 }
 
 
@@ -861,6 +873,7 @@ SYSCALL_EXIT_PROT(gettimeofday)
 {
 	actual->ret = canonical->ret;
 	free_scratch();
+	return 0;
 }
 
 
@@ -889,7 +902,7 @@ SYSCALL_ENTER_PROT(dup2)
 SYSCALL_EXIT_PROT(dup2)
 {
 	if(dispatch & DISPATCH_SKIP) {
-		return;
+		return 0;
 	}
 	return redirect_exit(dup3);
 }
@@ -967,6 +980,7 @@ SYSCALL_EXIT_PROT(dup3)
 
 ret:
 	free_scratch();
+	return 0;
 }
 
 
@@ -993,6 +1007,7 @@ SYSCALL_ENTER_PROT(lseek)
 SYSCALL_EXIT_PROT(lseek)
 {
 	write_back_canonical_return();
+	return 0;
 }
 
 
@@ -1021,7 +1036,7 @@ SYSCALL_ENTER_PROT(socket)
 SYSCALL_EXIT_PROT(socket)
 {
 	write_back_canonical_return();
-	redirect_exit(default_creates_fd);
+	return redirect_exit(default_creates_fd);
 }
 
 
@@ -1082,12 +1097,12 @@ SYSCALL_EXIT_PROT(socketpair)
 	di[1] = env_add_local_descriptor(env, local_fd[1], flags, 
 	                                 SOCKET_DESCRIPTOR);
 
-	actual_fds[0] = canonical_fd_for(env, di[0]);
-	actual_fds[1] = canonical_fd_for(env, di[1]);
+	actual_fds[0] = env_canonical_fd_for(env, di[0]);
+	actual_fds[1] = env_canonical_fd_for(env, di[1]);
 
 done:
 	free_scratch();
-	return;
+	return 0;
 }
 
 
@@ -1238,7 +1253,7 @@ SYSCALL_ENTER_PROT(epoll_ctl)
 				(struct epoll_data_info) {
 					.epfd = epfd,
 					.fd = fd,
-					.data = *event
+					.event = *event
 				};
 			append_epoll_data_info(env, event_info);
 			s->custom_event.events = event->events;
@@ -1252,7 +1267,7 @@ SYSCALL_ENTER_PROT(epoll_ctl)
 			if(NULL == event_info) {
 				return DISPATCH_ERROR;
 			}
-			s->custom_event.events = event_info->data.events;
+			s->custom_event.events = event_info->event.events;
 			s->custom_event.data.fd = fd;
 			actual->args[3] = (long)&s->custom_event;
 			break;
@@ -1319,8 +1334,8 @@ SYSCALL_EXIT_PROT(epoll_ctl)
 			break;
 		}
 	}
-
 	free_scratch();
+	return 0;
 }
 
 
@@ -1441,12 +1456,13 @@ SYSCALL_EXIT_PROT(epoll_pwait)
 		if(NULL == own_event) {
 			post_call_error();
 		}
-		memcpy(&events[i].data, &own_event->data.data, 
-		       sizeof(own_event->data.data));
+		memcpy(&events[i].data, &own_event->event.data, 
+		       sizeof(own_event->event.data));
 	}
 
 done:
 	free_scratch();
+	return 0;
 }
 
 
@@ -1498,6 +1514,7 @@ SYSCALL_ENTER_PROT(sendfile)
 SYSCALL_EXIT_PROT(sendfile)
 {
 	write_back_canonical_return();
+	return 0;
 }
 
 
@@ -1524,6 +1541,7 @@ SYSCALL_ENTER_PROT(getgroups)
 SYSCALL_EXIT_PROT(getgroups)
 {
 	free_scratch();
+	return 0;
 }
 
 
@@ -1547,6 +1565,7 @@ SYSCALL_ENTER_PROT(setgroups)
 SYSCALL_EXIT_PROT(setgroups)
 {
 	free_scratch();
+	return 0;
 }
 
 
@@ -1584,6 +1603,7 @@ SYSCALL_EXIT_PROT(getsockopt)
 {
 	free_scratch();
 	write_back_canonical_return();
+	return 0;
 }
 
 
@@ -1616,6 +1636,7 @@ SYSCALL_EXIT_PROT(setsockopt)
 {
 	free_scratch();
 	write_back_canonical_return();
+	return 0;
 }
 
 
@@ -1626,7 +1647,7 @@ SYSCALL_EXIT_PROT(setsockopt)
  * ************************************************************************** */
 
 SYSCALL_ENTER_PROT(fcntl) { return redirect_enter(default_arg1_fd); }
-SYSCALL_EXIT_PROT(fcntl) { write_back_canonical_return(); }
+SYSCALL_EXIT_PROT(fcntl) { write_back_canonical_return(); return 0; }
 
 
 /* ************************************************************************** *
@@ -1637,7 +1658,7 @@ SYSCALL_EXIT_PROT(fcntl) { write_back_canonical_return(); }
  * ************************************************************************** */
 
 SYSCALL_ENTER_PROT(connect) { return redirect_enter(default_arg1_fd); }
-SYSCALL_EXIT_PROT(connect) { write_back_canonical_return(); }
+SYSCALL_EXIT_PROT(connect) { write_back_canonical_return(); return 0; }
 
 
 /* ************************************************************************** *
@@ -1648,7 +1669,7 @@ SYSCALL_EXIT_PROT(connect) { write_back_canonical_return(); }
  * ************************************************************************** */
 
 SYSCALL_ENTER_PROT(bind) { return redirect_enter(default_arg1_fd); }
-SYSCALL_EXIT_PROT(bind) { write_back_canonical_return(); }
+SYSCALL_EXIT_PROT(bind) { write_back_canonical_return(); return 0; }
 
 
 /* ************************************************************************** *
@@ -1658,7 +1679,7 @@ SYSCALL_EXIT_PROT(bind) { write_back_canonical_return(); }
  * ************************************************************************** */
 
 SYSCALL_ENTER_PROT(listen) { return redirect_enter(default_arg1_fd); }
-SYSCALL_EXIT_PROT(listen) { write_back_canonical_return(); }
+SYSCALL_EXIT_PROT(listen) { write_back_canonical_return(); return 0; }
 
 
 /* ************************************************************************** *
@@ -1708,7 +1729,7 @@ SYSCALL_EXIT_PROT(accept4)
  * ************************************************************************** */
 
 SYSCALL_ENTER_PROT(shutdown) { return redirect_enter(default_arg1_fd); }
-SYSCALL_EXIT_PROT(shutdown) { write_back_canonical_return(); }
+SYSCALL_EXIT_PROT(shutdown) { write_back_canonical_return(); return 0; }
 
 
 /* ************************************************************************** *
@@ -1735,6 +1756,7 @@ SYSCALL_ENTER_PROT(rt_sigprocmask)
 SYSCALL_EXIT_PROT(rt_sigprocmask)
 {
 	free_scratch();
+	return 0;
 }
 
 
@@ -1745,7 +1767,7 @@ SYSCALL_EXIT_PROT(rt_sigprocmask)
  * ************************************************************************** */
 
 SYSCALL_ENTER_PROT(ioctl) { return redirect_enter(default_arg1_fd); }
-SYSCALL_EXIT_PROT(ioctl) { write_back_canonical_return(); }
+SYSCALL_EXIT_PROT(ioctl) { write_back_canonical_return(); return 0; }
 
 
 /* ************************************************************************** *
@@ -1756,7 +1778,7 @@ SYSCALL_EXIT_PROT(ioctl) { write_back_canonical_return(); }
  * ************************************************************************** */
 
 SYSCALL_ENTER_PROT(recvfrom) { return redirect_enter(default_arg1_fd); }
-SYSCALL_EXIT_PROT(recvfrom) { write_back_canonical_return(); }
+SYSCALL_EXIT_PROT(recvfrom) { write_back_canonical_return(); return 0; }
 
 
 /* ************************************************************************** *
@@ -1780,6 +1802,7 @@ SYSCALL_ENTER_PROT(getrlimit)
 SYSCALL_EXIT_PROT(getrlimit)
 {
 	free_scratch();
+	return 0;
 }
 
 
@@ -1801,6 +1824,7 @@ SYSCALL_ENTER_PROT(setrlimit)
 SYSCALL_EXIT_PROT(setrlimit)
 {
 	free_scratch();
+	return 0;
 }
 
 
@@ -1842,6 +1866,7 @@ SYSCALL_EXIT_PROT(getsockname)
 {
 	write_back_canonical_return();
 	free_scratch();
+	return 0;
 }
 
 
@@ -1959,6 +1984,7 @@ SYSCALL_ENTER_PROT(sendmsg)
 SYSCALL_EXIT_PROT(sendmsg)
 {
 	free_scratch();
+	return 0;
 }
 
 
@@ -2001,6 +2027,7 @@ SYSCALL_ENTER_PROT(mkdirat)
 SYSCALL_EXIT_PROT(mkdirat)
 {
 	free_scratch();
+	return 0;
 }
 
 
@@ -2104,13 +2131,18 @@ SYSCALL_ENTER_PROT(clone)
 SYSCALL_EXIT_PROT(clone)
 {
 	struct communicator *child_comm = (struct communicator *)*scratch;
-
+	struct pid_info *pid_info = NULL;
 	pid_t child_pid = (pid_t)actual->ret;
+	pid_t canonical_child_pid = 0;
 	monitor.ancestry++;  // just for log numbers
 	if(0 != child_pid) {
 		/* In parent: add child PID to environment. */
 		SAFE_NZ_TRY(comm_destroy(child_comm));
-		// SAFE_Z_TRY(env_add_local_pid_info(env, child_pid));
+		SAFE_Z_TRY(pid_info = env_add_local_pid_info(env, child_pid));
+		SAFE_LZ_TRY(canonical_child_pid = 
+		            env_canonical_pid_for(env, pid_info));
+		canonical->ret = canonical_child_pid;
+		actual->ret = canonical->ret;
 	} else {
 		/* In child: Use previosly created child_monitor as our new
 		   default monitor. */
@@ -2118,6 +2150,7 @@ SYSCALL_EXIT_PROT(clone)
 		SAFE_NZ_TRY(monitor_child_fix_up(&monitor, child_comm));
 	}
 	free_scratch();
+	return 0;
 }
 
 
@@ -2126,18 +2159,34 @@ SYSCALL_EXIT_PROT(clone)
  * pid_t wait(int *wstatus)                                                   *
  * ************************************************************************** */
 
+/* Here is how we handle wait and the associated asynchrony issues.
+
+   1. Child PIDs are remapped to canonical PIDs that are the same between all
+      variants. The program is exposed only to those canonical PIDs, and we
+      translate to the actual local PID if a system call needs to be executed.
+      Each clone/fork/... call that creates a new process thus adds a new entry
+      to that mapping.
+    2. wait() and waitpid(-1, ...) calls, that could return any child process,
+       and hence could return different child processes for different variants
+       due to different timing, initially run only on the leader. Then, the
+       children execute a waitpid(xxx) specifically for the PID that the 
+       leader's wait returned. */
+
 SYSCALL_ENTER_PROT(wait)
 {
-	alloc_scratch(sizeof(struct type));
-	struct type *buffer_type = (struct type *)*scratch;
-	canonical->arg_types[0] = POINTER_TYPE(buffer_type);
-	*buffer_type            = BUFFER_TYPE(sizeof(int));
-	return DISPATCH_EVERYONE | DISPATCH_CHECKED;
+	canonical->args[1] = canonical->args[0];
+	canonical->args[0] = -1;
+	return redirect_enter(waitpid);
+}
+
+SYSCALL_POST_CALL_PROT(wait)
+{
+	return redirect_post_call(waitpid);
 }
 
 SYSCALL_EXIT_PROT(wait)
 {
-	free_scratch();
+	return redirect_exit(waitpid);
 }
 
 
@@ -2148,36 +2197,168 @@ SYSCALL_EXIT_PROT(wait)
 
 SYSCALL_ENTER_PROT(waitpid)
 {
+	struct pid_info *pi = NULL;
+	if(-1 != actual->args[0]) {
+		pi = get_pid_info(0);
+		remap_pid(pi, 0);
+	}
 	alloc_scratch(sizeof(struct type));
 	struct type *buffer_type = (struct type *)*scratch;
 	canonical->arg_types[0] = IMMEDIATE_TYPE(pid_t);
 	canonical->arg_types[1] = POINTER_TYPE(buffer_type);
 	*buffer_type            = BUFFER_TYPE(sizeof(int));
+	canonical->arg_flags[1] = ARG_FLAG_WRITE_ONLY;
 	canonical->arg_types[2] = IMMEDIATE_TYPE(int);
+	canonical->ret_type = IMMEDIATE_TYPE(pid_t);
+	canonical->ret_flags = ARG_FLAG_REPLICATE;
+	if(-1 == actual->args[0]) {
+		return DISPATCH_LEADER | DISPATCH_CHECKED
+		       | DISPATCH_NEEDS_REPLICATION;
+	}
 	return DISPATCH_EVERYONE | DISPATCH_CHECKED;
+}
+
+SYSCALL_POST_CALL_PROT(waitpid)
+{
+	if(actual->ret <= 0) {
+		return;
+	}
+	struct pid_info *pid_info = env_get_local_pid_info(env, actual->ret);
+	if(NULL == pid_info) {
+		return;
+	}
+	pid_t canonical_pid = env_canonical_pid_for(env, pid_info);
+	if(0 > canonical_pid) {
+		return;
+	}
+	actual->ret = canonical_pid;
+	canonical->ret = actual->ret;
+	/* If this wait returned because the child process no longer exists
+	   (terminated), remove it from our list. */
+	if(0 != kill(pid_info->local_pid, 0)) {
+		if(0 != env_del_pid_info(env, pid_info)) {
+			return;
+		}
+	}
 }
 
 SYSCALL_EXIT_PROT(waitpid)
 {
+	if(-1 != actual->args[0]) {
+		goto ret;
+	}
+	if(!env->is_leader) {
+		struct pid_info *pid_info = env_get_pid_info(env, 
+		                                             canonical->ret);
+		if(NULL != pid_info) {
+			return 1;
+		}
+		/* Leader's wait(-1) returned the received PID in 
+		   canonical->ret. Instead of a catch-all wait, we wait for
+		   this process specifically in the followers. */
+		pid_t retv = waitpid((pid_t)pid_info->local_pid, 
+		                     (int *)actual->args[1], 
+				     (int)actual->args[2]);
+		if(0 >= retv) {
+			return 1;
+		}
+	}
+ret:
 	free_scratch();
+	return 0;
 }
+
+
+/* ************************************************************************** *
+ * wait3                                                                      *
+ * pid_t wait3(int *wstatus, int options, struct rusage *rusage);             *
+ * ************************************************************************** */
 
 SYSCALL_ENTER_PROT(wait3)
 {
-	return 0;
+	/* wait3(wstatus, options, rusage) == wait4(-1, wstatus, options, 
+	                                            rusage) */
+	canonical->args[2] = canonical->args[1];
+	canonical->args[1] = canonical->args[0];
+	canonical->args[0] = -1;
+	return redirect_enter(wait4);
+}
+
+SYSCALL_POST_CALL_PROT(wait3)
+{
+	return redirect_post_call(wait4);
 }
 
 SYSCALL_EXIT_PROT(wait3)
 {
-	free_scratch();
+	redirect_exit(wait4);
+	return 0;
 }
+
+
+/* ************************************************************************** *
+ * wait4                                                                      *
+ * pid_t wait4(pid_t pid, int *wstatus, int options,                          * 
+ *             struct rusage *rusage);                                        *
+ * ************************************************************************** */
 
 SYSCALL_ENTER_PROT(wait4)
 {
-	return 0;
+	/* TODO -- Ignore rusage argument for now. */
+	actual->args[3] = 0;
+	return redirect_enter(waitpid);
+}
+
+SYSCALL_POST_CALL_PROT(wait4)
+{
+	return redirect_post_call(waitpid);
 }
 
 SYSCALL_EXIT_PROT(wait4)
 {
+	return redirect_exit(waitpid);
+}
+
+
+/* ************************************************************************** *
+ * setitimer                                                                  *
+ * int setitimer(int which, const struct itimerval *restrict new_value,       *
+ *               struct itimerval *restrict old_value);                       *
+ * ************************************************************************** */
+
+SYSCALL_ENTER_PROT(setitimer)
+{
+	struct setitimer_scratch {
+		struct type itimerval_type;
+	};
+	alloc_scratch(sizeof(struct setitimer_scratch));
+	struct setitimer_scratch *_scratch = 
+		(struct setitimer_scratch *)*scratch;
+	_scratch->itimerval_type = BUFFER_TYPE(sizeof(struct itimerval));
+	canonical->arg_types[0] = IMMEDIATE_TYPE(int);
+	canonical->arg_types[1] = POINTER_TYPE(&_scratch->itimerval_type);
+	canonical->arg_types[2] = POINTER_TYPE(&_scratch->itimerval_type);
+	canonical->arg_flags[2] = ARG_FLAG_WRITE_ONLY;
+	return DISPATCH_CHECKED | DISPATCH_EVERYONE;
+}
+
+SYSCALL_EXIT_PROT(setitimer)
+{
 	free_scratch();
+	return 0;
+}
+
+
+/* ************************************************************************** *
+ * kill                                                                       *
+ * int kill(pid_t pid, int sig)                                               *
+ * ************************************************************************** */
+
+SYSCALL_ENTER_PROT(kill)
+{
+	struct pid_info *pi = get_pid_info(0);
+	remap_pid(pi, 0);
+	canonical->arg_types[0] = IMMEDIATE_TYPE(pid_t);
+	canonical->arg_types[1] = IMMEDIATE_TYPE(int);
+	return DISPATCH_EVERYONE | DISPATCH_CHECKED;
 }

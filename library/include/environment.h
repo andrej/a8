@@ -37,7 +37,7 @@ struct descriptor_info_list list_struct_def(struct descriptor_info,
 
 
 #define MAX_N_PID_MAPPINGS 256
-#define PID_BASE 1000
+#define CANONICAL_PID_BASE 1000
 struct pid_info {
 	pid_t local_pid;
 };
@@ -47,7 +47,7 @@ struct pid_info_list list_struct_def(struct pid_info, MAX_N_PID_MAPPINGS);
 struct epoll_data_info {
 	int epfd;
 	int fd;
-	struct epoll_event data;
+	struct epoll_event event;
 	struct epoll_data_info *prev;
 	struct epoll_data_info *next;
 };
@@ -76,7 +76,7 @@ struct environment {
 	   is the canonical file descriptor number, pointing to flags and 
 	   the corresponding locally-opened file descriptor. */
 	struct descriptor_info_list descriptors;
-	struct pid_info_list children;
+	struct pid_info_list children_pids;
 	pid_t pid;
 	pid_t ppid;
 	struct epoll_data_infos epoll_data_infos;
@@ -138,8 +138,8 @@ env_add_local_descriptor(struct environment *env,
 	return env_add_descriptor(env, fd, canonical, flags, type);
 }
 
-static inline int canonical_fd_for(struct environment *env,
-                                   struct descriptor_info *di)
+static inline int env_canonical_fd_for(struct environment *env,
+                                       struct descriptor_info *di)
 {
 	size_t i = (di - env->descriptors.items);
 	if(i > MAX_N_DESCRIPTOR_MAPPINGS || !(DI_PRESENT & di->flags)) {
@@ -154,7 +154,7 @@ static inline int
 env_del_descriptor(struct environment *env, struct descriptor_info *di)
 {
 	struct descriptor_info *in_list = NULL;
-	const int i = canonical_fd_for(env, di);
+	const int i = env_canonical_fd_for(env, di);
 	in_list = list_get_i(env->descriptors, i);
 	if(0 > i || NULL == in_list) {
 		return 1;
@@ -195,18 +195,72 @@ static inline struct descriptor_info
 	return ret;
 }
 
-static inline struct pid_info 
-*env_add_pid_info(struct environment *env, pid_t canonical_pid, pid_t local_pid)
-{
-	// TODO Not implemented
-	return NULL;
-}
-
 static inline struct pid_info
 *env_add_local_pid_info(struct environment *env, pid_t local_pid)
 {
-	// TODO Not implemented
-	return NULL;
+	int i = list_get_next_free_i(env->children_pids);
+	pid_t canonical_pid = i + CANONICAL_PID_BASE;
+	struct pid_info pid_info = {};
+	pid_info.local_pid = local_pid;
+	list_put_at(env->children_pids, pid_info, i);
+#if VERBOSITY >= 4
+	SAFE_LOGF("Added PID mapping %d -> %d.\n", canonical_pid, local_pid);
+#endif
+	return list_get_i(env->children_pids, i);
+}
+
+static inline struct pid_info
+*env_get_pid_info(struct environment *env, pid_t canonical_pid)
+{
+	struct pid_info *ret = NULL;
+	ret = list_get_i(env->children_pids, canonical_pid 
+	                                     - CANONICAL_PID_BASE);
+	if(NULL == ret) {
+		SAFE_WARNF("No such canonical child PID: %d.\n", canonical_pid);
+	}
+	return ret;
+}
+
+static inline struct pid_info
+*env_get_local_pid_info(struct environment *env, pid_t local_pid)
+{
+	struct pid_info *ret = NULL;
+	size_t i = 0;
+	list_for_each(env->children_pids, i) {
+		if(!list_item_is_occupied(env->children_pids, i)) {
+			continue;
+		}
+		if(local_pid == env->children_pids.items[i].local_pid) {
+			return &env->children_pids.items[i];
+		}
+	}
+	return ret;
+}
+
+static inline int env_canonical_pid_for(struct environment *env,
+                                        struct pid_info *pi)
+{
+	size_t i = (pi - env->children_pids.items);
+	if(i > MAX_N_PID_MAPPINGS) {
+		SAFE_WARNF("No PID mapping with local PID %d registered "
+		          "(%p).\n", pi->local_pid, pi);
+		return -1;
+	}
+	return i + CANONICAL_PID_BASE;
+}
+
+static inline int
+env_del_pid_info(struct environment *env, struct pid_info *pid_info)
+{
+	int i = env_canonical_pid_for(env, pid_info) - CANONICAL_PID_BASE;
+	if(0 > i) {
+		return 1;
+	}
+	if(0 != list_del_i(env->children_pids, i)) {
+		SAFE_WARNF("Cannot remove PID info %d.\n", i);
+		return 1;
+	}
+	return 0;
 }
 
 /**
@@ -216,6 +270,8 @@ struct epoll_data_info *get_epoll_data_info_for(struct environment *env,
                                                 int epfd,
 						int fd,
 						uint32_t events);
+
+struct epoll_data_info *purge_epoll_data_fd(struct environment *env, int fd);
 
 /**
  * Copy and append a new epoll_data_info structure 

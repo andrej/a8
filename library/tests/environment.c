@@ -10,7 +10,7 @@ TEST(environment)
 	ASSERT_NEQ(di = env_add_local_descriptor(&env, 1, 0, 
 	                                         SOCKET_DESCRIPTOR),
 		   NULL);
-	can1 = canonical_fd_for(&env, di);
+	can1 = env_canonical_fd_for(&env, di);
 	di = env_get_local_descriptor_info(&env, 1);
 	ASSERT_NEQ(di, NULL);
 	//ASSERT_EQ(di->canonical_fd, 0);
@@ -29,7 +29,7 @@ TEST(environment)
 	ASSERT_NEQ(di = env_add_descriptor(&env, 4, 3, DI_OPENED_ON_LEADER, 
 	                                   SOCKET_DESCRIPTOR), 
 		   NULL);
-	can3 = canonical_fd_for(&env, di);
+	can3 = env_canonical_fd_for(&env, di);
 	di = env_get_canonical_descriptor_info(&env, 3);
 	ASSERT_NEQ(di, NULL);
 	//ASSERT_EQ(di->canonical_fd, 3);

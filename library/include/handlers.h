@@ -58,8 +58,8 @@ struct syscall_handler {
 	void (*post_call)(struct environment *, const struct syscall_handler *,
 			  int, struct syscall_info *, struct syscall_info *,
 			   void **);
-	void (*exit)(struct environment *, const struct syscall_handler *, int,
-	             struct syscall_info *, struct syscall_info *, void **);
+	int (*exit)(struct environment *, const struct syscall_handler *, int,
+                    struct syscall_info *, struct syscall_info *, void **);
 	const char *name;
 };
 
@@ -80,12 +80,12 @@ struct syscall_handler {
 	                               struct syscall_info *canonical, \
 	                               void **scratch)
 #define SYSCALL_EXIT_PROT(name) \
-	void __ ## name ## _exit (struct environment *env, \
-	                          const struct syscall_handler *handler, \
-				  int dispatch, \
-	                          struct syscall_info *actual, \
-	                          struct syscall_info *canonical, \
-	                          void **scratch)
+	int __ ## name ## _exit (struct environment *env, \
+	                         const struct syscall_handler *handler, \
+	                         int dispatch, \
+	                         struct syscall_info *actual, \
+	                         struct syscall_info *canonical, \
+	                         void **scratch)
 
 extern const struct syscall_handler * const syscall_handlers_arch[];
 extern const struct syscall_handler * const syscall_handlers_canonical[];

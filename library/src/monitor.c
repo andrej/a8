@@ -121,12 +121,15 @@ long monitor_handle_syscall(struct monitor * const monitor,
 
 	/* Phase 1: Determine call dispatch type through entry handler. */
 #if VERBOSITY >= 2
+	SAFE_LZ_TRY(gettimeofday(&tv, NULL));
+	timersub(&tv, &monitor->start_tv, &rel_tv);
 	if(NULL != handler) {
-		SAFE_LZ_TRY(gettimeofday(&tv, NULL));
-		timersub(&tv, &monitor->start_tv, &rel_tv);
 		SAFE_LOGF("[%3ld.%06ld] >> %s (%ld) -- enter from PC %p, PID "
 			  "%d.\n", rel_tv.tv_sec, rel_tv.tv_usec,
 			  handler->name, actual.no, ret_addr, getpid());
+	} else {
+		SAFE_LOGF("[%3ld.%06ld] >> enter unhandled syscall %ld.\n",
+		          rel_tv.tv_sec, rel_tv.tv_usec, actual.no);
 	}
 #endif
 	dispatch = DISPATCH_UNCHECKED | DISPATCH_EVERYONE;	
@@ -188,8 +191,12 @@ long monitor_handle_syscall(struct monitor * const monitor,
 	/* Phase 4: Run exit handlers, potentially denormalizing results. */
 	if(NULL != handler && NULL != handler->exit 
 	   && !(dispatch & DISPATCH_SKIP)) {
-		handler->exit(&monitor->env, handler, dispatch, &actual, 
-		              &canonical, &handler_scratch_space);
+		s = handler->exit(&monitor->env, handler, dispatch, &actual, 
+		                  &canonical, &handler_scratch_space);
+		if(0 != s) {
+			SAFE_WARNF("Exit handler returned error %d.\n", s);
+			monmod_exit(1);
+		}
 	}
 
 #if VERBOSITY >= 2
@@ -465,7 +472,8 @@ int monitor_child_fix_up(struct monitor *monitor,
 	              exit(0));
 	monitor->env.pid = pid;
 	monitor->env.ppid = getppid();
-	memset(&monitor->env.children, 0, sizeof(monitor->env.children));
+	memset(&monitor->env.children_pids, 0, 
+	       sizeof(monitor->env.children_pids));
 	SAFE_NZ_TRY(comm_destroy(&monitor->comm));
 	monitor->comm = *child_comm;
 

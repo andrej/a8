@@ -8,24 +8,39 @@
 #include "util.h"
 #include "unprotected.h"
 
-void env_init(struct environment *env, bool is_leader)
+int env_init(struct environment *env, bool is_leader)
 {
+	struct pid_info *pi;
+
 	env->epoll_data_infos = (struct epoll_data_infos){};
-	env->pid = getpid();
-	env->ppid = getppid();
 	env->is_leader = is_leader;
 
 	// stdin
-	env_add_descriptor(env, 0, 0, DI_OPENED_ON_LEADER, 
-	                   (enum descriptor_type)FILE_DESCRIPTOR);
+	SAFE_Z_TRY_EXCEPT(
+		env_add_descriptor(env, 0, 0, DI_OPENED_ON_LEADER, 
+	                           (enum descriptor_type)FILE_DESCRIPTOR),
+		return 1);
 
 	// stdout
-	env_add_descriptor(env, 1, 1, DI_OPENED_LOCALLY, 
-	                   (enum descriptor_type)FILE_DESCRIPTOR);
+	SAFE_Z_TRY_EXCEPT(
+		env_add_descriptor(env, 1, 1, DI_OPENED_LOCALLY, 
+	                           (enum descriptor_type)FILE_DESCRIPTOR),
+		return 1);
 
 	// stderr
-	env_add_descriptor(env, 2, 2, DI_OPENED_LOCALLY, 
-	                   (enum descriptor_type)FILE_DESCRIPTOR);
+	SAFE_Z_TRY_EXCEPT(
+		env_add_descriptor(env, 2, 2, DI_OPENED_LOCALLY, 
+	                           (enum descriptor_type)FILE_DESCRIPTOR),
+		return 1);
+	
+	SAFE_Z_TRY_EXCEPT(
+		env->pid = env_add_local_pid_info(env, getpid()),
+		return 1);
+	SAFE_Z_TRY_EXCEPT(
+		env->ppid = env_add_local_pid_info(env, getppid()),
+		return 1);
+
+	return 0;
 }
 
 struct epoll_data_info *get_epoll_data_info_for(struct environment *env,

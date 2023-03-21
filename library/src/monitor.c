@@ -346,7 +346,7 @@ void register_monitor_in_kernel(struct monitor *monitor) {
 	monitor->len = monitor_len;
 	monitor->protected_len = protected_len;
 
-	SAFE_NZ_TRY(monmod_init(monitor->env.pid, 
+	SAFE_NZ_TRY(monmod_init(monitor->env.pid->local_pid, 
 	                        monitor_start, 
 	                        protected_len,
 	                        &monmod_syscall_trusted_addr,
@@ -388,7 +388,7 @@ int monitor_init(struct monitor *monitor, int own_id, struct config *conf)
 	/* Connect everyone to everyone. */
 	SAFE_NZ_TRY(monitor_init_comm(monitor, own_id, conf));
 
-	env_init(&monitor->env, monitor->is_leader);
+	SAFE_NZ_TRY(env_init(&monitor->env, monitor->is_leader));
 
 
 	/* Initialize Individual Basic Monitoring Components */
@@ -412,7 +412,7 @@ int monitor_init(struct monitor *monitor, int own_id, struct config *conf)
 	                           &monitor->env,
 	                           own_variant_conf,
 	                           monitor->start, monitor->protected_len));
-	monitor->env.pid = getpid();
+	monitor->env.pid->local_pid = getpid();
 #endif
 
 	/* -- Register Tracing With Kernel Module -- */
@@ -421,7 +421,7 @@ int monitor_init(struct monitor *monitor, int own_id, struct config *conf)
 #if VERBOSITY >= 1
 	SAFE_LZ_TRY(gettimeofday(&monitor->start_tv, NULL));
 	SAFE_LOGF("Starting monitored execution of process %d.\n",
-	          monitor->env.pid);
+	          monitor->env.pid->local_pid);
 #endif
 
 	return 0;
@@ -465,15 +465,14 @@ int monitor_arbitrate_child_comm(struct monitor *parent_monitor,
 int monitor_child_fix_up(struct monitor *monitor,
                          struct communicator *child_comm)
 {
-	const pid_t pid = getpid();
 	// Open a new log file for this child.
 	close(monmod_log_fd);
 	NZ_TRY_EXCEPT(open_log_file(monitor->own_id, monitor->ancestry), 
 	              exit(0));
-	monitor->env.pid = pid;
-	monitor->env.ppid = getppid();
-	memset(&monitor->env.children_pids, 0, 
-	       sizeof(monitor->env.children_pids));
+	// Adjust PIDs.
+	SAFE_Z_TRY(monitor->env.ppid = monitor->env.pid);
+	SAFE_Z_TRY(monitor->env.pid = 
+	           env_add_local_pid_info(&monitor->env, getpid()));
 	SAFE_NZ_TRY(comm_destroy(&monitor->comm));
 	monitor->comm = *child_comm;
 

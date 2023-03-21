@@ -54,3 +54,25 @@ time(time_t *tloc)
 #endif
 }
 
+/* From man(2) getpid:
+       From glibc version 2.3.4 up to and including version 2.24, the
+       glibc wrapper function for getpid() cached PIDs, with the goal of
+       avoiding additional system calls when a process calls getpid()
+       repeatedly.  Normally this caching was invisible, but its correct
+       operation relied on support in the wrapper functions for fork(2),
+       vfork(2), and clone(2): if an application bypassed the glibc
+       wrappers for these system calls by using syscall(2), then a call
+       to getpid() in the child would return the wrong value (to be
+       precise: it would return the PID of the parent process).  In
+       addition, there were cases where getpid() could return the wrong
+       value even when invoking clone(2) via the glibc wrapper function.
+       (For a discussion of one such case, see BUGS in clone(2).)
+       Furthermore, the complexity of the caching code had been the
+       source of a few bugs within glibc over the years.  */
+pid_t
+__attribute__((visibility("default"),
+               section("unprotected")))
+getpid(void)
+{
+	return unprotected_funcs.syscall(__NR_getpid, 0, 0, 0, 0, 0, 0);
+}

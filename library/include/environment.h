@@ -77,8 +77,8 @@ struct environment {
 	   the corresponding locally-opened file descriptor. */
 	struct descriptor_info_list descriptors;
 	struct pid_info_list children_pids;
-	pid_t pid;
-	pid_t ppid;
+	struct pid_info *pid;  // pointer into pid_info_list
+	struct pid_info *ppid;  // pointer into pid_info_list
 	struct epoll_data_infos epoll_data_infos;
 	bool is_leader;
 };
@@ -87,7 +87,7 @@ struct environment {
  * Initialize the environment with default file descriptors stdin, stdout,
  * stderr.
  */
-void env_init(struct environment *env, bool is_leader);
+int env_init(struct environment *env, bool is_leader);
 
 static inline struct descriptor_info *
 env_add_descriptor(struct environment *env, 

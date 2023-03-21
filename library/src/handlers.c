@@ -896,7 +896,7 @@ SYSCALL_ENTER_PROT(dup2)
 	canonical->no = SYSCALL_dup3_CANONICAL;
 	canonical->args[2] = 0; // flags
 	
-	return redirect_enter(dup2);
+	return redirect_enter(dup3);
 }
 
 SYSCALL_EXIT_PROT(dup2)
@@ -1055,13 +1055,16 @@ SYSCALL_ENTER_PROT(socketpair)
 	canonical->arg_types[2] = IMMEDIATE_TYPE(int);
 	canonical->arg_types[3] = POINTER_TYPE(buffer_type);
 	*buffer_type            = BUFFER_TYPE(sizeof(int) * 2);
+	canonical->arg_flags[3] = ARG_FLAG_WRITE_ONLY;
 	if(domain == AF_UNIX) {
 		return DISPATCH_EVERYONE | DISPATCH_CHECKED;
+	} else {
+		canonical->arg_flags[3] |= ARG_FLAG_REPLICATE;
+		canonical->ret_flags = ARG_FLAG_REPLICATE;
+		return DISPATCH_LEADER | DISPATCH_CHECKED
+			| DISPATCH_NEEDS_REPLICATION;
 	}
-	canonical->arg_flags[3] = ARG_FLAG_REPLICATE;
-	canonical->ret_flags = ARG_FLAG_REPLICATE;
-	return DISPATCH_LEADER | DISPATCH_CHECKED
-	        | DISPATCH_NEEDS_REPLICATION;
+	// Unreachable.
 }
 
 SYSCALL_EXIT_PROT(socketpair)
@@ -1643,11 +1646,69 @@ SYSCALL_EXIT_PROT(setsockopt)
 /* ************************************************************************** *
  * fcntl                                                                      *
  * int fcntl(int fd, int cmd, ... );                                          *
- * TODO!                                                                      *
  * ************************************************************************** */
 
-SYSCALL_ENTER_PROT(fcntl) { return redirect_enter(default_arg1_fd); }
-SYSCALL_EXIT_PROT(fcntl) { write_back_canonical_return(); return 0; }
+SYSCALL_ENTER_PROT(fcntl) { 
+	struct descriptor_info *di = get_di(0);
+	remap_fd(di, 0);
+	int cmd = actual->args[1];
+	int dispatch = dispatch_leader_if_needed(di, DISPATCH_CHECKED);
+	canonical->arg_types[0] = DESCRIPTOR_TYPE();
+	canonical->arg_types[1] = IMMEDIATE_TYPE(int);
+	switch(cmd) {
+		case F_GETFD:
+		case F_GETFL:
+		case F_GETOWN:
+			break;
+		case F_SETFD:
+		case F_SETFL:
+			canonical->arg_types[2] = IMMEDIATE_TYPE(int);
+			break;
+		case F_SETOWN: {
+			if((dispatch & DISPATCH_EVERYONE) || 
+			   (dispatch & DISPATCH_LEADER && env->is_leader)) {
+				struct pid_info *pi = get_pid_info(2);
+				actual->args[2] = pi->local_pid;
+			}
+			canonical->arg_types[2] = IMMEDIATE_TYPE(pid_t);
+			break;
+		}
+		default:
+			SAFE_WARNF("As of yet unhandled fcntl command: %d.\n",
+			           cmd);
+			return DISPATCH_ERROR;
+	}
+	return dispatch;
+}
+
+SYSCALL_EXIT_PROT(fcntl) { 
+	int cmd = actual->args[1];
+	switch(cmd) {
+		case F_GETFD:
+		case F_GETFL:
+			break;
+		case F_GETOWN: {
+			struct pid_info *pi;
+			if((dispatch & DISPATCH_EVERYONE) || 
+			   (dispatch & DISPATCH_LEADER && env->is_leader)) {
+				SAFE_Z_TRY_EXCEPT(
+					pi =env_get_local_pid_info(env, 
+					                           actual->ret),
+					return 1);
+				actual->ret = env_canonical_pid_for(env, pi);
+			}
+			break;
+		}
+		case F_SETFD:
+		case F_SETFL:
+		case F_SETOWN:
+			break;
+		default:
+			// As of yet unhandled fcntl command.
+			return 1;
+	}
+	return 0;
+ }
 
 
 /* ************************************************************************** *
@@ -1774,11 +1835,55 @@ SYSCALL_EXIT_PROT(ioctl) { write_back_canonical_return(); return 0; }
  * recvfrom                                                                   *
  * ssize_t recvfrom(int sockfd, void *buf, size_t len, int flags,             *
  *                  struct sockaddr *src_addr, socklen_t *addrlen);           *
- * TODO!                                                                      *
  * ************************************************************************** */
 
-SYSCALL_ENTER_PROT(recvfrom) { return redirect_enter(default_arg1_fd); }
-SYSCALL_EXIT_PROT(recvfrom) { write_back_canonical_return(); return 0; }
+SYSCALL_ENTER_PROT(recvfrom) { 
+	struct recvfrom_scratch {
+		struct type buf_type;
+		struct type src_addr_type;
+		struct type addrlen_type;
+	};
+	alloc_scratch(sizeof(struct recvfrom_scratch));
+	struct recvfrom_scratch *_scratch = (struct recvfrom_scratch *)*scratch;
+	struct descriptor_info *di = get_di(0);
+	remap_fd(di, 0);
+	size_t len = actual->args[2];
+	socklen_t addrlen = 0;
+	if(0 != actual->args[5]) {
+		addrlen = *(socklen_t *)actual->args[5];
+	}
+	if(!(di->flags & DI_OPENED_ON_LEADER)) {
+		// Do not yet handle recvfrom for local sockets.
+		return DISPATCH_ERROR;
+	}
+	// sockfd
+	canonical->arg_types[0] = DESCRIPTOR_TYPE();
+	// buf
+	canonical->arg_types[1] = POINTER_TYPE(&_scratch->buf_type);
+	_scratch->buf_type      = BUFFER_TYPE(len);
+	canonical->arg_flags[1] = ARG_FLAG_WRITE_ONLY | ARG_FLAG_REPLICATE;
+	// len
+	canonical->arg_types[2] = IMMEDIATE_TYPE(size_t);
+	// flags
+	canonical->arg_types[3] = IMMEDIATE_TYPE(int);
+	// src_addr
+	canonical->arg_types[4] = POINTER_TYPE(&_scratch->src_addr_type);
+	_scratch->src_addr_type = BUFFER_TYPE(addrlen);
+	// addrlen
+	canonical->arg_types[5] = POINTER_TYPE(&_scratch->addrlen_type);
+	_scratch->addrlen_type  = BUFFER_TYPE(sizeof(socklen_t));
+	canonical->arg_flags[5] = ARG_FLAG_REPLICATE;
+	// return
+	canonical->ret_type     = IMMEDIATE_TYPE(int);
+	canonical->ret_flags    = ARG_FLAG_REPLICATE;
+	return DISPATCH_LEADER | DISPATCH_NEEDS_REPLICATION | DISPATCH_CHECKED;
+}
+
+SYSCALL_EXIT_PROT(recvfrom) { 
+	free_scratch();
+	write_back_canonical_return(); 
+	return 0;
+}
 
 
 /* ************************************************************************** *
@@ -2038,7 +2143,8 @@ SYSCALL_EXIT_PROT(mkdirat)
 
 SYSCALL_ENTER_PROT(getpid)
 {
-	actual->ret = env->pid;
+	SAFE_LZ_TRY_EXCEPT(actual->ret = env_canonical_pid_for(env, env->pid),
+	                   return DISPATCH_ERROR);
 	return DISPATCH_SKIP;
 }
 
@@ -2050,7 +2156,8 @@ SYSCALL_ENTER_PROT(getpid)
 
 SYSCALL_ENTER_PROT(getppid)
 {
-	actual->ret = env->ppid;
+	SAFE_LZ_TRY_EXCEPT(actual->ret = env_canonical_pid_for(env, env->ppid),
+	                   return DISPATCH_ERROR);
 	return DISPATCH_SKIP;
 }
 

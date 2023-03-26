@@ -1655,6 +1655,8 @@ SYSCALL_ENTER_PROT(fcntl) {
 	int dispatch = dispatch_leader_if_needed(di, DISPATCH_CHECKED);
 	canonical->arg_types[0] = DESCRIPTOR_TYPE();
 	canonical->arg_types[1] = IMMEDIATE_TYPE(int);
+	canonical->ret_type = IMMEDIATE_TYPE(int);
+	canonical->ret_flags = ARG_FLAG_REPLICATE;
 	switch(cmd) {
 		case F_GETFD:
 		case F_GETFL:
@@ -1683,6 +1685,7 @@ SYSCALL_ENTER_PROT(fcntl) {
 
 SYSCALL_EXIT_PROT(fcntl) { 
 	int cmd = actual->args[1];
+	write_back_canonical_return();
 	switch(cmd) {
 		case F_GETFD:
 		case F_GETFL:

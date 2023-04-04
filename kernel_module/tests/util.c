@@ -9,6 +9,21 @@ MOCK(int, printk, const char *fmt, ...)
 	return 0;
 }
 
+/*
+The following test won't run until we find a way to mock copy_from_user.
+
+TEST(hash_user_region)
+{
+	char testbuf[] = "Hello, World.\n";
+	char testbuf2[] = "Halli Hallo.\n";
+	u64 a = 0;
+	u64 b = 0;
+	ASSERT_NEQ(a = hash_user_region(testbuf, ((char*)testbuf)+sizeof(testbuf)), 0);
+	ASSERT_NEQ(b = hash_user_region(testbuf2, ((char*)testbuf2)+sizeof(testbuf2)), 0);
+	ASSERT_NEQ(a, b);
+	return 0;
+}*/
+
 TEST(try) 
 {
 	int y = 0;

@@ -50,4 +50,17 @@ size_t line_length(const char *buf, size_t count);
  */
 ssize_t next_int_line(const char *buf, size_t count, int *res);
 
+u64 hash_user_region(void __user *start_addr, void __user *stop_addr);
+
+static inline u64 sdbm_hash(size_t buf_len, unsigned char *buf) {
+	size_t i = 0;
+	u64 hash = 0;
+	unsigned int c = 0;
+	for(i = 0; i < buf_len; i++) {
+		c = buf[i];
+		hash = c + (hash << 6) + (hash << 16) - hash;
+	}
+	return hash;
+}
+
 #endif

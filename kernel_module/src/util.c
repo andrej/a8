@@ -1,3 +1,4 @@
+#include <linux/uaccess.h>
 #include "util.h"
 
 size_t line_length(const char *buf, size_t count)
@@ -47,4 +48,22 @@ ssize_t next_int_line(const char *buf, size_t count, int *out)
 	}
 	*out = num;
 	return skipped + line_n;
+}
+
+u64 hash_user_region(void __user *start_addr, void __user *stop_addr)
+{
+	unsigned char buf[512];
+	u64 hash = 0;
+	u64 c;
+	size_t s;
+	if(start_addr >= stop_addr) {
+		return 0;
+	}
+	for(; start_addr < stop_addr; start_addr += sizeof(buf)) {
+		s = min((size_t)(stop_addr-start_addr), sizeof(buf));
+		TRY(copy_from_user(buf, start_addr, s), return 0);
+		c = sdbm_hash(s, buf);
+		hash = c + (hash << 6) + (hash << 16) - hash;
+	}
+	return hash;
 }

@@ -135,9 +135,20 @@ void destroy_tracee(struct tracee *tracee)
  * Regular Syscall Monitoring                                                 *
  * ************************************************************************** */
 
+static void syscall_entry_abort(struct pt_regs *regs, struct tracee *tracee)
+{
+	SYSCALL_NO_REG(regs) = (unsigned long)__NR_exit_group;
+	SYSCALL_ARG0_REG(regs) = -EPERM;
+	tracee->entry_info.do_inject_return = true;
+	tracee->entry_info.inject_return = -EPERM;
+}
+
 static void regular_syscall_enter(struct pt_regs *regs, long id,
                                   struct tracee *tracee)
 {
+#if MONMOD_MONITOR_PROTECTION == MONMOD_MONITOR_FLAG_PROTECTED
+	u64 hash = 0;
+#endif
 	const pid_t pid = current->pid;
 #if MONMOD_LOG_VERBOSITY >= 1
 	tracee->entry_info.do_log = false;
@@ -145,12 +156,7 @@ static void regular_syscall_enter(struct pt_regs *regs, long id,
 	if(syscall_breaks_protection(tracee, regs, id)) {
 		printk(KERN_WARNING "monmod: <%d> system call attempted to "
 		       "alter memory protection of monitor area.\n", pid);
-		/* Replace the call with a harmless getpid(). We inject an
-		   -EPERM return on exit. */
-		SYSCALL_NO_REG(regs) = (unsigned long)__NR_exit_group;
-		SYSCALL_ARG0_REG(regs) = -EPERM;
-		tracee->entry_info.do_inject_return = true;
-		tracee->entry_info.inject_return = -EPERM;
+		syscall_entry_abort(regs, tracee);
 		return;
 	}
 	if(!monmod_syscall_is_active(id)) {
@@ -175,6 +181,19 @@ static void regular_syscall_enter(struct pt_regs *regs, long id,
 	tracee->entry_info.do_log = true;
 	printk(KERN_INFO "monmod: <%d> >> Enter system call (%lu) from %px.\n", 
 	       pid, id, (void __user *)PC_REG(regs));
+#endif
+
+#if MONMOD_MONITOR_PROTECTION == MONMOD_MONITOR_FLAG_PROTECTED
+	hash = hash_user_region(tracee->config.monitor_start,
+	                        tracee->config.monitor_start
+				 + tracee->config.monitor_len);
+	if(hash != tracee->monitor_hash) {
+		printk(KERN_WARNING "monmod: <%d> Monitor hashes do not agree"
+		       "(%llu != %llu); monitor was tampered with by "
+		       "unprivileged code.\n", pid, tracee->monitor_hash, hash);
+		syscall_entry_abort(regs, tracee);
+		return;
+	}
 #endif
 
 	/* Set up the registers and stack so we will continue in the monitoring 
@@ -294,6 +313,18 @@ static void sys_exit_probe(void *__data, struct pt_regs *regs,
 		       "(custom) with return value %lld.\n", pid, 
 		       tracee->entry_info.syscall_no, 
 		       (long long int)SYSCALL_RET_REG(regs));
+#endif
+#if MONMOD_MONITOR_PROTECTION == MONMOD_MONITOR_FLAG_PROTECTED
+		if(tracee->entry_info.syscall_no == __NR_monmod_reprotect) {
+			tracee->monitor_hash = 
+				hash_user_region(tracee->config.monitor_start,
+						 tracee->config.monitor_start
+						 + tracee->config.monitor_len);
+	#if MONMOD_LOG_VERBOSITY >= 2
+			printk(KERN_INFO "monmod: <%d> New monitor hash: "
+			       "%llu\n", pid, tracee->monitor_hash);
+	#endif
+		}
 #endif
 	} else {
 		regular_syscall_exit(regs, return_value, tracee);

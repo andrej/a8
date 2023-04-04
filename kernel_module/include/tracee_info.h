@@ -57,6 +57,7 @@ struct tracee {
 	struct intercepted_syscall entry_info;
 #if MONMOD_MONITOR_PROTECTION == MONMOD_MONITOR_FLAG_PROTECTED
 	enum tracee_protection_state protection_state;
+	u64 monitor_hash;
 #endif
 };
 

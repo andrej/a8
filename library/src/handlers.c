@@ -1878,7 +1878,7 @@ SYSCALL_ENTER_PROT(recvfrom) {
 	_scratch->addrlen_type  = BUFFER_TYPE(sizeof(socklen_t));
 	canonical->arg_flags[5] = ARG_FLAG_REPLICATE;
 	// return
-	canonical->ret_type     = IMMEDIATE_TYPE(int);
+	canonical->ret_type     = IMMEDIATE_TYPE(long);
 	canonical->ret_flags    = ARG_FLAG_REPLICATE;
 	return DISPATCH_LEADER | DISPATCH_NEEDS_REPLICATION | DISPATCH_CHECKED;
 }

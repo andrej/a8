@@ -19,8 +19,8 @@ extern size_t monmod_page_size;
 
 extern struct monitor monitor;
 
-/* The __end__ address is defined by the default GNU linker script. */
-extern char __end__;
+/* Defined by our linker script. */
+extern char __monitor_end;
 
 
 #endif

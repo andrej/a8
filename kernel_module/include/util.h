@@ -60,11 +60,13 @@ static inline int compare_user_region(const void __user *user_buffer,
 	const u64 *kernel_longs = (const u64 *)kernel_buffer;
 	const size_t u64_len = len/sizeof(u64);
 	size_t i = 0;
+	u64 v = 0;
 	if(!access_ok(VERIFY_READ, user_buffer, len)) {
 		return 0;
 	}
 	for(; i < u64_len; i++) {
-		if(user_longs[i] != kernel_longs[i]) {
+		get_user(v, user_longs + i);
+		if(v != kernel_longs[i]) {
 			return 1;
 		}
 	}

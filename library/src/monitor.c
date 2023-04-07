@@ -138,7 +138,7 @@ long monmod_handle_syscall(struct syscall_trace_func_stack * const stack)
 	if(policy_is_exempt(monitor.policy, &canonical, &monitor.env)) {
 #if VERBOSITY >= 3
 		SAFE_LOGF("Policy \"%s\" exempted system call from "
-		          "cross-checking.\n", monitor->policy->name);
+		          "cross-checking.\n", monitor.policy->name);
 #endif
 		dispatch &= ~DISPATCH_CHECKED & ~DISPATCH_DEFERRED_CHECK;
 		dispatch |= DISPATCH_UNCHECKED;
@@ -171,7 +171,7 @@ long monmod_handle_syscall(struct syscall_trace_func_stack * const stack)
 
 	if(dispatch & DISPATCH_NEEDS_REPLICATION) {
 #if VERBOSITY >= 4
-		if(monitor->is_leader) {
+		if(monitor.is_leader) {
 			SAFE_LOG("Appending replication information to "
 			         "batch.\n");
 		} else {
@@ -340,7 +340,7 @@ void register_monitor_in_kernel(struct monitor *monitor) {
 					      &code_len));
 	
 	start = code_start;
-	len = &__end__ - start;
+	len = &__monitor_end - start;
 
 	protected_code_len = &__unprotected_start - code_start;
 	protected_data_start = &__protected_state_start;

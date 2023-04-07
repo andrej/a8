@@ -41,6 +41,11 @@ SECTIONS
 INSERT AFTER .data;
 
 SECTIONS {
-      __start__ = .;
+   __monitor_start = .;
 }
 INSERT BEFORE .hash;  
+
+SECTIONS {
+   __monitor_end = .;
+}
+INSERT AFTER .bss;

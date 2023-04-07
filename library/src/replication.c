@@ -2,10 +2,18 @@
 #include "batched_communication.h"
 
 
+
 /* ************************************************************************** *
- * Internal Forward Declarations                                              *
+ * Internal Forward Declarations / Globals                                    *
  * ************************************************************************** */
 
+//__attribute__((section("protected_state")))
+struct batch_communicator preallocated_batch_comm;
+
+char preallocated_batch_comm_memory[PREALLOCATED_REPLICATION_SZ];
+
+/* This buffer does not need to be "protected", since its value is overwritten
+   on every system call. */
 char cross_check_buffer[CROSS_CHECK_BUFFER_SZ];
 
 static char *serialize_args(size_t *len, struct syscall_info *canonical);
@@ -152,16 +160,22 @@ int replication_init(struct monitor * const monitor, size_t flush_after)
 		Z_TRY(leader_peer = comm_get_peer(&monitor->comm, 
 		                                  monitor->leader_id));
 	}
-	Z_TRY(monitor->batch_comm = init_batch_comm(&monitor->comm, leader_peer, 
-	                                            PREALLOCATED_REPLICATION_SZ, 
-				                    flush_after));
+	monitor->batch_comm = &preallocated_batch_comm;
+
+	NZ_TRY(init_batch_comm_at(&preallocated_batch_comm,
+	                          preallocated_batch_comm_memory,
+	                          &monitor->comm, leader_peer, 
+				  PREALLOCATED_REPLICATION_SZ, 
+				  flush_after));
 	return 0;
 }
 
 void replication_destroy(struct monitor * const monitor)
 {
 	SAFE_NZ_TRY(batch_comm_flush(monitor->batch_comm));	
-	free_batch_comm(monitor->batch_comm);
+	if(monitor->batch_comm != &preallocated_batch_comm) {
+		free_batch_comm(monitor->batch_comm);
+	}
 }
 
 int replicate_results(const struct monitor * const monitor,

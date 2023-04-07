@@ -6,7 +6,9 @@
 #include "vma_redirect.h"
 #include "util.h"
 
+#ifndef MAX_N_PEERS
 #define MAX_N_PEERS 8
+#endif
 
 enum peer_status {
 	PEER_PENDING,

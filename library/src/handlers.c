@@ -27,6 +27,7 @@
 
 // These variables hold the scratch values between system call entry and exit
 // handlers
+__attribute__((section("unprotected_data")))
 char handler_scratch_buffer[HANDLER_SCRATCH_BUFFER_SZ] = {};
 void *next_preallocated = handler_scratch_buffer;
 
@@ -2201,6 +2202,7 @@ SYSCALL_EXIT_PROT(fork)
 
 SYSCALL_ENTER_PROT(clone)
 {
+#if !MEASURE_TRACING_OVERHEAD
 	alloc_scratch(sizeof(struct communicator));
 	struct communicator *child_comm = (struct communicator *)*scratch;
 
@@ -2235,11 +2237,13 @@ SYSCALL_ENTER_PROT(clone)
 	SAFE_NZ_TRY_EXCEPT(monitor_arbitrate_child_comm(&monitor, child_comm),
 	                   return DISPATCH_ERROR);
 
+#endif
 	return DISPATCH_EVERYONE | DISPATCH_CHECKED;
 }
 
 SYSCALL_EXIT_PROT(clone)
 {
+#if !MEASURE_TRACING_OVERHEAD
 	struct communicator *child_comm = (struct communicator *)*scratch;
 	struct pid_info *pid_info = NULL;
 	pid_t child_pid = (pid_t)actual->ret;
@@ -2260,6 +2264,7 @@ SYSCALL_EXIT_PROT(clone)
 		SAFE_NZ_TRY(monitor_child_fix_up(&monitor, child_comm));
 	}
 	free_scratch();
+#endif
 	return 0;
 }
 

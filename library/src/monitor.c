@@ -23,6 +23,9 @@
  * Global Variables                                                           *
  * ************************************************************************** */
 
+#if !MEASURE_TRACING_OVERHEAD
+__attribute__((section("protected_state")))
+#endif
 struct monitor monitor;
 
 
@@ -31,6 +34,7 @@ struct monitor monitor;
  * ************************************************************************** */
 
 char syscall_log_buf[1024];
+bool is_exiting = false;
 
 
 /* ************************************************************************** *
@@ -65,23 +69,17 @@ static void terminate(struct monitor * const monitor);
 
 /* All monitored system calls go through this function, registered with the
    monmod_init system call. */
-long monmod_handle_syscall(struct syscall_trace_func_stack *stack)
-{
-	return monitor_handle_syscall(&monitor, stack);
-}
-
-long monitor_handle_syscall(struct monitor * const monitor,
-                            struct syscall_trace_func_stack * const stack)
+long monmod_handle_syscall(struct syscall_trace_func_stack * const stack)
 {
 #if MEASURE_TRACING_OVERHEAD
 	return monmod_trusted_syscall(SYSCALL_NO_REG(&stack->regs), 
            SYSCALL_ARG0_REG(&stack->regs), SYSCALL_ARG1_REG(&stack->regs), 
            SYSCALL_ARG2_REG(&stack->regs), SYSCALL_ARG3_REG(&stack->regs), 
            SYSCALL_ARG4_REG(&stack->regs), SYSCALL_ARG5_REG(&stack->regs));
-#endif
+#else
 
-	if(monitor->is_exiting) {
-		terminate(monitor);
+	if(is_exiting) {
+		terminate(&monitor);
 	}
 
 	int s = 0;
@@ -98,8 +96,8 @@ long monitor_handle_syscall(struct monitor * const monitor,
 #endif
 
 #if ENABLE_CHECKPOINTING
-	restore_checkpoint_if_needed(&monitor->checkpoint_env, 
-	                             monitor->conf.restore_interval);
+	restore_checkpoint_if_needed(&monitor.checkpoint_env, 
+	                             monitor.conf.restore_interval);
 #endif
 #if NO_HANDLER_TERMINATES
 	if(NULL == handler) {
@@ -122,7 +120,7 @@ long monitor_handle_syscall(struct monitor * const monitor,
 	/* Phase 1: Determine call dispatch type through entry handler. */
 #if VERBOSITY >= 2
 	SAFE_LZ_TRY(gettimeofday(&tv, NULL));
-	timersub(&tv, &monitor->start_tv, &rel_tv);
+	timersub(&tv, &monitor.start_tv, &rel_tv);
 	if(NULL != handler) {
 		SAFE_LOGF("[%3ld.%06ld] >> %s (%ld) -- enter from PC %p, PID "
 			  "%d.\n", rel_tv.tv_sec, rel_tv.tv_usec,
@@ -134,10 +132,10 @@ long monitor_handle_syscall(struct monitor * const monitor,
 #endif
 	dispatch = DISPATCH_UNCHECKED | DISPATCH_EVERYONE;	
 	if(NULL != handler && NULL != handler->enter) {
-		dispatch = handler->enter(&monitor->env, handler, &actual, 
+		dispatch = handler->enter(&monitor.env, handler, &actual, 
 		                          &canonical, &handler_scratch_space);
 	}
-	if(policy_is_exempt(monitor->policy, &canonical, &monitor->env)) {
+	if(policy_is_exempt(monitor.policy, &canonical, &monitor.env)) {
 #if VERBOSITY >= 3
 		SAFE_LOGF("Policy \"%s\" exempted system call from "
 		          "cross-checking.\n", monitor->policy->name);
@@ -149,23 +147,23 @@ long monitor_handle_syscall(struct monitor * const monitor,
 
 	/* Phase 2: Cross-check system call & arguments with other variants. */
 	if(dispatch & (DISPATCH_CHECKED | DISPATCH_DEFERRED_CHECK)) {
-		SAFE_LZ_TRY(s = cross_check_args(monitor, &canonical));
+		SAFE_LZ_TRY(s = cross_check_args(&monitor, &canonical));
 		if(0 == s) {
-			syscall_handle_divergence(monitor,
+			syscall_handle_divergence(&monitor,
 			                          handler, &actual, &canonical);
 		}
 	}
 
 	/* Phase 3: Execute system call locally if needed. */
 	if(dispatch & DISPATCH_EVERYONE || 
-	   ((dispatch & DISPATCH_LEADER) && monitor->is_leader)) {
+	   ((dispatch & DISPATCH_LEADER) && monitor.is_leader)) {
 		syscall_execute_locally(handler, &actual, &canonical);
 		if(NULL != handler && NULL != handler->post_call) {
 			/* This callback gets called whenever a system call has
 			   actually been issued locally. It can be used to
 			   normalize results in a canonical form before 
 			   replication, from actual into canonical. */
-			handler->post_call(&monitor->env, handler, dispatch, 
+			handler->post_call(&monitor.env, handler, dispatch, 
 			                   &actual, &canonical, 
 					   &handler_scratch_space);
 		}
@@ -185,13 +183,13 @@ long monitor_handle_syscall(struct monitor * const monitor,
 		   be the same across all nodes. It is the exit handler's 
 		   responsibility to copy this back to the actual results as
 		   appropriate. */
-		SAFE_NZ_TRY(replicate_results(monitor, &canonical));
+		SAFE_NZ_TRY(replicate_results(&monitor, &canonical));
 	}
 
 	/* Phase 4: Run exit handlers, potentially denormalizing results. */
 	if(NULL != handler && NULL != handler->exit 
 	   && !(dispatch & DISPATCH_SKIP)) {
-		s = handler->exit(&monitor->env, handler, dispatch, &actual, 
+		s = handler->exit(&monitor.env, handler, dispatch, &actual, 
 		                  &canonical, &handler_scratch_space);
 		if(0 != s) {
 			SAFE_WARNF("Exit handler returned error %d.\n", s);
@@ -201,12 +199,13 @@ long monitor_handle_syscall(struct monitor * const monitor,
 
 #if VERBOSITY >= 2
 	SAFE_LZ_TRY(gettimeofday(&tv, NULL));
-	timersub(&tv, &monitor->start_tv, &rel_tv);
+	timersub(&tv, &monitor.start_tv, &rel_tv);
 	SAFE_LOGF("[%3ld.%06ld] << Return %ld.\n\n", rel_tv.tv_sec, 
 	          rel_tv.tv_usec, actual.ret);
 #endif
 
 	return actual.ret;
+#endif
 }
 
 static int
@@ -324,33 +323,47 @@ static void syscall_execute_locally(struct syscall_handler const *const handler,
  * ************************************************************************** */
 
 void register_monitor_in_kernel(struct monitor *monitor) {
-	void *monitor_start = NULL; 
-	size_t monitor_len = 0, protected_len = 0;
+	char *start = NULL, 
+	     *code_start = NULL, 
+	     *protected_data_start = NULL; 
+	size_t len = 0,
+	       code_len = 0, 
+	       protected_code_len = 0,
+	       protected_data_len = 0;
+	
 
 	/* Find the pages this module is loaded on. These pages will be 
 	   protected by the kernel to remain inaccessible for other parts of
 	   the program. */
 	SAFE_NZ_TRY(find_mapped_region_bounds(&monmod_library_init, 
-	                                      &monitor_start, &monitor_len));
+	                                      (void **)&code_start, 
+					      &code_len));
+	
+	start = code_start;
+	len = &__end__ - start;
+
+	protected_code_len = &__unprotected_start - code_start;
+	protected_data_start = &__protected_state_start;
+	protected_data_len = &__protected_state_end - protected_data_start;
 
 	/* Sanity check that our linker script worked and, after loading,
 	   the "unprotected" section is the very last page-aligned sub-section
 	   of the loaded executable segment. */
-	SAFE_Z_TRY(monitor_len == (monitor_len & ~(monmod_page_size-1))
-	           && __unprotected_end == monitor_start + monitor_len
-	           && (void *)__unprotected_start > monitor_start 
-	           && (void *)__unprotected_start < monitor_start+monitor_len);
-	protected_len = (void *)__unprotected_start - monitor_start;
-
-	monitor->start = monitor_start;
-	monitor->len = monitor_len;
-	monitor->protected_len = protected_len;
-
+	SAFE_Z_TRY(code_len == (code_len & ~(monmod_page_size-1))
+	           && &__unprotected_end == code_start + code_len
+	           && &__unprotected_start > code_start 
+	           && &__unprotected_start < code_start + code_len
+		   && protected_data_len > 0
+		   && len > 0 
+		   && start < protected_data_start
+		   && protected_data_start + protected_data_len < start + len);
+	
 	SAFE_NZ_TRY(monmod_init(monitor->env.pid->local_pid, 
-	                        monitor_start, 
-	                        protected_len,
 	                        &monmod_syscall_trusted_addr,
-	                        &monmod_syscall_trace_enter));
+	                        &monmod_syscall_trace_enter,
+				start, len,
+	                        code_start, protected_code_len,
+				protected_data_start, protected_data_len));
 }
 
 int monitor_init_comm(struct monitor *monitor, int own_id, struct config *conf)
@@ -431,7 +444,7 @@ int
 __attribute__((section("unprotected")))
 monitor_destroy(struct monitor *monitor)
 {
-	monitor->is_exiting = true;
+	is_exiting = true;
 	unprotected_funcs.exit(0);  /* any system call that gets us into
 	                               monmod_handle_syscall will do here. */
 }

@@ -28,46 +28,87 @@ int sys_monmod_init(struct pt_regs *regs, struct tracee *tracee)
 	const pid_t pid = (pid_t)SYSCALL_ARG0_REG(regs);
 	/* Even though currently a process can only put itself into monitored
 	   mode, we add the pid argument for possible future extensions. */
-	void __user * const monitor_start = \
-		(void __user *)SYSCALL_ARG1_REG(regs);
-	const size_t monitor_len = (size_t)SYSCALL_ARG2_REG(regs);
 	void __user * const trusted_syscall_addr = \
-		(void __user *)SYSCALL_ARG3_REG(regs);
+		(void __user *)SYSCALL_ARG1_REG(regs);
 	void __user * const monitor_enter_addr = \
-		(void __user *)SYSCALL_ARG4_REG(regs);
+		(void __user *)SYSCALL_ARG2_REG(regs);
+	struct monmod_init_args __user * const user_addr_ranges = \
+		(struct monmod_init_args __user *)SYSCALL_ARG3_REG(regs);
+	struct monmod_monitor_addr_ranges addr_ranges;
+
+	TRY(copy_from_user(&addr_ranges, user_addr_ranges, sizeof(addr_ranges)),
+	    return -EINVAL);
 
 	// Sanity checks first
-	if(pid != current->pid || NULL == monitor_start
-	   || !BETWEEN(trusted_syscall_addr, monitor_start, 
-	               monitor_start+monitor_len)
-	   || !BETWEEN(monitor_enter_addr, monitor_start, 
-	               monitor_start+monitor_len)) {
+	if(pid != current->pid 
+	   || NULL == addr_ranges.overall_start
+	   || NULL == addr_ranges.code_start
+	   || NULL == addr_ranges.protected_data_start
+	   || !BETWEEN(addr_ranges.code_start, 
+	               addr_ranges.overall_start,
+		       addr_ranges.overall_start + addr_ranges.overall_len)
+	   || !BETWEEN(addr_ranges.code_start + addr_ranges.code_len,
+	               addr_ranges.overall_start,
+		       addr_ranges.overall_start + addr_ranges.overall_len)
+	   || !BETWEEN(addr_ranges.protected_data_start 
+	               + addr_ranges.protected_data_len,
+	               addr_ranges.overall_start,
+		       addr_ranges.overall_start + addr_ranges.overall_len)
+	   || !BETWEEN(trusted_syscall_addr, addr_ranges.code_start, 
+	               addr_ranges.code_start+addr_ranges.code_len)
+	   || !BETWEEN(monitor_enter_addr, addr_ranges.code_start, 
+	               addr_ranges.code_start+addr_ranges.code_len)) {
 		printk(KERN_WARNING "monmod: <%d> Sanity check failed for "
-		       "monmod_init(%d, %px, %lx, %px, %px) system call.\n",
-		       current->pid, pid, monitor_start, monitor_len, 
-		       trusted_syscall_addr, monitor_enter_addr);
+		       "monmod_init(%d, %px, %px, %px) system call, with \n"
+		       " overall_start        = %px, overall_len        = %ld\n"
+		       " code_start           = %px, code_len           = %ld\n"
+		       " protected_data_start = %px, protected_data_len = "
+		       "%ld\n",
+		       current->pid, pid, trusted_syscall_addr, 
+		       monitor_enter_addr, user_addr_ranges,
+		       addr_ranges.overall_start, addr_ranges.overall_len,
+		       addr_ranges.code_start, addr_ranges.code_len,
+		       addr_ranges.protected_data_start, 
+		       addr_ranges.protected_data_len);
 		/* We do not check for a PC between the monitor_start and 
 		   monitor end addresses; our checkpointing code initializes
 		   monmod from outside of this range ("unprotected" section). */
 		return -EINVAL;
 	}
 
-	tracee->config.monitor_start = monitor_start;
-	tracee->config.monitor_len = monitor_len;
-	tracee->config.trusted_addr = trusted_syscall_addr;
-	tracee->config.trace_func_addr = monitor_enter_addr;
+	tracee->trusted_addr = trusted_syscall_addr;
+	tracee->trace_func_addr = monitor_enter_addr;
+	memcpy(&tracee->addrs, &addr_ranges, sizeof(addr_ranges));
 
 	tracee->config.active = false; /* until first reprotect call */
 
-#if MONMOD_MONITOR_PROTECTION == MONMOD_MONITOR_FLAG_PROTECTED
+#if MONMOD_MONITOR_PROTECTION & MONMOD_MONITOR_FLAG_PROTECTED
 	tracee->protection_state = TRACEE_UNINITIALIZED;
 #endif
+#if MONMOD_MONITOR_PROTECTION & MONMOD_MONITOR_COMPARE_PROTECTED
+	tracee->monitor_code_copy = 
+		kmalloc(addr_ranges.protected_data_len, GFP_KERNEL);
+	if(NULL == tracee->monitor_code_copy) {
+		printk(KERN_WARNING "monmod: <%d> No memory to copy %ld bytes "
+		       "of monitor pages into.\n", current->pid, 
+		       addr_ranges.protected_data_len);
+		return -ENOMEM;
+	}
+#endif
 
-	printk(KERN_INFO "monmod: <%d> Added tracing. Monitor: %px - %px. "
-	       "Trusted syscall address: %px. Trace function address: %px.\n",
-	       current->pid, tracee->config.monitor_start,
-	       tracee->config.monitor_start + tracee->config.monitor_len,
-	       tracee->config.trusted_addr, tracee->config.trace_func_addr);
+	printk(KERN_INFO "monmod: <%d> Registered monitor: \n"
+		"    Trusted syscall address: %px \n"
+		"    Trace function address:  %px \n"
+		"    overall_start:           %px    len:  %ld\n"
+		"    code_start:              %px    len:  %ld\n"
+		"    protected_data_start:    %px    len:  %ld\n",
+		pid, 
+		trusted_syscall_addr, 
+		monitor_enter_addr, 
+		addr_ranges.overall_start, addr_ranges.overall_len,
+		addr_ranges.code_start, addr_ranges.code_len,
+		addr_ranges.protected_data_start, 
+		addr_ranges.protected_data_len);
 
 	return 0;
 }
@@ -134,8 +175,8 @@ int sys_monmod_reprotect(struct pt_regs *regs, struct tracee *tracee)
 		info->ret_addr = reprotect_stack_addr;
 	}
 
-	if(BETWEEN(info->ret_addr, tracee->config.monitor_start,
-	           tracee->config.monitor_start + tracee->config.monitor_len)) {
+	if(BETWEEN(info->ret_addr, tracee->addrs.code_start,
+	           tracee->addrs.code_start + tracee->addrs.code_len)) {
 		printk(KERN_WARNING "monmod: <%d> cannot return into monitor "
 		       "after reprotect call -- that memory is going to be "
 		       "inaccessible.\n", current->pid);
@@ -143,10 +184,10 @@ int sys_monmod_reprotect(struct pt_regs *regs, struct tracee *tracee)
 	}
 
 	SYSCALL_NO_REG(regs) = __NR_getpid;
-#if MONMOD_MONITOR_PROTECTION == MONMOD_MONITOR_MPROTECTED
+#if MONMOD_MONITOR_PROTECTION & MONMOD_MONITOR_MPROTECTED
 	SYSCALL_NO_REG(regs) = __NR_mprotect;
-	SYSCALL_ARG0_REG(regs) = (long)tracee->config.monitor_start;
-	SYSCALL_ARG1_REG(regs) = (long)tracee->config.monitor_len;
+	SYSCALL_ARG0_REG(regs) = (long)tracee->addrs.code_start;
+	SYSCALL_ARG1_REG(regs) = (long)tracee->addrs.code_len;
 	SYSCALL_ARG2_REG(regs) = PROT_READ;
 	SYSCALL_ARG3_REG(regs) = 0;
 	SYSCALL_ARG4_REG(regs) = 0;
@@ -156,17 +197,29 @@ int sys_monmod_reprotect(struct pt_regs *regs, struct tracee *tracee)
 
 	tracee->config.active = true;
 
-#if MONMOD_MONITOR_PROTECTION == MONMOD_MONITOR_FLAG_PROTECTED
+#if MONMOD_MONITOR_PROTECTION & MONMOD_MONITOR_FLAG_PROTECTED
 	tracee->protection_state = TRACEE_NOT_IN_MONITOR;
 #endif
 
-#if MONMOD_MONITOR_PROTECTION == MONMOD_MONITOR_MPROTECTED \
+#if MONMOD_MONITOR_PROTECTION & MONMOD_MONITOR_MPROTECTED \
     && MONMOD_LOG_VERBOSITY >= 1
 	printk(KERN_INFO "monmod: <%d> Reprotecting monitor with "
 	       "mprotect(%px, %lx, %x).\n", current->pid,
 	       (void *)SYSCALL_ARG0_REG(regs), 
 	       (size_t)SYSCALL_ARG1_REG(regs), 
 	       (int)SYSCALL_ARG2_REG(regs));
+#endif
+
+#if MONMOD_MONITOR_PROTECTION & MONMOD_MONITOR_HASH_PROTECTED
+	tracee->monitor_hash = 
+		hash_user_region(tracee->addrs.protected_data_start, 
+		                 tracee->addrs.protected_data_len);
+#endif
+#if MONMOD_MONITOR_PROTECTION & MONMOD_MONITOR_COMPARE_PROTECTED
+	TRY(copy_from_user(tracee->monitor_code_copy, 
+	                   tracee->addrs.protected_data_start, 
+	                   tracee->addrs.protected_data_len),
+	    return -ENOMEM);
 #endif
 
 	return 0;
@@ -193,7 +246,7 @@ void sys_monmod_reprotect_exit(struct pt_regs *regs, struct tracee *tracee)
 	}
 
 	mprotect_return_value = (unsigned long)SYSCALL_RET_REG(regs);
-#if MONMOD_MONITOR_PROTECTION == MONMOD_MONITOR_MPROTECTED
+#if MONMOD_MONITOR_PROTECTION & MONMOD_MONITOR_MPROTECTED
 	if(0 != mprotect_return_value) {
 		printk(KERN_WARNING "monmod: <%d> mprotect failed with return "
 		       "value %ld.\n", current->pid, mprotect_return_value);
@@ -209,7 +262,7 @@ void sys_monmod_reprotect_exit(struct pt_regs *regs, struct tracee *tracee)
 		tracee->entry_info.do_inject_return = false;
 	}
 
-#if MONMOD_MONITOR_PROTECTION == MONMOD_MONITOR_MPROTECTED \
+#if MONMOD_MONITOR_PROTECTION & MONMOD_MONITOR_MPROTECTED \
     && MONMOD_LOG_VERBOSITY >= 1
 	printk(KERN_INFO "monmod: <%d> mprotect returned with %ld, returning "
 	       "to address %px with return value %lld.\n", current->pid, 

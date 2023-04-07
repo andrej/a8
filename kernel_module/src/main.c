@@ -54,7 +54,8 @@ static int redirect_to_user_trace_func(void __user *target,
  * ensures that upon the return to the rest of the program, the monitor is
  * reprotected.
  */
-static void unprotect_monitor_enter(struct tracee *tracee, struct pt_regs *regs)
+static inline void 
+unprotect_monitor_enter(struct tracee *tracee, struct pt_regs *regs)
 {
 	tracee->config.active = false;
 
@@ -64,8 +65,8 @@ static void unprotect_monitor_enter(struct tracee *tracee, struct pt_regs *regs)
 	tracee->protection_state = TRACEE_IN_MONITOR;
 #elif MONMOD_MONITOR_PROTECTION == MONMOD_MONITOR_MPROTECTED
 	SYSCALL_NO_REG(regs) = __NR_mprotect;
-	SYSCALL_ARG0_REG(regs) = (long)tracee->config.monitor_start;
-	SYSCALL_ARG1_REG(regs) = (long)tracee->config.monitor_len;
+	SYSCALL_ARG0_REG(regs) = (long)tracee->addrs.code_start;
+	SYSCALL_ARG1_REG(regs) = (long)tracee->addrs.code_len;
 	SYSCALL_ARG2_REG(regs) = PROT_READ | PROT_EXEC;
 	SYSCALL_ARG3_REG(regs) = 0;
 	SYSCALL_ARG4_REG(regs) = 0;
@@ -73,8 +74,8 @@ static void unprotect_monitor_enter(struct tracee *tracee, struct pt_regs *regs)
 #if MONMOD_LOG_VERBOSITY >= 1
 	printk(KERN_INFO "monmod: <%d> Unprotecting pages with "
 	       "mprotect(%px, %lx, %x)\n", current->pid, 
-	       tracee->config.monitor_start,
-	       tracee->config.monitor_len,
+	       tracee->addrs.code_start,
+	       tracee->addrs.code_len,
 	       PROT_READ | PROT_EXEC);
 #endif
 #endif
@@ -92,9 +93,9 @@ static inline bool syscall_breaks_protection(
 		struct tracee *tracee,
 		struct pt_regs *regs, long id)
 {
-	void __user * const monitor_start = tracee->config.monitor_start;
+	void __user * const monitor_start = tracee->addrs.overall_start;
 	void __user * const monitor_end = monitor_start 
-	                                  + tracee->config.monitor_len;
+	                                  + tracee->addrs.overall_len;
 
 #if MONMOD_MONITOR_PROTECTION == MONMOD_MONITOR_FLAG_PROTECTED
 	if(BETWEEN((void __user *)PC_REG(regs), monitor_start, monitor_end)) {
@@ -146,7 +147,11 @@ static void syscall_entry_abort(struct pt_regs *regs, struct tracee *tracee)
 static void regular_syscall_enter(struct pt_regs *regs, long id,
                                   struct tracee *tracee)
 {
-#if MONMOD_MONITOR_PROTECTION == MONMOD_MONITOR_FLAG_PROTECTED
+#if MONMOD_MONITOR_PROTECTION & (MONMOD_MONITOR_HASH_PROTECTED \
+                                 | MONMOD_MONITOR_COMPARE_PROTECTED)
+	int s = 0;
+#endif
+#if MONMOD_MONITOR_PROTECTION & MONMOD_MONITOR_HASH_PROTECTED
 	u64 hash = 0;
 #endif
 	const pid_t pid = current->pid;
@@ -183,14 +188,23 @@ static void regular_syscall_enter(struct pt_regs *regs, long id,
 	       pid, id, (void __user *)PC_REG(regs));
 #endif
 
-#if MONMOD_MONITOR_PROTECTION == MONMOD_MONITOR_FLAG_PROTECTED
-	hash = hash_user_region(tracee->config.monitor_start,
-	                        tracee->config.monitor_start
-				 + tracee->config.monitor_len);
-	if(hash != tracee->monitor_hash) {
-		printk(KERN_WARNING "monmod: <%d> Monitor hashes do not agree"
-		       "(%llu != %llu); monitor was tampered with by "
-		       "unprivileged code.\n", pid, tracee->monitor_hash, hash);
+	/* Check whether monitor code was altered between system calls.
+	   If so, abort since monitor integrity is compromised. */
+#if MONMOD_MONITOR_PROTECTION & MONMOD_MONITOR_HASH_PROTECTED
+	hash = hash_user_region(tracee->addrs.protected_data_start,
+	                        tracee->addrs.protected_data_len);
+	s = (tracee->monitor_hash == hash ? 0 : 1);
+#endif
+#if MONMOD_MONITOR_PROTECTION & MONMOD_MONITOR_COMPARE_PROTECTED
+	s = compare_user_region(tracee->addrs.protected_data_start,
+	                        tracee->monitor_code_copy,
+				tracee->addrs.protected_data_len);
+#endif
+#if MONMOD_MONITOR_PROTECTION & (MONMOD_MONITOR_HASH_PROTECTED \
+                                 | MONMOD_MONITOR_COMPARE_PROTECTED)
+	if(0 != s) {
+		printk(KERN_WARNING "monmod: <%d> Monitor code was altered.\n",
+		       pid);
 		syscall_entry_abort(regs, tracee);
 		return;
 	}
@@ -198,7 +212,7 @@ static void regular_syscall_enter(struct pt_regs *regs, long id,
 
 	/* Set up the registers and stack so we will continue in the monitoring 
 	   function upon kernel exit. */
-	redirect_to_user_trace_func(tracee->config.trace_func_addr, regs);
+	redirect_to_user_trace_func(tracee->trace_func_addr, regs);
 
 	/* Change system call arguments to actually issue an mprotect call that
 	   allows execution of the otherwise protected region of monitor code.*/
@@ -313,18 +327,6 @@ static void sys_exit_probe(void *__data, struct pt_regs *regs,
 		       "(custom) with return value %lld.\n", pid, 
 		       tracee->entry_info.syscall_no, 
 		       (long long int)SYSCALL_RET_REG(regs));
-#endif
-#if MONMOD_MONITOR_PROTECTION == MONMOD_MONITOR_FLAG_PROTECTED
-		if(tracee->entry_info.syscall_no == __NR_monmod_reprotect) {
-			tracee->monitor_hash = 
-				hash_user_region(tracee->config.monitor_start,
-						 tracee->config.monitor_start
-						 + tracee->config.monitor_len);
-	#if MONMOD_LOG_VERBOSITY >= 2
-			printk(KERN_INFO "monmod: <%d> New monitor hash: "
-			       "%llu\n", pid, tracee->monitor_hash);
-	#endif
-		}
 #endif
 	} else {
 		regular_syscall_exit(regs, return_value, tracee);

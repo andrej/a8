@@ -32,7 +32,9 @@
  * Globals                                                                    *
  * ************************************************************************** */
 
+__attribute__((section("protected_state")))
 int monmod_log_fd = 0;
+__attribute__((section("protected_state")))
 size_t monmod_page_size = 0;
 
 
@@ -102,6 +104,8 @@ __attribute__((destructor))
 __attribute__((section("unprotected")))
 monmod_library_destroy()
 {
+#if !MEASURE_TRACING_OVERHEAD
 	unprotected_funcs.monitor_destroy(&monitor);
+#endif
 }
 

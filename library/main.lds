@@ -27,3 +27,20 @@ SECTIONS
 	}
 }
 INSERT AFTER .eh_frame;
+
+
+SECTIONS 
+{
+   protected_state ALIGN(0x1000):
+   {
+      __protected_state_start = .;
+      *(protected_state)
+      __protected_state_end = .;
+   }
+}
+INSERT AFTER .data;
+
+SECTIONS {
+      __start__ = .;
+}
+INSERT BEFORE .hash;  

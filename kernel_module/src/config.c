@@ -302,23 +302,6 @@ ssize_t _monmod_config_int_or_long_store(struct kobject *kobj,
  * Config Setting Store / Show Callbacks                                      *
  * ************************************************************************** */
 
-CONFIG_LONG_SHOW_FUN(trusted_addr, struct monmod_tracee_config, trusted_addr)
-CONFIG_LONG_STORE_FUN(trusted_addr, struct monmod_tracee_config, trusted_addr, 
-                      true)
-
-CONFIG_LONG_SHOW_FUN(monitor_start, struct monmod_tracee_config, monitor_start)
-CONFIG_LONG_STORE_FUN(monitor_start, struct monmod_tracee_config, monitor_start, 
-                      true)
-
-CONFIG_LONG_SHOW_FUN(monitor_len, struct monmod_tracee_config, monitor_len)
-CONFIG_LONG_STORE_FUN(monitor_len, struct monmod_tracee_config, monitor_len, 
-                      true)
-
-CONFIG_LONG_SHOW_FUN(trace_func_addr, struct monmod_tracee_config, 
-                     trace_func_addr)
-CONFIG_LONG_STORE_FUN(trace_func_addr, struct monmod_tracee_config, 
-                      trace_func_addr, true)
-
 CONFIG_LONG_SHOW_FUN(active, struct monmod_config, active)
 CONFIG_LONG_STORE_FUN(active, struct monmod_config, active, false)
 

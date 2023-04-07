@@ -2,6 +2,7 @@
 #include "handler_table.h"
 
 #define POLICY_ARR_DEF(X) {#X, policy_ ## X ## _is_exempt},
+__attribute__((section("protected_state")))
 struct policy policies[] = {
 	POLICIES(POLICY_ARR_DEF)
 };

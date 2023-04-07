@@ -15,7 +15,6 @@ struct monitor {
 	int own_id;
 	int leader_id;
 	bool is_leader;
-	bool is_exiting;
 	struct config conf;
 	struct communicator comm;
 	struct batch_communicator *batch_comm;
@@ -23,16 +22,10 @@ struct monitor {
 	struct policy *policy;
 	struct timeval start_tv;
 	unsigned long ancestry;  // just for log numbers
-	void *start;  // start address
-	size_t len;  // code pages length
-	size_t protected_len;  // length of protected code pages
 #if ENABLE_CHECKPOINTING
 	struct checkpoint_env checkpoint_env;
 #endif
 };
-
-long monitor_handle_syscall(struct monitor * const monitor,
-                            struct syscall_trace_func_stack * const stack);
 
 void register_monitor_in_kernel();
 

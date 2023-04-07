@@ -56,6 +56,8 @@
 #define SAFE_LOGF_LEN(...)
 #define SAFE_LOGF(...)
 #define SAFE_LOG(...)
+#define SAFE_WARNF(...)
+#define SAFE_WARN(...)
 #endif
 
 #define TRY_EXCEPT_F(x, rhs, except, print_func) { \

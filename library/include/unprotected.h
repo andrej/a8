@@ -18,8 +18,8 @@
    start and end address of any functions marked section("unprotected").
    Functions in this section will remain accessible even when the rest of the
    monitor is memory-protected. */
-void __unprotected_start();
-void __unprotected_end();
+extern char __unprotected_start;
+extern char __unprotected_end;
 
 /* Since the PLT is inside the protected monitor, unprotected code cannot
    indirectly call other functions through the PLT (it would lead to a 

@@ -9,4 +9,5 @@ monmod-y := \
 	src/util.o \
 	src/tracepoint_helpers.o \
 	src/custom_syscalls.o \
-	src/tracee_info.o
+	src/tracee_info.o \
+	src/xxhash.o

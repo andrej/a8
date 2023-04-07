@@ -25,9 +25,12 @@
  * This makes the system insecure, since the tracee application can write to
  * the monitor address range and hence compromise the monitor.
  */
-#define MONMOD_MONITOR_UNPROTECTED 0
-#define MONMOD_MONITOR_MPROTECTED 1
-#define MONMOD_MONITOR_FLAG_PROTECTED 2
-#define MONMOD_MONITOR_PROTECTION MONMOD_MONITOR_FLAG_PROTECTED
+#define MONMOD_MONITOR_UNPROTECTED       0
+#define MONMOD_MONITOR_MPROTECTED        1
+#define MONMOD_MONITOR_FLAG_PROTECTED    2
+#define MONMOD_MONITOR_HASH_PROTECTED    4
+#define MONMOD_MONITOR_COMPARE_PROTECTED 8
+#define MONMOD_MONITOR_PROTECTION        (MONMOD_MONITOR_FLAG_PROTECTED \
+                                          | MONMOD_MONITOR_COMPARE_PROTECTED)
 
 #endif

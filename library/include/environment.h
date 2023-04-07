@@ -8,7 +8,14 @@
 #include "util.h"
 #include "list.h"
 
+#ifndef MAX_N_DESCRIPTOR_MAPPINGS
 #define MAX_N_DESCRIPTOR_MAPPINGS 256
+#endif
+
+#ifndef MAX_N_PID_MAPPINGS
+#define MAX_N_PID_MAPPINGS 256
+#endif
+
 #define DI_FREE              0x0  // DI stands for Descriptor Information
 #define DI_PRESENT           0x1
 #define DI_OPENED_LOCALLY    0x2 
@@ -36,7 +43,6 @@ struct descriptor_info_list list_struct_def(struct descriptor_info,
                                             MAX_N_DESCRIPTOR_MAPPINGS);
 
 
-#define MAX_N_PID_MAPPINGS 256
 #define CANONICAL_PID_BASE 1000
 struct pid_info {
 	pid_t local_pid;

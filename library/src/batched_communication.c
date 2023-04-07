@@ -19,26 +19,41 @@ struct batch_communicator *init_batch_comm(const struct communicator *comm,
 	struct batch_communicator *bc = NULL;
 	Z_TRY_EXCEPT(bc = calloc(1, sizeof(*bc) + capacity),
 	             return NULL);
+	Z_TRY_EXCEPT(init_batch_comm_at(bc, ((char *)bc) + sizeof(*bc),
+	                                comm, recv_peer, capacity, 
+	                                flush_after),
+		     return NULL);
+	return bc;
+}
+
+int init_batch_comm_at(struct batch_communicator *bc,
+                       char *preallocated_memory,
+                       const struct communicator *comm, 
+                       const struct peer *recv_peer,
+                       size_t capacity,
+                       size_t flush_after)
+{
 	bc->comm = comm;
 	bc->recv_peer = recv_peer;
 	bc->flush_after = flush_after;
-	bc->preallocated_batch.capacity = capacity;
-	bc->preallocated_batch.length = 0;
-	bc->current_batch = &bc->preallocated_batch;
-	bc->current_item = bc->preallocated_batch.items;
-	return bc;
+	bc->preallocated_batch = (struct batch *)preallocated_memory;
+	bc->preallocated_batch->capacity = capacity;
+	bc->preallocated_batch->length = 0;
+	bc->current_batch = bc->preallocated_batch;
+	bc->current_item = bc->preallocated_batch->items;
+	return 0;
 }
 
 static void free_current_batch(struct batch_communicator *bc)
 {
-	if(bc->current_batch != &bc->preallocated_batch)
+	if(bc->current_batch != bc->preallocated_batch)
 	{
 		safe_free(bc->current_batch,
 		          sizeof(*bc->current_batch)+bc->current_batch->length);
-		bc->current_batch = &bc->preallocated_batch;
+		bc->current_batch = bc->preallocated_batch;
 	}
-	bc->preallocated_batch.length = 0;
-	bc->current_item = bc->preallocated_batch.items;
+	bc->preallocated_batch->length = 0;
+	bc->current_item = bc->preallocated_batch->items;
 }
 
 void free_batch_comm(struct batch_communicator *bc)
@@ -56,11 +71,11 @@ void free_batch_comm(struct batch_communicator *bc)
 static 
 struct batch *alloc_current_batch(struct batch_communicator *bc, size_t len)
 {
-	SAFE_Z_TRY(bc->current_batch == &bc->preallocated_batch
-	           && bc->preallocated_batch.length == 0);  // assert
+	SAFE_Z_TRY(bc->current_batch == bc->preallocated_batch
+	           && bc->preallocated_batch->length == 0);  // assert
 	struct batch *b;
-	if(len <= bc->preallocated_batch.capacity) {
-		b = &bc->preallocated_batch;
+	if(len <= bc->preallocated_batch->capacity) {
+		b = bc->preallocated_batch;
 		b->length = 0;
 	} else {
 		SAFE_Z_TRY(b = safe_malloc(sizeof(*bc->current_batch) + len));
@@ -192,7 +207,7 @@ void batch_comm_cancel_reserved(struct batch_communicator *bc)
 	bc->current_batch->length -= sizeof(*bc->current_item)
 	                             + bc->current_item->length;
 	SAFE_LZ_TRY(bc->current_batch->length);  // assert
-	if(bc->current_batch != &bc->preallocated_batch
+	if(bc->current_batch != bc->preallocated_batch
 	   && bc->current_batch->length <= 0) {
 		free_current_batch(bc);
 	}

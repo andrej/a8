@@ -35,6 +35,11 @@ void _del_tracee_info_synchronized(struct tracee *tracee)
 	//synchronize_rcu();
 	/* At this point, there are no more references to tracee floating 
 	   around. */
+#if MONMOD_MONITOR_PROTECTION & MONMOD_MONITOR_COMPARE_PROTECTED
+	if(NULL != tracee->monitor_code_copy) {
+		kfree(tracee->monitor_code_copy);
+	}
+#endif
 	monmod_tracee_config_free(&tracee->config);
 	if(NULL != tracee->entry_info.custom_data) {
 		kfree(tracee->entry_info.custom_data);

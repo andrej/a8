@@ -6,6 +6,7 @@
 #include <linux/rcupdate.h>
 #endif
 #include "config.h"
+#include "custom_syscall_api.h"
 
 
 /* ************************************************************************** *
@@ -42,7 +43,7 @@ enum tracee_info_state {
 	TRACEE_INFO_STALE
 };
 
-#if MONMOD_MONITOR_PROTECTION == MONMOD_MONITOR_FLAG_PROTECTED
+#if MONMOD_MONITOR_PROTECTION & MONMOD_MONITOR_FLAG_PROTECTED
 enum tracee_protection_state {
 	TRACEE_UNINITIALIZED = 0,
 	TRACEE_IN_MONITOR,
@@ -53,11 +54,19 @@ enum tracee_protection_state {
 struct tracee {
 	enum tracee_info_state state;
 	pid_t pid;
+        void __user *trusted_addr;
+        void __user *trace_func_addr;
+	struct monmod_monitor_addr_ranges addrs;
 	struct monmod_tracee_config config;
 	struct intercepted_syscall entry_info;
-#if MONMOD_MONITOR_PROTECTION == MONMOD_MONITOR_FLAG_PROTECTED
+#if MONMOD_MONITOR_PROTECTION & MONMOD_MONITOR_FLAG_PROTECTED
 	enum tracee_protection_state protection_state;
+#endif
+#if MONMOD_MONITOR_PROTECTION & MONMOD_MONITOR_HASH_PROTECTED
 	u64 monitor_hash;
+#endif
+#if MONMOD_MONITOR_PROTECTION & MONMOD_MONITOR_COMPARE_PROTECTED
+	char *monitor_code_copy;
 #endif
 };
 

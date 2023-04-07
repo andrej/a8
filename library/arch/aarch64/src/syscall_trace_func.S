@@ -1,5 +1,5 @@
 #include <sys/syscall.h>
-#include "custom_syscall_nrs.h"
+#include "custom_syscall_api.h"
 
 .text
 

@@ -40,10 +40,6 @@
 
 struct monmod_tracee_config {
         struct kobject kobj;
-        void __user *monitor_start;
-        size_t monitor_len;
-        void __user *trusted_addr;
-        void __user *trace_func_addr;
         bool active;
 };
 
@@ -86,10 +82,6 @@ int _monmod_syscall_mask_offset(u64 syscall_no);
     X(untraced_syscalls)
 
 #define TRACEE_ATTRIBUTES(X) \
-    X(monitor_start) \
-    X(monitor_len) \
-    X(trusted_addr) \
-    X(trace_func_addr) 
 
 #define CONFIG_SHOW_PROT(name) \
         ssize_t _monmod_config_ ## name ## _show(struct kobject *kobject, \

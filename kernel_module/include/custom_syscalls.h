@@ -3,13 +3,7 @@
 
 #include "arch.h"
 #include "tracee_info.h"
-
-//#define __NR_monmod_init        (MAX_SYSCALL_NO+3)
-//#define __NR_monmod_reprotect   (MAX_SYSCALL_NO+4)
-// TODO: Put these + function signatures into a common kernel/userspace header
-#define __NR_monmod_init        328
-#define __NR_monmod_reprotect   329
-#define __NR_monmod_destroy     330
+#include "custom_syscall_api.h"
 
 static inline bool is_monmod_syscall(long nr)
 {

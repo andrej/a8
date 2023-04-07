@@ -14,7 +14,7 @@
  *    - Replication of results
  *    - Adding/removing of descriptor mappings
  */
-#define VERBOSITY 4
+#define VERBOSITY 0
 
 /**
  * CHECK_HASHES_ONLY
@@ -51,7 +51,7 @@
  * survivability aspect and allows benchmarking a pure MVEE implementation that
  * terminates upon divergence.
  */
-#define ENABLE_CHECKPOINTING FORK_CHECKPOINTING 
+#define ENABLE_CHECKPOINTING NO_CHECKPOINTING 
 
 /**
  * Since malloc() is non-reentrant, we cannot use it in system call handlers.
@@ -78,5 +78,26 @@
 #define MONMOD_SYSFS_TRACE_FUNC_ADDR_FILE "/%d/trace_func_addr"
 #define MONMOD_SYSFS_ACTIVE_FILE "/active"
 #define MONMOD_LOG_FILE "./monmod_%lu_%lu.log"
+
+/**
+ * The following two define the maximum size of several fixed-size arrays in
+ * monitor configurations and other aspects of the monitor. Adjusting
+ * these has a large impact on the size of the struct monitor. Since this is
+ * "protected state" data, keeping its size minimal has a big impact on
+ * overhead.
+ * 
+ * Therefore: try to keep this as small as possible.
+ */
+
+// config.h
+#define MAX_N_VARIANTS 2
+#define MAX_N_BREAKPOINTS 1
+
+// communication.h
+#define MAX_N_PEERS MAX_N_VARIANTS-1
+
+// environment.h
+#define MAX_N_DESCRIPTOR_MAPPINGS 26
+#define MAX_N_PID_MAPPINGS 2
 
 #endif

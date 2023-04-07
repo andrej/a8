@@ -3,8 +3,12 @@
 
 #include <sys/socket.h>
 
+#ifndef MAX_N_VARIANTS
 #define MAX_N_VARIANTS 8
+#endif
+#ifndef MAX_N_BREAKPOINTS
 #define MAX_N_BREAKPOINTS 4
+#endif
 
 /**
  * Variants are checkpointed each N-th time they hit breakpoints at the given

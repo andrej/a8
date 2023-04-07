@@ -34,7 +34,7 @@ struct batch_communicator {
 				       reserved item to-be-sent (in sender after
 				       batch_comm_reserve but before 
 				       batch_comm_broadcast_reserved call) */
-	struct batch preallocated_batch;
+	struct batch *preallocated_batch;
 };
 
 
@@ -46,6 +46,13 @@ struct batch_communicator *init_batch_comm(const struct communicator *comm,
                                            const struct peer *recv_peer,
                                            size_t capacity,
 					   size_t flush_after);
+
+int init_batch_comm_at(struct batch_communicator *bc,
+                       char *preallocated_memory,
+                       const struct communicator *comm, 
+                       const struct peer *recv_peer,
+                       size_t capacity,
+                       size_t flush_after);
 
 void free_batch_comm(struct batch_communicator *bc);
 

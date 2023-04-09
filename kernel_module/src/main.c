@@ -158,15 +158,6 @@ static void regular_syscall_enter(struct pt_regs *regs, long id,
 #if MONMOD_LOG_VERBOSITY >= 1
 	tracee->entry_info.do_log = false;
 #endif
-	if(syscall_breaks_protection(tracee, regs, id)) {
-		printk(KERN_WARNING "monmod: <%d> system call attempted to "
-		       "alter memory protection of monitor area.\n", pid);
-		syscall_entry_abort(regs, tracee);
-		return;
-	}
-	if(!monmod_syscall_is_active(id)) {
-		return;
-	}
 
 	if(!tracee->config.active) {
 #if MONMOD_LOG_VERBOSITY >= 3
@@ -179,6 +170,17 @@ static void regular_syscall_enter(struct pt_regs *regs, long id,
 		/* Let code inside the trusted region issue system calls
 		   regularly with no intervention from this module (otherwise
 		   would lead to infinite recurison). */
+		return;
+	}
+
+	if(syscall_breaks_protection(tracee, regs, id)) {
+		printk(KERN_WARNING "monmod: <%d> system call attempted to "
+		       "alter memory protection of monitor area.\n", pid);
+		syscall_entry_abort(regs, tracee);
+		return;
+	}
+
+	if(!monmod_syscall_is_active(id)) {
 		return;
 	}
 

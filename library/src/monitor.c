@@ -369,7 +369,8 @@ void register_monitor_in_kernel(struct monitor *monitor) {
 				start, len,
 	                        code_start, protected_code_len,
 				protected_data_start, protected_data_len));
-	
+
+#if ENABLE_CHECKPOINTING
 	monitor->addr_ranges = (struct monmod_monitor_addr_ranges) {
 		.overall_start = start,
 		.overall_len = len,
@@ -378,6 +379,7 @@ void register_monitor_in_kernel(struct monitor *monitor) {
 		.protected_data_start = protected_data_start,
 		.protected_data_len = protected_data_len
 	};
+#endif
 }
 
 int monitor_init_comm(struct monitor *monitor, int own_id, struct config *conf)

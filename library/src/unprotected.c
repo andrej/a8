@@ -29,7 +29,7 @@ init_unprotected()
 	unprotected_funcs.dup = dup;
 	unprotected_funcs.memcpy = memcpy;
 	unprotected_funcs.mprotect = mprotect;
-	unprotected_funcs.monmod_init = monmod_init_unprotected;
+	unprotected_funcs.monmod_init = monmod_init;
 	unprotected_funcs.monmod_unprotected_reprotect = 
 		monmod_unprotected_reprotect;
 	unprotected_funcs.sem_wait = sem_wait;

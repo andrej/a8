@@ -28,6 +28,11 @@ __attribute__((section("protected_state")))
 #endif
 struct monitor monitor;
 
+#if ENABLE_CHECKPOINTING
+// Needs to be in unprotected section.
+struct checkpoint_env checkpoint_env;
+#endif
+
 
 /* ************************************************************************** *
  * Local Variables                                                            *
@@ -96,7 +101,7 @@ long monmod_handle_syscall(struct syscall_trace_func_stack * const stack)
 #endif
 
 #if ENABLE_CHECKPOINTING
-	restore_checkpoint_if_needed(&monitor.checkpoint_env, 
+	restore_checkpoint_if_needed(monitor.checkpoint_env, 
 	                             monitor.conf.restore_interval);
 #endif
 #if NO_HANDLER_TERMINATES
@@ -274,8 +279,8 @@ void syscall_handle_divergence(struct monitor * const monitor,
 	}
 #endif
 #if ENABLE_CHECKPOINTING
-	if(monitor->checkpoint_env.last_checkpoint.valid) {
-		s = restore_last_checkpoint(&monitor->checkpoint_env);
+	if(monitor->checkpoint_env->last_checkpoint.valid) {
+		s = restore_last_checkpoint(monitor->checkpoint_env);
 		if(0 != s) {
 			SAFE_WARNF("Checkpoint restoration failed with "
 			          "exit code %d.\n", s);
@@ -364,6 +369,15 @@ void register_monitor_in_kernel(struct monitor *monitor) {
 				start, len,
 	                        code_start, protected_code_len,
 				protected_data_start, protected_data_len));
+	
+	monitor->addr_ranges = (struct monmod_monitor_addr_ranges) {
+		.overall_start = start,
+		.overall_len = len,
+		.code_start = code_start,
+		.code_len = protected_code_len,
+		.protected_data_start = protected_data_start,
+		.protected_data_len = protected_data_len
+	};
 }
 
 int monitor_init_comm(struct monitor *monitor, int own_id, struct config *conf)
@@ -421,10 +435,11 @@ int monitor_init(struct monitor *monitor, int own_id, struct config *conf)
 	   the monitor is registered: CRIU checkpointing forks a new
 	   dumper/restorer parent process, and the child process is the one
 	   that should register to be monitored. */
-	SAFE_NZ_TRY(init_checkpoint_env(&monitor->checkpoint_env,
-	                           &monitor->env,
-	                           own_variant_conf,
-	                           monitor->start, monitor->protected_len));
+	monitor->checkpoint_env = &checkpoint_env;
+	SAFE_NZ_TRY(init_checkpoint_env(&checkpoint_env,
+	                                &monitor->env,
+	                                own_variant_conf,
+					&monitor->addr_ranges));
 	monitor->env.pid->local_pid = getpid();
 #endif
 

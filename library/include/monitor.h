@@ -23,7 +23,8 @@ struct monitor {
 	struct timeval start_tv;
 	unsigned long ancestry;  // just for log numbers
 #if ENABLE_CHECKPOINTING
-	struct checkpoint_env checkpoint_env;
+	struct monmod_monitor_addr_ranges addr_ranges;
+	struct checkpoint_env *checkpoint_env;
 #endif
 };
 

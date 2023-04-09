@@ -58,7 +58,7 @@ struct unprotected_funcs {
    typeof(mprotect) *mprotect;
 
    // custom_syscalls.h
-   int (* monmod_init)(pid_t, void *, size_t, void *, void *);
+   typeof(monmod_init) *monmod_init;
 
    // library_init.h
    typeof(monmod_unprotected_reprotect) *monmod_unprotected_reprotect;

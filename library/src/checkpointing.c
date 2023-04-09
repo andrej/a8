@@ -34,8 +34,7 @@ static struct checkpoint_env *signal_env = NULL;
 static void monmod_handle_signal(int sig, siginfo_t *si, void *_context);
 static void *handle_breakpoint(struct checkpoint_env *env, void *loc);
 #if ENABLE_CHECKPOINTING == FORK_CHECKPOINTING
-static int create_fork_checkpoint(struct checkpoint_env *env,
-                                  struct breakpoint *b);
+static int create_fork_checkpoint(struct checkpoint_env *env);
 #elif ENABLE_CHECKPOINTING == CRIU_CHECKPOINTING
 static int create_criu_checkpoint(struct checkpoint_env *env);
 #endif
@@ -51,12 +50,10 @@ static int inject_breakpoint(struct checkpoint_env *env, void *loc,
 int init_checkpoint_env(struct checkpoint_env *env, 
                         struct environment *tracee_env,
                         struct variant_config *config,
-			void *monitor_start,
-			size_t protected_len)
+			struct monmod_monitor_addr_ranges *addr_ranges)
 {
 	env->tracee_env = tracee_env;
-	env->monitor_start = monitor_start;
-	env->protected_len = protected_len;
+	env->addr_ranges = addr_ranges;
 
 #if ENABLE_CHECKPOINTING == FORK_CHECKPOINTING
 	/* Allocate shared memory for communication between checkpointed
@@ -142,19 +139,21 @@ int restore_last_checkpoint(struct checkpoint_env *env)
 void restore_checkpoint_if_needed(struct checkpoint_env *env, 
                                   int restore_interval)
 {
-#if ENABLE_CHECKPOINTING == CRIU_CHECKPOINTING
 	/* We cannot successfully create a checkpoint from within the signal
 	   handler in a breakpoint with CRIU. This workaround creates a
 	   checkpoint after system call handler entry after an appropriate
 	   flag was set in the breakpoint beforehand. */
 	if(env->create_checkpoint) {
 #if VERBOSITY >= 2
-		SAFE_LOG("Creating CRIU checkpoint.\n")
+		SAFE_LOG("Creating checkpoint.\n")
 #endif
+#if ENABLE_CHECKPOINTING == FORK_CHECKPOINTING
+		SAFE_NZ_TRY(create_fork_checkpoint(env));
+#elif ENABLE_CHECKPOINTING == CRIU_CHECKPOINTING
 		SAFE_NZ_TRY(create_criu_checkpoint(env));
+#endif
 		env->create_checkpoint = false;
 	}
-#endif
 
 	/* Periodically restore to the last checkpoint, as set in
 	   config.restore_interval. This is used to assess the performance of
@@ -256,12 +255,7 @@ handle_breakpoint(struct checkpoint_env *env, void *loc)
 
 		/* Trigger checkpointing mechanism. */
 		if(b->hits % b->interval == 0) {
-#if ENABLE_CHECKPOINTING == FORK_CHECKPOINTING
-			NZ_TRY_EXCEPT(create_fork_checkpoint(env, b),
-			              return NULL);
-#elif ENABLE_CHECKPOINTING == CRIU_CHECKPOINTING
 			env->create_checkpoint = true;
-#endif
 			b->hits = 0;
 		}
 		b->hits++;
@@ -308,7 +302,7 @@ handle_breakpoint(struct checkpoint_env *env, void *loc)
 #if ENABLE_CHECKPOINTING == FORK_CHECKPOINTING
 static int
 __attribute__((section("unprotected")))
-create_fork_checkpoint(struct checkpoint_env *cenv, struct breakpoint *b)
+create_fork_checkpoint(struct checkpoint_env *cenv)
 {
 	int s = 0;
 	/* We perform a very lightweight, incomplete checkpointing by simply
@@ -351,11 +345,16 @@ create_fork_checkpoint(struct checkpoint_env *cenv, struct breakpoint *b)
 			return 1;
 		}
 		/* Register self for tracing. */
-		s = unprotected_funcs.monmod_init(unprotected_funcs.getpid(), 
-		                                  cenv->monitor_start, 
-		                                  cenv->protected_len,
-		                                  &monmod_syscall_trusted_addr,
-		                                  &monmod_syscall_trace_enter);
+		s = unprotected_funcs.monmod_init(
+			unprotected_funcs.getpid(), 
+			&monmod_syscall_trusted_addr,
+			&monmod_syscall_trace_enter,
+			cenv->addr_ranges->overall_start,
+			cenv->addr_ranges->overall_len,
+			cenv->addr_ranges->code_start,
+			cenv->addr_ranges->code_len,
+			cenv->addr_ranges->protected_data_start,
+			cenv->addr_ranges->protected_data_len);
 		if(0 != s) {
 			return 1;
 		}

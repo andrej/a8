@@ -58,25 +58,21 @@ struct checkpoint_env {
 	                                     after hitting this breakpoint */
 	size_t n_breakpoints;
 	struct breakpoint breakpoints[MAX_N_BREAKPOINTS];
-	/* The following two denote the monitor location in shared memory; 
-	   information needed by the monmod_init call in child checkpoints. */
-	void *monitor_start;
-	size_t protected_len;
+	struct monmod_monitor_addr_ranges *addr_ranges;
+	bool create_checkpoint;
 #if ENABLE_CHECKPOINTING == FORK_CHECKPOINTING
 	struct checkpointing_smem *smem;
 	size_t smem_length;
 #elif ENABLE_CHECKPOINTING == CRIU_CHECKPOINTING
 	pid_t dumper_restorer_pid;
 	volatile bool dumper_restorer_ready;
-	bool create_checkpoint;
 #endif
 };
 
 int init_checkpoint_env(struct checkpoint_env *env,
                         struct environment *tracee_env,
                         struct variant_config *config,
-			void *monitor_start,
-			size_t protected_len);
+			struct monmod_monitor_addr_ranges *addr_ranges);
 
 int restore_last_checkpoint(struct checkpoint_env *env);
 

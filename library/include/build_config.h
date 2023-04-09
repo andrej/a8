@@ -14,7 +14,7 @@
  *    - Replication of results
  *    - Adding/removing of descriptor mappings
  */
-#define VERBOSITY 0
+#define VERBOSITY 4
 
 /**
  * CHECK_HASHES_ONLY
@@ -51,7 +51,7 @@
  * survivability aspect and allows benchmarking a pure MVEE implementation that
  * terminates upon divergence.
  */
-#define ENABLE_CHECKPOINTING NO_CHECKPOINTING 
+#define ENABLE_CHECKPOINTING FORK_CHECKPOINTING 
 
 /**
  * Since malloc() is non-reentrant, we cannot use it in system call handlers.
@@ -98,6 +98,6 @@
 
 // environment.h
 #define MAX_N_DESCRIPTOR_MAPPINGS 26
-#define MAX_N_PID_MAPPINGS 2
+#define MAX_N_PID_MAPPINGS 4
 
 #endif

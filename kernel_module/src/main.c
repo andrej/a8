@@ -180,7 +180,7 @@ static void regular_syscall_enter(struct pt_regs *regs, long id,
 		return;
 	}
 
-	if(!monmod_syscall_is_active(id)) {
+	if(!monmod_syscall_is_active(id) && __NR_monmod_fake_fork != id) {
 		return;
 	}
 

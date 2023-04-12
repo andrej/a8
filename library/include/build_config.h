@@ -99,5 +99,6 @@
 // environment.h
 #define MAX_N_DESCRIPTOR_MAPPINGS 26
 #define MAX_N_PID_MAPPINGS 4
+#define MAX_N_EPOLL_DATA_INFOS 16
 
 #endif

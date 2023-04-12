@@ -54,6 +54,15 @@ time(time_t *tloc)
 #endif
 }
 
+int 
+__attribute__((visibility("default"),
+               section("unprotected")))
+clock_gettime(clockid_t clockid, struct timespec *tp)
+{
+       return unprotected_funcs.syscall(__NR_clock_gettime, (long)clockid,
+                                        (long)tp, 0, 0, 0, 0);
+}
+
 /* From man(2) getpid:
        From glibc version 2.3.4 up to and including version 2.24, the
        glibc wrapper function for getpid() cached PIDs, with the goal of

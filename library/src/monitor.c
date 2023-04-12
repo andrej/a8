@@ -382,19 +382,21 @@ void register_monitor_in_kernel(struct monitor *monitor) {
 #endif
 }
 
-int monitor_init_comm(struct monitor *monitor, int own_id, struct config *conf)
+int monitor_init_comm(struct monitor *monitor)
 {
 	struct variant_config *own_variant_conf;
-	SAFE_Z_TRY(own_variant_conf = get_variant(conf, own_id));
+	SAFE_Z_TRY(own_variant_conf = get_variant(&monitor->conf, 
+	                                          monitor->own_id));
 
-	SAFE_LZ_TRY(comm_init(&monitor->comm, own_id, 
+	SAFE_LZ_TRY(comm_init(&monitor->comm, monitor->own_id, 
 	                      &own_variant_conf->addr));
-	for(size_t i = 0; i < conf->n_variants; i++) {
-		if(conf->variants[i].id == own_id) {
+	for(size_t i = 0; i < monitor->conf.n_variants; i++) {
+		if(monitor->conf.variants[i].id == monitor->own_id) {
 			continue;
 		}
-		SAFE_NZ_TRY(comm_connect(&monitor->comm, conf->variants[i].id, 
-		                         &conf->variants[i].addr));
+		SAFE_NZ_TRY(comm_connect(&monitor->comm, 
+		                         monitor->conf.variants[i].id, 
+		                         &monitor->conf.variants[i].addr));
 	}
 	return 0;
 }
@@ -415,7 +417,7 @@ int monitor_init(struct monitor *monitor, int own_id, struct config *conf)
 	SAFE_Z_TRY(own_variant_conf = get_variant(conf, own_id));
 
 	/* Connect everyone to everyone. */
-	SAFE_NZ_TRY(monitor_init_comm(monitor, own_id, conf));
+	SAFE_NZ_TRY(monitor_init_comm(monitor));
 
 	SAFE_NZ_TRY(env_init(&monitor->env, monitor->is_leader));
 
@@ -439,6 +441,7 @@ int monitor_init(struct monitor *monitor, int own_id, struct config *conf)
 	   that should register to be monitored. */
 	monitor->checkpoint_env = &checkpoint_env;
 	SAFE_NZ_TRY(init_checkpoint_env(&checkpoint_env,
+	                                monitor,
 	                                &monitor->env,
 	                                own_variant_conf,
 					&monitor->addr_ranges));
@@ -524,6 +527,7 @@ int monitor_arbitrate_child_comm(struct monitor *parent_monitor,
 	struct sockaddr_in own_addr = { .sin_family = AF_INET,
 	                                .sin_addr = INADDR_ANY,
 					.sin_port = 0 };
+
 	uint64_t own_port;
 	SAFE_LZ_TRY(own_port = comm_init(child_comm, 
 	                                 parent_monitor->own_id, 
@@ -561,6 +565,8 @@ int monitor_arbitrate_child_comm(struct monitor *parent_monitor,
 		memcpy(variant_ports, received->variant_ports,
 		       sizeof(variant_ports));
 	} else {
+		SAFE_NZ_TRY_EXCEPT(batch_comm_flush(parent_monitor->batch_comm),
+		                   return -1);
 		/* The leader broadcasts the set of new ports.*/
 		size_t received_sz = sizeof(struct arbitration_msg)
 		                     + sizeof(uint64_t);
@@ -609,7 +615,7 @@ int monitor_arbitrate_child_comm(struct monitor *parent_monitor,
 			                       ->conf.variants[i].addr)
 			->sin_addr;
 		child_addr.sin_port = variant_ports[i];
-		NZ_TRY(comm_connect(child_comm, 
+		SAFE_NZ_TRY(comm_connect(child_comm, 
 		                    parent_monitor->conf.variants[i].id, 
 		                    (struct sockaddr *)&child_addr));
 	}

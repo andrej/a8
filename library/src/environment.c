@@ -12,7 +12,6 @@ int env_init(struct environment *env, bool is_leader)
 {
 	struct pid_info *pi;
 
-	env->epoll_data_infos = (struct epoll_data_infos){};
 	env->is_leader = is_leader;
 
 	// stdin
@@ -40,6 +39,10 @@ int env_init(struct environment *env, bool is_leader)
 		env->ppid = env_add_local_pid_info(env, getppid()),
 		return 1);
 
+	SAFE_Z_TRY_EXCEPT(env->epoll_data_infos =
+	                  calloc(1, sizeof(struct epoll_data_info_list)),
+			  return 1);
+
 	return 0;
 }
 
@@ -48,23 +51,23 @@ struct epoll_data_info *get_epoll_data_info_for(struct environment *env,
 						int fd,
 						uint32_t events)
 {
-	struct epoll_data_info *info = 
-		(struct epoll_data_info *)env->epoll_data_infos.head;
-	while(NULL != info) {
+	size_t i = 0;
+	list_for_each(*env->epoll_data_infos, i) {
+		if(!list_item_is_occupied(*env->epoll_data_infos, i)) {
+			continue;
+		}
+		struct epoll_data_info *info = 
+			list_get_i(*env->epoll_data_infos, i);
 		if(info->epfd == epfd && info->fd == fd
 		   && (info->event.events & events)) {
 			return info;
 		}
-		info = info->next;
 	}
 	return NULL;
 }
 
-struct epoll_data_info *purge_epoll_data_fd(struct environment *env, int fd)
+int purge_epoll_data_fd(struct environment *env, int fd)
 {
-	struct epoll_data_info *info =
-		(struct epoll_data_info *)env->epoll_data_infos.head;
-	struct epoll_data_info *next;
 	/* FIXME: The current implementation does not address the following 
 	   subtlety:
 
@@ -82,13 +85,19 @@ struct epoll_data_info *purge_epoll_data_fd(struct environment *env, int fd)
            A file descriptor is removed from an interest list only after
            all the file descriptors referring to the underlying open
            file description have been closed. */
-	while(NULL != info) {
-		next = info->next;
-		if(info->fd == fd) {
-			remove_epoll_data_info(env, info);
+	size_t i = 0;
+	list_for_each(*env->epoll_data_infos, i) {
+		if(!list_item_is_occupied(*env->epoll_data_infos, i)) {
+			continue;
 		}
-		info = next;
+		struct epoll_data_info *info = 
+			list_get_i(*env->epoll_data_infos, i);
+		if(info->fd == fd) {
+			SAFE_NZ_TRY_EXCEPT(remove_epoll_data_info(env, info),
+			                   return 1);
+		}
 	}
+	return 0;
 }
 
 int append_epoll_data_info(struct environment *env, 
@@ -100,40 +109,26 @@ int append_epoll_data_info(struct environment *env,
 		           "exists.\n", info.epfd, info.fd, info.event.events);
 		return 1;
 	}
-	struct epoll_data_info *to_insert = malloc(sizeof(info));
-	if(NULL == to_insert) {
-		return 1;
-	}
-	memcpy(to_insert, &info, sizeof(struct epoll_data_info));
-	struct epoll_data_info *tail = env->epoll_data_infos.tail;
-	if(NULL != tail) {
-		to_insert->prev = tail;
-		tail->next = to_insert;
-	} else {
-		env->epoll_data_infos.head = to_insert;
-		to_insert->prev = NULL;
-	}
-	to_insert->next = NULL;
-	env->epoll_data_infos.tail = to_insert;
+	int s = list_put(*env->epoll_data_infos, info);
+	SAFE_LZ_TRY_EXCEPT(s, return 1);
+#if VERBOSITY >= 4
+	SAFE_LOGF("Appended epoll data info (%d, %d, %x) at index %d.\n",
+	          info.epfd, info.fd, info.event.events, s);
+#endif
 	return 0;
 }
 
 int remove_epoll_data_info(struct environment *env, 
                            struct epoll_data_info *info)
 {
-	if(info == env->epoll_data_infos.head) {
-		env->epoll_data_infos.head = info->next;
-	}
-	if(info == env->epoll_data_infos.tail) {
-		env->epoll_data_infos.tail = info->prev;
-	}
-	if(NULL != info->prev) {
-		info->prev->next = info->next;
-	}
-	if(NULL != info->next) {
-		info->next->prev = info->prev;
-	}
-	free(info);
+	size_t i = info 
+	           - (struct epoll_data_info *)env->epoll_data_infos->items;
+	int s = list_del_i(*env->epoll_data_infos, i);
+	SAFE_NZ_TRY_EXCEPT(s, return 1);
+#if VERBOSITY >= 4
+	SAFE_LOGF("Removed epoll data info (%d, %d, %x) at index %lu.\n",
+	          info->epfd, info->fd, info->event.events, i);
+#endif
 	return 0;
 }
 
@@ -166,38 +161,42 @@ checkpointed_environment_fix_up(struct environment *env)
 			list_get_i(env->descriptors, i);
 		int new_fd = 0;
 		const int old_fd = di->local_fd;
-		const int canonical_fd = di - env->descriptors.items; 
+		const int canonical_fd = env_canonical_fd_for(env, di); 
 			// TODO add bounds check
 		int s = 0;
 		if(di->type != EPOLL_DESCRIPTOR ||
 		   !is_open_locally(env, di)) {
 			continue;
 		}
-		new_fd = unprotected_funcs.epoll_create1(0);
+		new_fd = epoll_create1(0);
 			// FIXME: copy CLOEXEC flag from original epoll
 		if(-1 == new_fd) {
-			SAFE_WARNF("Cannot recreate epoll file descriptor: %d\n", 
-			          errno);
+			SAFE_WARNF("Cannot recreate epoll file descriptor: "
+			           "%d\n", errno);
 			return 1;
 		}
-		unprotected_funcs.close(old_fd);
+		close(old_fd);
 		di->local_fd = new_fd;
 		/* Add back all the listened-for fds. */
-		struct epoll_data_info *j = NULL;
-		for_each_epoll_data_info(env->epoll_data_infos, j) {
-			if(j->epfd != canonical_fd) {
+		size_t j = 0;
+		list_for_each(*env->epoll_data_infos, j) {
+			if(!list_item_is_occupied(*env->epoll_data_infos, j)) {
+				continue;
+			}
+			struct epoll_data_info *j_item = 
+				list_get_i(*env->epoll_data_infos, j);
+			if(j_item->epfd != canonical_fd) {
 				continue;
 			}
 			const struct descriptor_info *fd_di = 
-				list_get_i(env->descriptors, j->fd);
+				list_get_i(env->descriptors, j_item->fd);
 				// TODO add bounds check
-			s = unprotected_funcs.epoll_ctl(
-				new_fd, EPOLL_CTL_ADD, fd_di->local_fd,
-				&j->event);
+			s = epoll_ctl(new_fd, EPOLL_CTL_ADD, fd_di->local_fd,
+				      &j_item->event);
 			if(0 != s) {
 				SAFE_WARNF("epoll_ctl failed for fd %d while "
 				          "trying to recreate epoll %d\n",
-					  canonical_fd, j->fd);
+					  canonical_fd, j_item->fd);
 				return 1;
 			}
 		}

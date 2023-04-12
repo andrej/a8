@@ -99,7 +99,7 @@
 	                         scratch);
 
 #define redirect_exit(other) \
-	SYSCALL_EXIT(other)(env, handler, dispatch, actual, canonical, scratch);
+	SYSCALL_EXIT(other)(env, handler, dispatch, actual, canonical, scratch)
 
 static inline int get_dispatch_by_path(const char *path)
 {

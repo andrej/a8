@@ -111,6 +111,9 @@ SYSCALL_EXIT_PROT(default_creates_fd);
  X( __NR_gettimeofday, gettimeofday, SYSCALL_ENTER(gettimeofday), \
                                 NULL, \
                                 SYSCALL_EXIT(gettimeofday)) \
+ X( __NR_clock_gettime, clock_gettime, SYSCALL_ENTER(clock_gettime), \
+                                NULL, \
+                                SYSCALL_EXIT(clock_gettime)) \
  X( __NR_dup2,     dup2,        SYSCALL_ENTER(dup2), \
                                 NULL, \
                                 SYSCALL_EXIT(dup2)) \
@@ -174,7 +177,7 @@ SYSCALL_EXIT_PROT(default_creates_fd);
  X( __NR_shutdown, shutdown,    SYSCALL_ENTER(shutdown), \
                                 NULL, \
                                 SYSCALL_EXIT(shutdown)) /*TODO*/ \
- X( __NR_rt_sigaction, rt_sigaction, SYSCALL_ENTER(default_checked_arg1), \
+ X( __NR_rt_sigaction, rt_sigaction, SYSCALL_ENTER(rt_sigaction), \
                                 NULL, \
                                 NULL) /*TODO*/ \
  X( __NR_rt_sigprocmask, rt_sigprocmask, SYSCALL_ENTER(rt_sigprocmask), \
@@ -228,6 +231,9 @@ SYSCALL_EXIT_PROT(default_creates_fd);
  X( __NR_fork,      fork,       SYSCALL_ENTER(fork), \
                                 NULL, \
                                 SYSCALL_EXIT(fork) ) \
+ X( __NR_monmod_fake_fork, monmod_fake_fork, SYSCALL_ENTER(monmod_fake_fork), \
+                                NULL, \
+                                NULL) \
  X( __NR_clone,     clone,      SYSCALL_ENTER(clone), \
                                 NULL, \
                                 SYSCALL_EXIT(clone) ) \

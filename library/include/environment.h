@@ -54,17 +54,10 @@ struct epoll_data_info {
 	int epfd;
 	int fd;
 	struct epoll_event event;
-	struct epoll_data_info *prev;
-	struct epoll_data_info *next;
 };
 
-struct epoll_data_infos {
-	struct epoll_data_info *head;
-	struct epoll_data_info *tail;
-};
-
-#define for_each_epoll_data_info(epoll_data_infos, x) \
-	for((x) = (epoll_data_infos).head; (x) != NULL; (x) = (x)->next)
+struct epoll_data_info_list list_struct_def(struct epoll_data_info,
+                                            MAX_N_EPOLL_DATA_INFOS);
 
 /**
  * The environment structure is used to encode information about the execution
@@ -85,7 +78,7 @@ struct environment {
 	struct pid_info_list children_pids;
 	struct pid_info *pid;  // pointer into pid_info_list
 	struct pid_info *ppid;  // pointer into pid_info_list
-	struct epoll_data_infos epoll_data_infos;
+	struct epoll_data_info_list *epoll_data_infos;
 	bool is_leader;
 };
 
@@ -112,7 +105,8 @@ env_add_descriptor(struct environment *env,
 	di.flags = DI_PRESENT | flags;
 	di.local_fd = local_fd;
 	di.type = type;
-	list_put_at(env->descriptors, di, i);
+	int s = list_put_at(env->descriptors, di, i);
+	SAFE_LZ_TRY_EXCEPT(s, return NULL);
 	env->n_descriptors++;
 #if VERBOSITY >= 3
 	SAFE_LOGF("Added descriptor mapping %d -> %d.\n", canonical_fd, 
@@ -169,7 +163,8 @@ env_del_descriptor(struct environment *env, struct descriptor_info *di)
 	SAFE_LOGF("Removing descriptor mapping %d -> %d.\n", 
 	          i, in_list->local_fd);
 #endif
-	list_del_i(env->descriptors, i);
+	int s = list_del_i(env->descriptors, i);
+	SAFE_NZ_TRY_EXCEPT(s, return 1);
 	env->n_descriptors--;
 	return 0;
 }
@@ -277,7 +272,7 @@ struct epoll_data_info *get_epoll_data_info_for(struct environment *env,
 						int fd,
 						uint32_t events);
 
-struct epoll_data_info *purge_epoll_data_fd(struct environment *env, int fd);
+int purge_epoll_data_fd(struct environment *env, int fd);
 
 /**
  * Copy and append a new epoll_data_info structure 

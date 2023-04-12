@@ -283,8 +283,10 @@ SYSCALL_EXIT_PROT(close)
 #if VERBOSITY >= 4
 		SAFE_LOGF("close removing descriptor.%s", "\n");
 #endif
-		env_del_descriptor(env, di);
-		purge_epoll_data_fd(env, env_canonical_fd_for(env, di));
+		SAFE_NZ_TRY(env_del_descriptor(env, di));
+		SAFE_NZ_TRY(
+			purge_epoll_data_fd(env, env_canonical_fd_for(env, di))
+		);
 	}
 	return 0;
 }
@@ -325,7 +327,10 @@ SYSCALL_ENTER_PROT(mmap)
 	canonical->arg_types[5] = IMMEDIATE_TYPE(off_t);
 	canonical->args[5] = (canonical->args[5] == 0 ? 0 : 1);
 
-	return DISPATCH_EVERYONE | DISPATCH_CHECKED;
+	/* On some architectures, malloc may issue an anonymous mmap call where
+	   it is a brk call on another. To avoid false positive divergences,
+	   we leave this system call unchecked. */
+	return DISPATCH_EVERYONE | DISPATCH_UNCHECKED;
 }
 
 /* ************************************************************************** *
@@ -879,6 +884,32 @@ SYSCALL_EXIT_PROT(gettimeofday)
 
 
 /* ************************************************************************** *
+ * clock_gettime                                                              *
+ * int clock_gettime(clockid_t clockid, struct timespec *tp);                 *
+ * ************************************************************************** */
+
+SYSCALL_ENTER_PROT(clock_gettime)
+{
+	alloc_scratch(sizeof(struct type));
+	struct type *buf_type = (struct type *)*scratch;
+	canonical->arg_types[0] = IMMEDIATE_TYPE(long);
+	canonical->arg_types[1] = POINTER_TYPE(buf_type);
+	*buf_type               = BUFFER_TYPE(sizeof(struct timespec));
+	canonical->arg_flags[1] = ARG_FLAG_REPLICATE | ARG_FLAG_WRITE_ONLY;
+	canonical->ret_type = IMMEDIATE_TYPE(long);
+	canonical->ret_flags = ARG_FLAG_REPLICATE;
+	return DISPATCH_CHECKED | DISPATCH_LEADER | DISPATCH_NEEDS_REPLICATION;
+}
+
+SYSCALL_EXIT_PROT(clock_gettime)
+{
+	free_scratch();
+	write_back_canonical_return();
+	return 0;
+}
+
+
+/* ************************************************************************** *
  * dup2                                                                       * 
  * int dup2(int oldfd, int newfd);                                            *
  * ************************************************************************** */
@@ -1259,7 +1290,9 @@ SYSCALL_ENTER_PROT(epoll_ctl)
 					.fd = fd,
 					.event = *event
 				};
-			append_epoll_data_info(env, event_info);
+			SAFE_NZ_TRY_EXCEPT(
+				append_epoll_data_info(env, event_info),
+				return DISPATCH_ERROR);
 			s->custom_event.events = event->events;
 			s->custom_event.data.fd = fd;
 			actual->args[3] = (long)&s->custom_event;
@@ -1314,6 +1347,8 @@ SYSCALL_EXIT_PROT(epoll_ctl)
 				}
 			} else {
 				if(NULL == event_info) {
+					SAFE_WARN("Cannot find event_info "
+					          "to add.\n");
 					post_call_error();
 				}
 			}
@@ -1331,6 +1366,8 @@ SYSCALL_EXIT_PROT(epoll_ctl)
 		case EPOLL_CTL_DEL: {
 			if(0 == actual->ret) {
 				if(NULL == event_info) {
+					SAFE_WARN("Cannot find event_info to "
+					          "delete.\n");
 					post_call_error();
 				}
 				remove_epoll_data_info(env, event_info);
@@ -1453,16 +1490,23 @@ SYSCALL_EXIT_PROT(epoll_pwait)
 
 	struct epoll_event *custom_event = NULL;
 	struct epoll_data_info *own_event = NULL;
+	size_t j = 0;
 	for(int i = 0; i < n_events; i++) {
 		custom_event = &events[i];
 		own_event = get_epoll_data_info_for(
 			env, epfd, custom_event->data.fd, custom_event->events);
 		if(NULL == own_event) {
+			SAFE_WARNF("No matching epoll event data structure "
+			           "found for epfd %d, fd %d (index %d)\n",
+				   epfd, custom_event->data.fd, i);
 			post_call_error();
 		}
-		memcpy(&events[i].data, &own_event->event.data, 
+		memcpy(&events[j].data, &own_event->event.data, 
 		       sizeof(own_event->event.data));
+		j++;
 	}
+
+	actual->ret = j;
 
 done:
 	free_scratch();
@@ -2167,12 +2211,59 @@ SYSCALL_ENTER_PROT(getppid)
 
 
 /* ************************************************************************** *
+ * monmod_fake_fork                                                           *
+ * ************************************************************************** */
+
+/* When using libVMA, establishing new connections for spawned child processes
+   in the fork() handler causes a deadlock. Since libVMA is a user-space 
+   library, it holds some locks when the fork() system call enters. We then
+   also try to acquire these locks again by calling into libVMA to initiate our
+   child process. 
+   
+   To avoid this deadlock, we overwrite the fork() function (in vma_redirect.c)
+   with our own, that does nothing more than issue this "fake_fork" system call.
+   We then call fork() ourselves here, which acquires the locks, issues a
+   trusted fork system call, releases the locks and then returs. After all this,
+   we now set up the new network connection. */
+
+SYSCALL_ENTER_PROT(monmod_fake_fork)
+{
+#if USE_LIBVMA
+	alloc_scratch(sizeof(struct communicator));
+	struct communicator *child_comm = (struct communicator *)*scratch;
+	memset(child_comm, 0, sizeof(*child_comm));
+	int dispatch = DISPATCH_SKIP;
+	SAFE_NZ_TRY_EXCEPT(
+		monitor_arbitrate_child_comm(&monitor, child_comm),
+		return DISPATCH_ERROR);
+	actual->ret = vmafork();
+	if(0 == actual->ret) {  // child
+		canonical->ret = actual->ret;
+	}
+	if(0 != (redirect_exit(clone))) {  
+		// clone exit handler calls free_scratch
+		return DISPATCH_ERROR;
+	}
+	return dispatch;
+#else
+	/* fake_fork calls should only be issued if libVMA is enabled. They
+	   are not needed otherwise. */
+	return DISPATCH_ERROR;
+#endif
+}
+
+
+/* ************************************************************************** *
  * fork                                                                       *
  * pid_t fork(void)                                                           *
  * ************************************************************************** */
 
 SYSCALL_ENTER_PROT(fork)
 {
+#if USE_LIBVMA
+	/* Fork handlers not supported, use monmod_fake_fork. */
+	return DISPATCH_ERROR;
+#else
 	/* Forward to clone() handler.
 	   See glibc sysdeps/unix/sysv/linux/arch-fork.h */
 	const int flags = CLONE_CHILD_SETTID | CLONE_CHILD_CLEARTID | SIGCHLD;
@@ -2182,6 +2273,7 @@ SYSCALL_ENTER_PROT(fork)
 	canonical->args[2] = (unsigned long)NULL;
 	canonical->args[3] = (unsigned long)NULL;  // FIXME
 	return redirect_enter(clone);
+#endif
 }
 
 SYSCALL_EXIT_PROT(fork)
@@ -2251,7 +2343,9 @@ SYSCALL_EXIT_PROT(clone)
 	monitor.ancestry++;  // just for log numbers
 	if(0 != child_pid) {
 		/* In parent: add child PID to environment. */
+#if !USE_LIBVMA
 		SAFE_NZ_TRY(comm_destroy(child_comm));
+#endif
 		SAFE_Z_TRY(pid_info = env_add_local_pid_info(env, child_pid));
 		SAFE_LZ_TRY(canonical_child_pid = 
 		            env_canonical_pid_for(env, pid_info));
@@ -2476,4 +2570,19 @@ SYSCALL_ENTER_PROT(kill)
 	canonical->arg_types[0] = IMMEDIATE_TYPE(pid_t);
 	canonical->arg_types[1] = IMMEDIATE_TYPE(int);
 	return DISPATCH_EVERYONE | DISPATCH_CHECKED;
+}
+
+
+/* ************************************************************************** *
+ * rt_sigaction                                                               *
+ * Currently signal handlers are not supported; we skip any registrations,.   *
+ * ************************************************************************** */
+
+SYSCALL_ENTER_PROT(rt_sigaction)
+{
+	int dispatch = DISPATCH_UNCHECKED;
+	actual->ret = 0;
+	canonical->ret = 0;
+	dispatch |= DISPATCH_SKIP;
+	return dispatch;
 }

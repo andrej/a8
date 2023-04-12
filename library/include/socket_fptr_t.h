@@ -103,7 +103,7 @@ typedef int (* maybeconst creat_fptr_t)(const char *__pathname, mode_t __mode);
 typedef int (* maybeconst dup_fptr_t)(int fildes);
 typedef int (* maybeconst dup2_fptr_t)(int fildes, int fildes2);
 
-typedef int (* maybeconst clone_fptr_t)(int (*__fn)(void *), void *__child_stack, int __flags, void *__arg);
+typedef int (* maybeconst clone_fptr_t)(unsigned long flags, void *child_stack, void *ptid, void *ctid, void *regs);
 typedef pid_t (* maybeconst fork_fptr_t)(void);
 typedef pid_t (* maybeconst vfork_fptr_t)(void);
 typedef int (* maybeconst daemon_fptr_t)(int __nochdir, int __noclose);

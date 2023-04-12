@@ -9,7 +9,6 @@
 
 #define _GNU_SOURCE
 #include <dlfcn.h>
-#define _GNU_SOURCE
 #include <poll.h>
 #include "build_config.h"
 #include "util.h"
@@ -84,7 +83,10 @@ static inline int init_vma_redirect() {
 }
 #else
 
-static struct socket_fptrs s = {};
+extern struct socket_fptrs s;
+
+pid_t vmafork(void);
+
 static inline int init_vma_redirect() {
 	if(NULL != s.socket) {
 		// Already initialized.

@@ -60,6 +60,7 @@ struct checkpoint_env {
 	struct breakpoint breakpoints[MAX_N_BREAKPOINTS];
 	struct monmod_monitor_addr_ranges *addr_ranges;
 	bool create_checkpoint;
+	struct monitor *monitor;
 #if ENABLE_CHECKPOINTING == FORK_CHECKPOINTING
 	struct checkpointing_smem *smem;
 	size_t smem_length;
@@ -70,6 +71,7 @@ struct checkpoint_env {
 };
 
 int init_checkpoint_env(struct checkpoint_env *env,
+                        struct monitor *monitor,
                         struct environment *tracee_env,
                         struct variant_config *config,
 			struct monmod_monitor_addr_ranges *addr_ranges);

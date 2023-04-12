@@ -1499,7 +1499,13 @@ SYSCALL_EXIT_PROT(epoll_pwait)
 			SAFE_WARNF("No matching epoll event data structure "
 			           "found for epfd %d, fd %d (index %d)\n",
 				   epfd, custom_event->data.fd, i);
-			post_call_error();
+			/* FIXME: An issue with our fork-checkpointing 
+			   implementation causes children to be notified of
+			   changes to file descriptors for which we have no
+			   data in our epoll data info list. For now, we
+			   just ignore those. */
+			continue;
+			//post_call_error();
 		}
 		memcpy(&events[j].data, &own_event->event.data, 
 		       sizeof(own_event->event.data));

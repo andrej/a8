@@ -39,12 +39,15 @@
 	char log[n]; \
 	int len = 0; \
 	len = snprintf(log, sizeof(log), msg, __VA_ARGS__); \
-	if(0 < len && len < sizeof(log)) { \
+	if(len >= sizeof(log)) { \
+		log[sizeof(log)-1] = '\0'; \
+	} \
+	if(0 < len) { \
 		monmod_trusted_syscall(__NR_write, monmod_log_fd, (long)log, \
 		                       (long)len, 0, 0, 0); \
 	} \
 }
-#define SAFE_LOGF(msg, ...) SAFE_LOGF_LEN(128, msg, __VA_ARGS__)
+#define SAFE_LOGF(msg, ...) SAFE_LOGF_LEN(256, msg, __VA_ARGS__)
 #define SAFE_LOG(msg) SAFE_LOGF(msg "%s", "")
 #define SAFE_WARNF(msg, ...) SAFE_LOGF(__FILE__ ": %d: " msg, __LINE__, \
                                        __VA_ARGS__)

@@ -320,8 +320,8 @@ create_fork_checkpoint(struct checkpoint_env *cenv)
 	if(cenv->last_checkpoint.valid) {
 		smem_put(&cenv->smem->semaphore, 
 		         cenv->smem->message = CHECKPOINT_DELETE);
-		while(!smem_get(&cenv->smem->semaphore,
-		                cenv->smem->done_flag));
+		smem_await(!smem_get(&cenv->smem->semaphore,
+		                     cenv->smem->done_flag));
 		/* At this point, we are sure that we are memory-synchronized
 		   with the checkpointed process, and it is about to exit --
 		   it is guaranteed to not acquire the semaphore again, but not
@@ -385,7 +385,7 @@ create_fork_checkpoint(struct checkpoint_env *cenv)
 				msg = CHECKPOINT_DELETE;
 			}
 			if(msg == CHECKPOINT_HOLD) {
-				usleep(20);
+				sched_yield();
 			}
 		} while(msg == CHECKPOINT_HOLD);
 		switch(msg) {
@@ -403,12 +403,8 @@ create_fork_checkpoint(struct checkpoint_env *cenv)
 			}
 		}
 	} else {
-		/* While, in theory, the checkpoint may not be fully created
-		   yet (not yet waiting for messages), it is safe to continue
-		   without introducing a race. We know that the child will
-		   eventually see any restore requests issued. */
-		while(!smem_get(&cenv->smem->semaphore,
-		                cenv->smem->done_flag));
+		smem_await(!smem_get(&cenv->smem->semaphore,
+		                     cenv->smem->done_flag));
 		smem_put(&cenv->smem->semaphore,
 		         cenv->smem->done_flag = false);
 		cenv->last_checkpoint.valid = true;

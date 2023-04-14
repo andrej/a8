@@ -22,6 +22,7 @@
 #define DI_OPENED_ON_LEADER  0x4
 #define DI_UNCHECKED         0x8  /* Any operations involving this descriptor
                                      should not be cross-checked. */
+#define DI_WATCHED_BY_EPOLL 0x10 // fd is associated with some epoll 
 
 #define is_open_locally(env, di) \
 	((di->flags & DI_OPENED_LOCALLY) \

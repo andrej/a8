@@ -272,6 +272,14 @@ SYSCALL_ENTER_PROT(close)
 	if(di->flags & DI_UNCHECKED) {
 		return dispatch_leader_if_needed(di, DISPATCH_UNCHECKED);
 	}
+	/* We must purge the epoll information before close() exits, because
+	   afterwards the file descriptor is meaningless and can't be used
+	   for epoll_ctl. Hence, we assume the close will suceed. */
+	if(di->flags & DI_WATCHED_BY_EPOLL) {
+		SAFE_NZ_TRY(
+			purge_epoll_data_fd(env, env_canonical_fd_for(env, di))
+		); 
+	}
 	return dispatch_leader_if_needed(di, DISPATCH_CHECKED);
 }
 
@@ -284,9 +292,6 @@ SYSCALL_EXIT_PROT(close)
 		SAFE_LOGF("close removing descriptor.%s", "\n");
 #endif
 		SAFE_NZ_TRY(env_del_descriptor(env, di));
-		SAFE_NZ_TRY(
-			purge_epoll_data_fd(env, env_canonical_fd_for(env, di))
-		);
 	}
 	return 0;
 }
@@ -1341,6 +1346,8 @@ SYSCALL_EXIT_PROT(epoll_ctl)
 
 	switch(op) {
 		case EPOLL_CTL_ADD: {
+			struct descriptor_info *di = 
+				env_get_canonical_descriptor_info(env, fd);
 			if(0 > actual->ret) {
 				if(NULL != event_info) {
 					remove_epoll_data_info(env, event_info);
@@ -1350,6 +1357,9 @@ SYSCALL_EXIT_PROT(epoll_ctl)
 					SAFE_WARN("Cannot find event_info "
 					          "to add.\n");
 					post_call_error();
+				}
+				if(NULL != di) {
+					di->flags |= DI_WATCHED_BY_EPOLL;
 				}
 			}
 			break;
@@ -1499,13 +1509,7 @@ SYSCALL_EXIT_PROT(epoll_pwait)
 			SAFE_WARNF("No matching epoll event data structure "
 			           "found for epfd %d, fd %d (index %d)\n",
 				   epfd, custom_event->data.fd, i);
-			/* FIXME: An issue with our fork-checkpointing 
-			   implementation causes children to be notified of
-			   changes to file descriptors for which we have no
-			   data in our epoll data info list. For now, we
-			   just ignore those. */
-			continue;
-			//post_call_error();
+			post_call_error();
 		}
 		memcpy(&events[j].data, &own_event->event.data, 
 		       sizeof(own_event->event.data));

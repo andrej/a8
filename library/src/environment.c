@@ -95,6 +95,23 @@ int purge_epoll_data_fd(struct environment *env, int fd)
 		if(info->fd == fd) {
 			SAFE_NZ_TRY_EXCEPT(remove_epoll_data_info(env, info),
 			                   return 1);
+			/* When checkpointing, there may remain other 
+			   processes that refer to `fd`. This causes that
+			   file description to remain open, and epoll will 
+			   continue notifying for it -- not what we the program
+			   expects, so we must remove it here. Note that this 
+			   removal may fail if the target program already 
+			   removed it, in which case we silently ignore it. */
+			struct descriptor_info *epfd_di, *fd_di;
+			epfd_di = env_get_canonical_descriptor_info(env, 
+			                                            info->epfd);
+			fd_di = env_get_canonical_descriptor_info(env, fd);
+			if(NULL != epfd_di && NULL != fd_di
+			   && is_open_locally(env, epfd_di)
+			   && is_open_locally(env, fd_di)) {
+				int s = epoll_ctl(epfd_di->local_fd, EPOLL_CTL_DEL, 
+				                  fd_di->local_fd, NULL);
+			}
 		}
 	}
 	return 0;
@@ -191,8 +208,12 @@ checkpointed_environment_fix_up(struct environment *env)
 			const struct descriptor_info *fd_di = 
 				list_get_i(env->descriptors, j_item->fd);
 				// TODO add bounds check
+			struct epoll_event custom_event = {
+				.events = j_item->event.events,
+				.data.fd = j_item->fd
+			};
 			s = epoll_ctl(new_fd, EPOLL_CTL_ADD, fd_di->local_fd,
-				      &j_item->event);
+				      &custom_event);
 			if(0 != s) {
 				SAFE_WARNF("epoll_ctl failed for fd %d while "
 				          "trying to recreate epoll %d\n",

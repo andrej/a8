@@ -8,6 +8,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <semaphore.h>
+#include <sched.h>
 #include "config.h"
 #include "trap_instr.h"
 #include "environment.h"
@@ -49,6 +50,12 @@ struct checkpointing_smem {
 	while(0 != unprotected_funcs.sem_wait(sem)); \
 	put_op; \
 	unprotected_funcs.sem_post(sem); \
+})
+
+#define smem_await(cond) ({ \
+	while((cond)) { \
+ 		sched_yield();\
+	} \
 })
 
 struct checkpoint_env {

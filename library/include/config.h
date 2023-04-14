@@ -66,6 +66,11 @@ struct config {
 	 *  (b) the batch size is reached
 	 */
 	int replication_batch_size;
+	/**
+	 * If > 0, probabilistically insert divergences during execution to 
+	 * simulate attempted attacks or faults.
+	 */
+	double inject_fault_probability;
 };
 
 /**

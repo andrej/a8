@@ -329,9 +329,7 @@ create_fork_checkpoint(struct checkpoint_env *cenv)
 		   death (either kill errors because child already exited, or
 		   it succeeds -- in both cases after the call, the child is
 		   gone). */
-		kill(cenv->last_checkpoint.pid, SIGKILL);
-		int status;
-		waitpid(cenv->last_checkpoint.pid, &status, 0);
+		kill_and_wait(cenv->last_checkpoint.pid);
 	}
 
 	/* Set message in shared memory to CHECKPOINT_HOLD before fork() to
@@ -398,6 +396,10 @@ create_fork_checkpoint(struct checkpoint_env *cenv)
 			case CHECKPOINT_RESTORE: {
 				smem_put(&cenv->smem->semaphore, 
 				         cenv->smem->done_flag = true);
+				kill_and_wait(getppid());
+				/* Immediately create a copy of the current
+				   checkpoint state upon restore. */
+				SAFE_NZ_TRY(create_fork_checkpoint(cenv));
 				return 0; /* resume execution out of 
 				             syscall handler */
 			}

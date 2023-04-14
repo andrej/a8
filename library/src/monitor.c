@@ -4,6 +4,7 @@
 #include <sys/user.h>
 #include <unistd.h>
 #include <sys/syscall.h>
+#include <time.h>
 #include <sys/time.h>
 #include <netinet/in.h>
 
@@ -59,7 +60,8 @@ static void
 syscall_handle_divergence(struct monitor * const monitor,
 	                  const struct syscall_handler * const handler,
                           struct syscall_info *actual,
-                          struct syscall_info *canonical);
+                          struct syscall_info *canonical,
+			  const void *ret_addr);
 
 static void syscall_execute_locally(struct syscall_handler const *const handler,
                                     struct syscall_info *actual, 
@@ -129,7 +131,8 @@ long monmod_handle_syscall(struct syscall_trace_func_stack * const stack)
 	if(NULL != handler) {
 		SAFE_LOGF("[%3ld.%06ld] >> %s (%ld) -- enter from PC %p, PID "
 			  "%d.\n", rel_tv.tv_sec, rel_tv.tv_usec,
-			  handler->name, actual.no, ret_addr, getpid());
+			  handler->name, actual.no, ret_addr,
+			  monitor.env.pid->local_pid);
 	} else {
 		SAFE_LOGF("[%3ld.%06ld] >> enter unhandled syscall %ld.\n",
 		          rel_tv.tv_sec, rel_tv.tv_usec, actual.no);
@@ -154,8 +157,8 @@ long monmod_handle_syscall(struct syscall_trace_func_stack * const stack)
 	if(dispatch & (DISPATCH_CHECKED | DISPATCH_DEFERRED_CHECK)) {
 		SAFE_LZ_TRY(s = cross_check_args(&monitor, &canonical));
 		if(0 == s) {
-			syscall_handle_divergence(&monitor,
-			                          handler, &actual, &canonical);
+			syscall_handle_divergence(&monitor, handler, &actual, 
+			                          &canonical, ret_addr);
 		}
 	}
 
@@ -260,13 +263,22 @@ static
 void syscall_handle_divergence(struct monitor * const monitor,
 	                       struct syscall_handler const *const handler,
                                struct syscall_info *actual,
-                               struct syscall_info *canonical)
+                               struct syscall_info *canonical,
+			       const void * ret_addr)
 {
 	int s;
+	struct timeval tv, rel_tv;
+	SAFE_LZ_TRY(gettimeofday(&tv, NULL));
+	timersub(&tv, &monitor->start_tv, &rel_tv);
 #if !ENABLE_CHECKPOINTING
-	SAFE_LOG("Divergence -- abort!\n");
+	SAFE_LOG("[%3ld.%06ld] Divergence in '%s' called from %p, PID %d "
+	         "-- abort!\n", rel_tv.tv_sec, rel_tv.tv_usec, handler->name, 
+		 ret_addr, monitor->env.pid->local_pid);
 #else
-	SAFE_LOG("Divergence -- attempt restore last checkpoint.\n");
+	SAFE_LOGF("[%3ld.%06ld] Divergence in '%s' called from %p, PID %d "
+	          "-- attempting to restore last checkpoint.\n",
+		  rel_tv.tv_sec, rel_tv.tv_usec, handler->name, ret_addr,
+		  monitor->env.pid->local_pid);
 #endif
 #if VERBOSITY > 0 && VERBOSITY < 3
 	// Print divergence information if we have not before.
@@ -447,6 +459,9 @@ int monitor_init(struct monitor *monitor, int own_id, struct config *conf)
 					&monitor->addr_ranges));
 	monitor->env.pid->local_pid = getpid();
 #endif
+
+	/* Initiate random number generator used for fault injection */
+	srandom(time(NULL));
 
 	/* -- Register Tracing With Kernel Module -- */
 	register_monitor_in_kernel(monitor);

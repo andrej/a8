@@ -55,12 +55,22 @@ int cross_check_args(const struct monitor * const monitor,
 #if CHECK_HASHES_ONLY
 	const unsigned long hash = sdbm_hash(serialized_args_buf_len,
 					     serialized_args_buf);
-	char * const cross_check_buf = (char * const)&hash;
+	char * cross_check_buf = (char * const)&hash;
 	size_t cross_check_buf_len = sizeof(hash);
 #else
-	char * const cross_check_buf = (char * const)serialized_args_buf;
+	char * cross_check_buf = (char * const)serialized_args_buf;
 	size_t cross_check_buf_len = serialized_args_buf_len;
 #endif
+	/* Cause an artificial divergence probabilistically to test system if
+	   so configured. We only inject faults once the first checkpoint has
+	   been created -- thus assuming that the checkpoints are reasonably
+	   set, before any exposed code runs. */
+	if(monitor->conf.inject_fault_probability > 0
+	   && monitor->checkpoint_env->last_checkpoint.valid
+	   && random() < RAND_MAX*monitor->conf.inject_fault_probability) {
+		cross_check_buf = (char *)&monitor->own_id;
+		cross_check_buf_len = sizeof(monitor->own_id);
+	}
 	ret = comm_all_agree(&monitor->comm, monitor->leader_id,
 	                     cross_check_buf_len,
 			     cross_check_buf);

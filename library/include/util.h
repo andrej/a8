@@ -8,6 +8,8 @@
 #include <sys/syscall.h>
 #include <link.h>
 #include <elf.h>
+#include <signal.h>
+#include <wait.h>
 
 #include "build_config.h"
 #include "syscall.h"
@@ -132,5 +134,17 @@ int find_mapped_region_bounds(void * const needle,
  * child.
  */
 int open_log_file(unsigned long maj, unsigned long min);
+
+/**
+ * Kill a process and wait until it is terminated.
+ */
+static inline int kill_and_wait(pid_t target)
+{
+	SAFE_NZ_TRY_EXCEPT(kill(target, SIGKILL),
+	                   return 1);
+	int status;
+	waitpid(target, &status, 0);
+	return 0;
+}
 
 #endif

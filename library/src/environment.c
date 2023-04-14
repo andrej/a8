@@ -2,6 +2,7 @@
 #include <unistd.h>
 #include <string.h>
 #include <errno.h>
+#include <time.h>
 #include <sys/epoll.h>
 #include "environment.h"
 #include "communication.h"
@@ -153,6 +154,12 @@ int
 __attribute__((section("unprotected")))
 checkpointed_environment_fix_up(struct environment *env)
 {
+	env->pid->local_pid = getpid();
+	/* A newly created checkpoint should re-seed the random values used by
+	   fault injection. Otherwise, it may appen that we re-inject the same
+	   fault over and over again, and the program gets stuck in an infinite
+	   checkpoint/restore loop. */
+	srandom(time(NULL));
 	/* epoll has somewhat unintuitive behavior across fork() compared to 
 	   other file descriptors, outlined further below in this discussion
 	   https://groups.google.com/g/fa.linux.kernel/c/LH9hqwpeyuw 

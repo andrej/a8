@@ -31,6 +31,7 @@ int parse_config(const char *path, struct config *dest)
 	const char *tmp_str;
 	int tmp_int;
 	long long tmp_long;
+	double tmp_float;
 	struct sockaddr_in *sa;
 	int n_variants;
 
@@ -63,6 +64,13 @@ int parse_config(const char *path, struct config *dest)
 		strncpy(dest->policy, tmp_str, sizeof(dest->policy));
 	} else {
 		strncpy(dest->policy, "full", sizeof(dest->policy));
+	}
+
+	if(config_lookup_float(&config, "inject_fault_probability", &tmp_float))
+	{
+		dest->inject_fault_probability = tmp_float;
+	} else {
+		dest->inject_fault_probability = 0;
 	}
 
 	for(int i = 0; i < n_variants; i++) {

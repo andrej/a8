@@ -96,6 +96,7 @@ int sys_monmod_init(struct pt_regs *regs, struct tracee *tracee)
 	}
 #endif
 
+#if MONMOD_LOG_VERBOSITY >= 1
 	printk(KERN_INFO "monmod: <%d> Registered monitor: \n"
 		"    Trusted syscall address: %px \n"
 		"    Trace function address:  %px \n"
@@ -109,6 +110,7 @@ int sys_monmod_init(struct pt_regs *regs, struct tracee *tracee)
 		addr_ranges.code_start, addr_ranges.code_len,
 		addr_ranges.protected_data_start, 
 		addr_ranges.protected_data_len);
+#endif
 
 	return 0;
 }

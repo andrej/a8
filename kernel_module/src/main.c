@@ -65,7 +65,7 @@ unprotect_monitor_enter(struct tracee *tracee, struct pt_regs *regs)
 
 	SYSCALL_NO_REG(regs) = (unsigned long)__NR_getpid;
 
-#if MONMOD_MONITOR_PROTECTION == MONMOD_MONITOR_FLAG_PROTECTED
+#if MONMOD_MONITOR_PROTECTION & MONMOD_MONITOR_FLAG_PROTECTED
 	tracee->protection_state = TRACEE_IN_MONITOR;
 #elif MONMOD_MONITOR_PROTECTION == MONMOD_MONITOR_MPROTECTED
 	SYSCALL_NO_REG(regs) = __NR_mprotect;

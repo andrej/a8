@@ -85,6 +85,8 @@ static inline int init_vma_redirect() {
 
 extern struct socket_fptrs s;
 
+pid_t original_fork(void);
+
 pid_t vmafork(void);
 
 static inline int init_vma_redirect() {

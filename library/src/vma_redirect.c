@@ -1,3 +1,5 @@
+#define _GNU_SOURCE
+#include <dlfcn.h>
 #include "build_config.h"
 
 #if USE_LIBVMA
@@ -15,6 +17,18 @@ fork(void)
 {
        return unprotected_funcs.syscall(__NR_monmod_fake_fork, 0,
                                         0, 0, 0, 0, 0);
+}
+
+pid_t
+__attribute((visibility("default"),
+             section("unprotected")))
+original_fork(void)
+{
+       pid_t (* _fork)() = dlsym(RTLD_NEXT, "fork");
+       if(NULL == _fork) {
+              exit(1);
+       }
+       return _fork();
 }
 
 pid_t

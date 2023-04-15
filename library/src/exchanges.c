@@ -9,6 +9,7 @@
 //__attribute__((section("protected_state")))
 struct batch_communicator preallocated_batch_comm;
 
+__attribute__((aligned(4096)))
 char preallocated_batch_comm_memory[PREALLOCATED_REPLICATION_SZ];
 
 /* This buffer does not need to be "protected", since its value is overwritten
@@ -34,7 +35,7 @@ static char *receive_replication_buffer(const struct monitor * const monitor,
  * Synchronization                                                            *
  * ************************************************************************** */
 
-int synchronize(const struct monitor * const monitor, char reason)
+int synchronize(const struct monitor * const monitor, unsigned char reason)
 {
 	if(monitor->is_leader && REPLICATION_EXCHANGE != reason) {
 		// Allow followers waiting on batched communication to catch up.

@@ -18,13 +18,13 @@
 #include "monitor.h"
 
 
-#define ERROR_EXCHANGE 0x11
-#define CROSS_CHECK_EXCHANGE 0xAA
-#define REPLICATION_EXCHANGE 0xBB
-#define CREATE_CP_EXCHANGE 0xCC
-#define RESTORE_CP_EXCHANGE 0xDD
-#define FORK_EXCHANGE 0xEE
-#define TERMINATE_EXCHANGE 0xFF
+#define ERROR_EXCHANGE         (unsigned char)0x11
+#define CROSS_CHECK_EXCHANGE   (unsigned char)0xAA
+#define REPLICATION_EXCHANGE   (unsigned char)0xBB
+#define CREATE_CP_EXCHANGE     (unsigned char)0xCC
+#define RESTORE_CP_EXCHANGE    (unsigned char)0xDD
+#define FORK_EXCHANGE          (unsigned char)0xEE
+#define TERMINATE_EXCHANGE     (unsigned char)0xFF
 
 
 /**
@@ -44,7 +44,7 @@
  *  The follower will always detect divergences first, because it is the one
  *  catching up. 
  **/
-int synchronize(const struct monitor * const monitor, char reason);
+int synchronize(const struct monitor * const monitor, unsigned char reason);
 
 /**
  * Compare serialized arguments in `canonical` with other instances. This may

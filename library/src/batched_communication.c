@@ -3,13 +3,6 @@
 #include "communication.h"
 #include "util.h"
 
-#define batch_end(b) ((struct batch_item *)((char *)(b)->items \
-                                           + (b)->length))
-#define batch_capacity_end(b) ((struct batch_item *)((char *)(b)->items \
-                                                     + (b)->capacity))
-#define next_item(i) ((struct batch_item *)((char *)(i) \
-                                            + sizeof(*i) \
-                                            + (i)->length))
 
 struct batch_communicator *init_batch_comm(const struct communicator *comm, 
                                            const struct peer *recv_peer,
@@ -100,10 +93,11 @@ static int receive_next_batch(struct batch_communicator *bc)
 	size_t recv_len = 0;
 	size_t items_len = 0;
 	SAFE_NZ_TRY_EXCEPT(comm_receive_header(bc->comm, bc->recv_peer, &msg),
-		           goto abort0);
+		           return 1);
+	
 	items_len = msg.length - sizeof(struct batch);
 	recv_len = msg.length;
-	
+
 	/* Allocate new replication pool. */
 	struct batch *b;
 	SAFE_Z_TRY(b = alloc_current_batch(bc, items_len));
@@ -114,7 +108,7 @@ static int receive_next_batch(struct batch_communicator *bc)
 
 	SAFE_NZ_TRY_EXCEPT(comm_receive_body(bc->comm, bc->recv_peer, 
 	                                     &msg, &recv_len, (char *)b),
-		           goto abort1);
+		           goto abort);
 	SAFE_Z_TRY(msg.length == recv_len);  // assert
 	SAFE_Z_TRY(b->length == items_len);
 
@@ -125,9 +119,8 @@ static int receive_next_batch(struct batch_communicator *bc)
 
 	return 0;
 
-abort1:
+abort:
 	free_current_batch(bc);
-abort0:
 	return 1;
 }
 
@@ -135,7 +128,7 @@ char *batch_comm_receive(struct batch_communicator *bc, size_t *n)
 {
 	char *ret = NULL;
 
-	if(bc->current_item >= batch_end(bc->current_batch)) {
+	if(batch_comm_receive_will_communicate(bc)) {
 		/* Batch exhausted. Reset and receive next batch. */
 		SAFE_NZ_TRY_EXCEPT(receive_next_batch(bc),
 		                   return NULL);
@@ -155,7 +148,7 @@ char *batch_comm_receive(struct batch_communicator *bc, size_t *n)
 
 int batch_comm_flush(struct batch_communicator *bc)
 {
-	if(bc->current_batch->length > 0) {
+	if(batch_comm_flush_will_communicate(bc)) {
 		const size_t bcast_len = bc->current_batch->length +
 		                         sizeof(*bc->current_batch);
 		SAFE_NZ_TRY_EXCEPT(comm_broadcast(bc->comm, bcast_len, 
@@ -175,7 +168,7 @@ char *batch_comm_reserve(struct batch_communicator *bc, size_t len)
 {
 	const size_t item_len = sizeof(*bc->current_item) + len; 
 	struct batch *b = bc->current_batch;
-	if((char*)bc->current_item + item_len > (char*)batch_capacity_end(b)) {
+	if(batch_comm_reserve_will_communicate(bc, len)) {
 		/* New item does not fit in current batch. Send out batch. */
 		SAFE_NZ_TRY_EXCEPT(batch_comm_flush(bc),
 		                   return NULL);
@@ -193,8 +186,7 @@ char *batch_comm_reserve(struct batch_communicator *bc, size_t len)
 int batch_comm_broadcast_reserved(struct batch_communicator *bc)
 {
 	bc->current_item = next_item(bc->current_item);
-	if(bc->current_batch->length >= bc->flush_after
-	   || bc->current_item >= batch_capacity_end(bc->current_batch)) {
+	if(batch_comm_broadcast_reserved_will_communicate(bc)) {
 		SAFE_NZ_TRY_EXCEPT(batch_comm_flush(bc), return 1);
 		/* "Freeing" in the flush call above resets the current_batch
 		   to an empty preallocated default batch. */

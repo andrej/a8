@@ -122,21 +122,28 @@ char *serialize(const void *inp, const struct type *type, size_t *len)
 	return buf;
 }
 
-ssize_t deserialize(void *buf, const struct type *type, void *dest, 
+ssize_t deserialize(void *buf, size_t len, const struct type *type, void *dest, 
                     enum deserialize_approach approach)
 { 
 	assert(approach == DESERIALIZE_OVERWRITE
 	       || approach == DESERIALIZE_IN_PLACE && buf == dest);
+	assert(len >= 0);
 	switch(type->kind) {
 		case IGNORE:
 		{
+			if(len != type->immediate.size) {
+				return -1;
+			}
 			return type->immediate.size;
 		}
 		case IMMEDIATE: 
 		case DESCRIPTOR:
 		{
+			if(len != type->immediate.size) {
+				return -1;
+			}
 			/* Copy sizeof(imm) from buf to deserialize_into. */
-			if(NULL != dest && buf != dest) {
+			if(NULL != dest && buf != dest && NULL != buf) {
 				// TODO handle endianness
 				memcpy(dest, buf, type->immediate.size);
 			}
@@ -156,6 +163,10 @@ ssize_t deserialize(void *buf, const struct type *type, void *dest,
 			   deserialized recursively into the address at dest. */
 			struct type *pointee = type->pointer.type;
 
+			if(len < sizeof(void*) || NULL == buf) {
+				return -1;
+			}
+
 			/* Set pointer to deserialized pointee. */
 			void *recursive_dest = NULL;
 			if(*(uint64_t *)buf != 0UL) {
@@ -172,8 +183,11 @@ ssize_t deserialize(void *buf, const struct type *type, void *dest,
 			/* Recursively deserialize pointee. */
 			ssize_t s = 0;
 			if(*(uint64_t *)buf != 0UL) {
-				s = deserialize(buf + sizeof(uint64_t), pointee,
-				                recursive_dest, approach);
+				s = deserialize(buf + sizeof(uint64_t), 
+				                len - sizeof(uint64_t),
+				                pointee,
+				                recursive_dest, 
+						approach);
 				if(0 > s) {
 					return s;
 				}
@@ -182,10 +196,18 @@ ssize_t deserialize(void *buf, const struct type *type, void *dest,
 		}
 		case STRING: {
 			/* Copy string into deserialize_into. */
+			if(len < sizeof(uint64_t)) {
+				return -1;
+			}
 			uint64_t actual_strlen = *(uint64_t *)buf - 1;
+			if(len < actual_strlen + 1) {
+				return -1;
+			}
 			buf += sizeof(uint64_t);
 			size_t observed_strlen = strlen(buf);
-			assert(observed_strlen == actual_strlen);
+			if(observed_strlen != actual_strlen) {
+				return -1;
+			}
 			if(NULL != dest && buf != dest) {
 				memmove(dest, buf, actual_strlen);
 				((char *)dest)[actual_strlen] = '\0';
@@ -213,7 +235,13 @@ ssize_t deserialize(void *buf, const struct type *type, void *dest,
 			   overwritten -- recursive reference are deserialized
 			   into the locations given there.  */
 			size_t consumed = 0;
+			if(len < sizeof(uint64_t) || NULL == buf) {
+				return -1;
+			}
 			uint64_t actual_len = *(uint64_t *)buf;
+			if(len < actual_len) {
+				return -1;
+			}
 			consumed += sizeof(uint64_t);
 			if(0 == actual_len) {
 				return consumed;
@@ -251,7 +279,9 @@ ssize_t deserialize(void *buf, const struct type *type, void *dest,
 					recursive_dest = 
 						dest + reference->offset;
 				}
-				s = deserialize(buf + consumed, reference->type,
+				s = deserialize(buf + consumed, 
+				                len - consumed,
+						reference->type,
 				                recursive_dest, approach);
 				if(0 > s) {
 					return s;
@@ -274,14 +304,15 @@ ssize_t deserialize(void *buf, const struct type *type, void *dest,
 	return -1; /* unreachable*/
 }
 
-ssize_t deserialize_in_place(void *buf, struct type *type)
+ssize_t deserialize_in_place(void *buf, size_t len, struct type *type)
 {
-	return deserialize(buf, type, buf, DESERIALIZE_IN_PLACE);
+	return deserialize(buf, len, type, buf, DESERIALIZE_IN_PLACE);
 }
 
-ssize_t deserialize_overwrite(void *buf, struct type *type, void *dest)
+ssize_t deserialize_overwrite(void *buf, size_t len, struct type *type, 
+                              void *dest)
 {
-	return deserialize(buf, type, dest, DESERIALIZE_OVERWRITE);
+	return deserialize(buf, len, type, dest, DESERIALIZE_OVERWRITE);
 }
 
 static size_t write_printable_bytes(const char *inp, size_t inp_len,

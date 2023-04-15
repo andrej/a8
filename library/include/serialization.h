@@ -111,7 +111,7 @@ ssize_t serialize_into(const void *inp, const struct type *type, void *buf);
 
 char *serialize(const void *inp, const struct type *type, size_t *len);
 
-ssize_t deserialize(void *buf, const struct type *type, void *dest,
+ssize_t deserialize(void *buf, size_t len, const struct type *type, void *dest,
                     enum deserialize_approach approach);
 
 /**
@@ -120,7 +120,7 @@ ssize_t deserialize(void *buf, const struct type *type, void *dest,
  * 
  * Returns the number of bytes in the input buffer consumed.
  */
-ssize_t deserialize_in_place(void *buf, struct type *type);
+ssize_t deserialize_in_place(void *buf, size_t len, struct type *type);
 
 /**
  * Deserialize the buffer `buf` to overwrite the value at `dest`. Any pointers
@@ -131,7 +131,8 @@ ssize_t deserialize_in_place(void *buf, struct type *type);
  * deserialized to the destinations pointed to at those offsets in the `dest`
  * buffer.
 */
-ssize_t deserialize_overwrite(void *buf, struct type *type, void *dest);
+ssize_t deserialize_overwrite(void *buf, size_t len, struct type *type, 
+                              void *dest);
 
 /**
  * Return string in human-readable format that represents the data `inp`

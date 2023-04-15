@@ -16,7 +16,7 @@
 #include "globals.h"
 #include "arch.h"
 #include "unprotected.h"
-#include "replication.h"
+#include "exchanges.h"
 #include "communication.h"
 
 
@@ -56,16 +56,20 @@ syscall_check_dispatch_sanity(int dispatch,
                               struct syscall_info *actual,
                               struct syscall_info *canonical);
 
-static void
-syscall_handle_divergence(struct monitor * const monitor,
-	                  const struct syscall_handler * const handler,
-                          struct syscall_info *actual,
-                          struct syscall_info *canonical,
-			  const void *ret_addr);
-
 static void syscall_execute_locally(struct syscall_handler const *const handler,
                                     struct syscall_info *actual, 
                                     struct syscall_info *canonical);
+
+static int handle_divergence(const struct monitor * const monitor, char reason);
+
+static int handle_error(const struct monitor * const monitor);
+
+static void
+handle_cross_check_divergence(const struct monitor * const monitor,
+                              const struct syscall_handler * const handler,
+                              struct syscall_info *actual,
+                              struct syscall_info *canonical,
+                              const void *ret_addr);
 
 static void terminate(struct monitor * const monitor);
 
@@ -91,6 +95,17 @@ long monmod_handle_syscall(struct syscall_trace_func_stack * const stack)
 
 	int s = 0;
 	struct pt_regs *regs = &(stack->regs);
+
+	/* Cause an artificial divergence probabilistically to test system if
+	   so configured. We only inject faults once the first checkpoint has
+	   been created -- thus assuming that the checkpoints are reasonably
+	   set, before any exposed code runs. */
+	if(monitor.conf.inject_fault_probability > 0
+	   && monitor.checkpoint_env->last_checkpoint.valid
+	   && random() < RAND_MAX*monitor.conf.inject_fault_probability) {
+		SYSCALL_NO_REG(regs) = -1;
+	}
+
 	const long syscall_no = SYSCALL_NO_REG(regs);
 	const void *ret_addr = (void *)PC_REG(regs);
 	struct syscall_handler const * const handler = get_handler(syscall_no);
@@ -98,12 +113,13 @@ long monmod_handle_syscall(struct syscall_trace_func_stack * const stack)
 	struct syscall_info canonical = {};
 	void *handler_scratch_space = NULL;
 	int dispatch = 0;
+
 #if VERBOSITY >= 2
 	struct timeval tv, rel_tv;
 #endif
 
 #if ENABLE_CHECKPOINTING
-	restore_checkpoint_if_needed(monitor.checkpoint_env, 
+	syscall_handle_checkpointing(monitor.checkpoint_env, 
 	                             monitor.conf.restore_interval);
 #endif
 #if NO_HANDLER_TERMINATES
@@ -151,14 +167,22 @@ long monmod_handle_syscall(struct syscall_trace_func_stack * const stack)
 		dispatch &= ~DISPATCH_CHECKED & ~DISPATCH_DEFERRED_CHECK;
 		dispatch |= DISPATCH_UNCHECKED;
 	}
+
+	if(dispatch & DISPATCH_ERROR) {
+		SAFE_WARN("Dispatch error.\n");
+		SAFE_NZ_TRY(synchronize(&monitor, ERROR_EXCHANGE));
+		monmod_exit(1);
+	}
+
 	syscall_check_dispatch_sanity(dispatch, handler, &actual, &canonical);
 
 	/* Phase 2: Cross-check system call & arguments with other variants. */
 	if(dispatch & (DISPATCH_CHECKED | DISPATCH_DEFERRED_CHECK)) {
 		SAFE_LZ_TRY(s = cross_check_args(&monitor, &canonical));
 		if(0 == s) {
-			syscall_handle_divergence(&monitor, handler, &actual, 
-			                          &canonical, ret_addr);
+			handle_cross_check_divergence(&monitor, handler, 
+			                              &actual, &canonical, 
+						      ret_addr);
 		}
 	}
 
@@ -201,6 +225,7 @@ long monmod_handle_syscall(struct syscall_trace_func_stack * const stack)
 		                  &canonical, &handler_scratch_space);
 		if(0 != s) {
 			SAFE_WARNF("Exit handler returned error %d.\n", s);
+			SAFE_NZ_TRY(synchronize(&monitor, ERROR_EXCHANGE));
 			monmod_exit(1);
 		}
 	}
@@ -222,11 +247,6 @@ syscall_check_dispatch_sanity(int dispatch,
                               struct syscall_info *actual,
                               struct syscall_info *canonical)
 {
-	if(dispatch & DISPATCH_ERROR) {
-		SAFE_WARN("Error on dispatch.\n");
-		monmod_exit(1);
-	}
-
 	if(dispatch & DISPATCH_LEADER) {
 		if(!(dispatch & DISPATCH_NEEDS_REPLICATION)) {
 #if VERBOSITY >= 2
@@ -259,51 +279,6 @@ syscall_check_dispatch_sanity(int dispatch,
 	return 0;
 }
 
-static
-void syscall_handle_divergence(struct monitor * const monitor,
-	                       struct syscall_handler const *const handler,
-                               struct syscall_info *actual,
-                               struct syscall_info *canonical,
-			       const void * ret_addr)
-{
-	int s;
-	struct timeval tv, rel_tv;
-	SAFE_LZ_TRY(gettimeofday(&tv, NULL));
-	timersub(&tv, &monitor->start_tv, &rel_tv);
-#if !ENABLE_CHECKPOINTING
-	SAFE_LOG("[%3ld.%06ld] Divergence in '%s' called from %p, PID %d "
-	         "-- abort!\n", rel_tv.tv_sec, rel_tv.tv_usec, handler->name, 
-		 ret_addr, monitor->env.pid->local_pid);
-#else
-	SAFE_LOGF("[%3ld.%06ld] Divergence in '%s' called from %p, PID %d "
-	          "-- attempting to restore last checkpoint.\n",
-		  rel_tv.tv_sec, rel_tv.tv_usec, handler->name, ret_addr,
-		  monitor->env.pid->local_pid);
-#endif
-#if VERBOSITY > 0 && VERBOSITY < 3
-	// Print divergence information if we have not before.
-	if(NULL != handler) {
-		SAFE_LOGF("%s (%ld)\n", handler->name, actual->no);
-		char log_buf[1024];
-		log_buf[0] = '\0';
-		log_args(log_buf, sizeof(log_buf), actual, canonical);
-		SAFE_LOGF_LEN(sizeof(log_buf), "%s", log_buf);
-	}
-#endif
-#if ENABLE_CHECKPOINTING
-	if(monitor->checkpoint_env->last_checkpoint.valid) {
-		s = restore_last_checkpoint(monitor->checkpoint_env);
-		if(0 != s) {
-			SAFE_WARNF("Checkpoint restoration failed with "
-			          "exit code %d.\n", s);
-		}
-	} else {
-		SAFE_WARN("No valid last checkpoint.\n");
-	}
-#endif
-	monmod_exit(2);
-}
-
 static void syscall_execute_locally(struct syscall_handler const *const handler,
                                     struct syscall_info *actual, 
                                     struct syscall_info *canonical)
@@ -332,6 +307,67 @@ static void syscall_execute_locally(struct syscall_handler const *const handler,
 			SAFE_LOGF("Returned: %ld\n", actual->ret);
 		}
 #endif
+}
+
+
+/* ************************************************************************** *
+ * Divergence Handling                                                        *
+ * ************************************************************************** */
+
+int handle_divergence(const struct monitor * const monitor, char reason)
+{
+	int s = 0;
+#if ENABLE_CHECKPOINTING
+	if(monitor->checkpoint_env->last_checkpoint.valid) {
+		s = restore_last_checkpoint(monitor->checkpoint_env);
+		if(0 != s) {
+			SAFE_WARNF("Checkpoint restoration failed with "
+			          "exit code %d.\n", s);
+		}
+	} else {
+		SAFE_WARN("No valid last checkpoint.\n");
+	}
+#endif
+	monmod_exit(2);
+}
+
+static
+void handle_cross_check_divergence(const struct monitor * const monitor,
+                                   struct syscall_handler const *const handler,
+                                   struct syscall_info *actual,
+                                   struct syscall_info *canonical,
+                                   const void * ret_addr)
+{
+	struct timeval tv, rel_tv;
+	SAFE_LZ_TRY(gettimeofday(&tv, NULL));
+	timersub(&tv, &monitor->start_tv, &rel_tv);
+#if !ENABLE_CHECKPOINTING
+	SAFE_LOG("[%3ld.%06ld] Divergence in '%s' called from %p, PID %d "
+	         "-- abort!\n", rel_tv.tv_sec, rel_tv.tv_usec, handler->name, 
+		 ret_addr, monitor->env.pid->local_pid);
+#else
+	SAFE_LOGF("[%3ld.%06ld] Divergence in '%s' called from %p, PID %d "
+	          "-- attempting to restore last checkpoint.\n",
+		  rel_tv.tv_sec, rel_tv.tv_usec, handler->name, ret_addr,
+		  monitor->env.pid->local_pid);
+#endif
+#if VERBOSITY > 0 && VERBOSITY < 3
+	// Print divergence information if we have not before.
+	if(NULL != handler) {
+		SAFE_LOGF("%s (%ld)\n", handler->name, actual->no);
+		char log_buf[1024];
+		log_buf[0] = '\0';
+		log_args(log_buf, sizeof(log_buf), actual, canonical);
+		SAFE_LOGF_LEN(sizeof(log_buf), "%s", log_buf);
+	}
+#endif
+	handle_divergence(monitor, CROSS_CHECK_EXCHANGE);
+}
+
+static int handle_error(const struct monitor * const monitor)
+{
+	SAFE_WARN("Terminating due to error in all variants.\n");
+	monmod_exit(2);
 }
 
 
@@ -424,6 +460,8 @@ int monitor_init(struct monitor *monitor, int own_id, struct config *conf)
 	monitor->is_leader = conf->leader_id == own_id;
 	monitor->conf = *conf;
 	monitor->ancestry = 0;
+	monitor->handle_divergence = handle_divergence;
+	monitor->handle_error = handle_error;
 	SAFE_Z_TRY(monitor->policy = policy_from_str(conf->policy));
 
 	SAFE_Z_TRY(own_variant_conf = get_variant(conf, own_id));
@@ -487,6 +525,7 @@ monitor_destroy(struct monitor *monitor)
 static void terminate(struct monitor * const monitor)
 {
 	struct timeval end_tv, duration;
+	synchronize(monitor, TERMINATE_EXCHANGE);
 	replication_destroy(monitor);
 	comm_destroy(&monitor->comm);
 #if VERBOSITY >= 1
@@ -549,6 +588,8 @@ int monitor_arbitrate_child_comm(struct monitor *parent_monitor,
 	                                 (struct sockaddr *)&own_addr));
 	uint64_t variant_ports[parent_monitor->conf.n_variants];
 
+	SAFE_NZ_TRY(synchronize(parent_monitor, FORK_EXCHANGE));
+
 	/* We let everyone know the new ports for the servers we just 
 	   started using the existing parent connection. */
 	if(!parent_monitor->is_leader) {
@@ -580,8 +621,6 @@ int monitor_arbitrate_child_comm(struct monitor *parent_monitor,
 		memcpy(variant_ports, received->variant_ports,
 		       sizeof(variant_ports));
 	} else {
-		SAFE_NZ_TRY_EXCEPT(batch_comm_flush(parent_monitor->batch_comm),
-		                   return -1);
 		/* The leader broadcasts the set of new ports.*/
 		size_t received_sz = sizeof(struct arbitration_msg)
 		                     + sizeof(uint64_t);

@@ -10,16 +10,15 @@
 #include <sys/time.h>
 
 #include "arch.h"
-#include "syscall.h"
+#include "monmod_syscall.h"
 #include "util.h"
 #include "config.h"
 #include "communication.h"
 #include "build_config.h"
-#include "syscall.h"
 #include "syscall_trace_func.h"
 #include "environment.h"
 #include "serialization.h"
-#include "replication.h"
+#include "exchanges.h"
 #include "custom_syscalls.h"
 #include "library_init.h"
 #include "unprotected.h"

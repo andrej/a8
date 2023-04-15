@@ -6,7 +6,7 @@
 #include <elf.h>
 #include <fcntl.h>
 
-#include "syscall.h"
+#include "monmod_syscall.h"
 #include "util.h"
 
 void *safe_malloc(size_t size)

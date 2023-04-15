@@ -34,7 +34,7 @@ extern char __unprotected_end;
 
 struct unprotected_funcs {
 
-	// syscall.h
+	// monmod_syscall.h
 	long (* syscall)(long, long, long, long, long, long, long);
 
    // environment.h

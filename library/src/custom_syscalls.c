@@ -1,5 +1,5 @@
 #include "custom_syscalls.h"
-#include "syscall.h"
+#include "monmod_syscall.h"
 #include "util.h"
 #include "unprotected.h"
 

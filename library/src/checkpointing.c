@@ -14,12 +14,13 @@
 #include "config.h"
 #include "arch.h"
 #include "trap_instr.h"
-#include "syscall.h"
+#include "monmod_syscall.h"
 #include "syscall_trace_func.h"
 #include "library_init.h"
 #include "unprotected.h"
 #include "environment.h"
 #include "globals.h"
+#include "exchanges.h"
 #if ENABLE_CHECKPOINTING == CRIU_CHECKPOINTING
 #include "dumper_restorer.h"
 #endif
@@ -128,9 +129,6 @@ int restore_last_checkpoint(struct checkpoint_env *env)
 	if(!env->last_checkpoint.valid) {
 		return 1;
 	}
-	if(env->monitor->is_leader) {
-		SAFE_NZ_TRY(batch_comm_flush(env->monitor->batch_comm));
-	}
 #if ENABLE_CHECKPOINTING == FORK_CHECKPOINTING
 	smem_put(&env->smem->semaphore, 
 	         env->smem->message = CHECKPOINT_RESTORE);
@@ -141,7 +139,7 @@ int restore_last_checkpoint(struct checkpoint_env *env)
 	exit(0);
 }
 
-void restore_checkpoint_if_needed(struct checkpoint_env *env, 
+void syscall_handle_checkpointing(struct checkpoint_env *env, 
                                   int restore_interval)
 {
 	/* We cannot successfully create a checkpoint from within the signal
@@ -150,11 +148,9 @@ void restore_checkpoint_if_needed(struct checkpoint_env *env,
 	   flag was set in the breakpoint beforehand. */
 	if(env->create_checkpoint) {
 #if VERBOSITY >= 2
-		SAFE_LOG("Creating checkpoint.\n")
+		SAFE_LOGF("<%d> Creating checkpoint.\n", getpid());
 #endif
-		if(env->monitor->is_leader) {
-			SAFE_NZ_TRY(batch_comm_flush(env->monitor->batch_comm));
-		}
+		SAFE_NZ_TRY(synchronize(env->monitor, CREATE_CP_EXCHANGE));
 #if ENABLE_CHECKPOINTING == FORK_CHECKPOINTING
 		SAFE_NZ_TRY(create_fork_checkpoint(env));
 #elif ENABLE_CHECKPOINTING == CRIU_CHECKPOINTING

@@ -5,7 +5,7 @@
 
 #include "unprotected.h"
 #include "checkpointing.h"
-#include "syscall.h"
+#include "monmod_syscall.h"
 #include "custom_syscalls.h"
 #include "library_init.h"
 #include "monitor.h"

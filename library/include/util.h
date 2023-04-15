@@ -12,7 +12,7 @@
 #include <wait.h>
 
 #include "build_config.h"
-#include "syscall.h"
+#include "monmod_syscall.h"
 #include "custom_syscalls.h"
 
 

@@ -74,7 +74,7 @@ int comm_disconnect_all(struct communicator *comm);
 
 int comm_send(const struct communicator * const comm, int peer_id, size_t n, 
               const char *buf);
-#define comm_send_p(comm, peer_id, val) comm_send(comm, peer_id, \
+#define comm_send_p(comm, peer_id, val) comm_send((comm), (peer_id), \
                                                   sizeof(val), (char *)&(val))
 
 int comm_receive_header(const struct communicator * const comm, 
@@ -139,7 +139,7 @@ int comm_receive_dynamic(const struct communicator * const comm, int peer_id,
  */
 int comm_broadcast(const struct communicator * const comm, size_t n, 
                    const char *buf);
-#define comm_broadcast_p(comm, val) comm_broadcast(comm, sizeof(val), \
+#define comm_broadcast_p(comm, val) comm_broadcast((comm), sizeof(val), \
                                                    (char *)&(val))
 
 /**
@@ -156,7 +156,7 @@ int comm_broadcast(const struct communicator * const comm, size_t n,
 int comm_all_agree(const struct communicator * const comm, int leader_id, 
                    size_t n, const char *buf);
 #define comm_all_agree_p(comm, leader_id, val) \
-		comm_all_agree(comm, leader_id, sizeof(val), (char *)&(val))
+		comm_all_agree((comm), (leader_id), sizeof(val), (char *)&(val))
 
 
 #endif

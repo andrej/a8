@@ -51,13 +51,6 @@ struct config {
 	 */
 	char policy[64];
 	/**
-	 * If set to a positive value, this will reset the variant to the last
-	 * checkpoint after every # restore_interval system calls. Set too low,
-	 * this will lead to an infinite loop. For server-type applications,
-	 * this could potentially be useful as a moving target defense.
-	 */
-	int restore_interval;
-	/**
 	 * If set to > 1, replication buffers are exchanged in batches of up to
 	 * the given size between variants. System call replication information
 	 * is always exchanged when
@@ -66,6 +59,13 @@ struct config {
 	 *  (b) the batch size is reached
 	 */
 	int replication_batch_size;
+	/**
+	 * If set to a positive value, this will reset the variant to the last
+	 * checkpoint after every # restore_interval system calls. Set too low,
+	 * this will lead to an infinite loop. For server-type applications,
+	 * this could potentially be useful as a moving target defense.
+	 */
+	double restore_probability;
 	/**
 	 * If > 0, probabilistically insert divergences during execution to 
 	 * simulate attempted attacks or faults.

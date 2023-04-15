@@ -5,6 +5,18 @@
 #include <stdbool.h>
 #include "communication.h"
 
+/* ************************************************************************** *
+ * Macros                                                                     *
+ * ************************************************************************** */
+
+#define batch_end(b) ((struct batch_item *)((char *)(b)->items \
+                                           + (b)->length))
+#define batch_capacity_end(b) ((struct batch_item *)((char *)(b)->items \
+                                                     + (b)->capacity))
+#define next_item(i) ((struct batch_item *)((char *)(i) \
+                                            + sizeof(*i) \
+                                            + (i)->length))
+
 
 /* ************************************************************************** *
  * Data Types                                                                 *
@@ -56,7 +68,19 @@ int init_batch_comm_at(struct batch_communicator *bc,
 
 void free_batch_comm(struct batch_communicator *bc);
 
+static inline bool 
+batch_comm_receive_will_communicate(const struct batch_communicator * const bc)
+{
+	return bc->current_item >= batch_end(bc->current_batch);
+}
+
 char *batch_comm_receive(struct batch_communicator *bc, size_t *n);
+
+static inline bool 
+batch_comm_flush_will_communicate(struct batch_communicator *bc)
+{
+	return bc->current_batch->length > 0;
+}
 
 /**
  * If the current batch has contents, broadcst it to the receivers, then free 
@@ -65,6 +89,16 @@ char *batch_comm_receive(struct batch_communicator *bc, size_t *n);
  * receive other message instead of batch first.)
  */
 int batch_comm_flush(struct batch_communicator *bc);
+
+static inline bool
+batch_comm_reserve_will_communicate(const struct batch_communicator * const bc,
+                                    size_t len)
+{
+	const size_t item_len = sizeof(*bc->current_item) + len; 
+	struct batch *b = bc->current_batch;
+	return ((char*)bc->current_item + item_len 
+	        > (char*)batch_capacity_end(b));
+}
 
 /**
  * Reserve `len` bytes, to be subsequently sent using 
@@ -76,6 +110,14 @@ int batch_comm_flush(struct batch_communicator *bc);
  * call to this function.
  */
 char *batch_comm_reserve(struct batch_communicator *bc, size_t len);
+
+static inline bool
+batch_comm_broadcast_reserved_will_communicate(const struct batch_communicator 
+                                               * const bc)
+{
+	return (bc->current_batch->length >= bc->flush_after
+	        || bc->current_item >= batch_capacity_end(bc->current_batch));
+}
 
 int batch_comm_broadcast_reserved(struct batch_communicator *bc);
 

@@ -129,6 +129,9 @@ int restore_last_checkpoint(struct checkpoint_env *env)
 	if(!env->last_checkpoint.valid) {
 		return 1;
 	}
+#if VERBOSITY >= 2
+	SAFE_LOGF("<%d> Restoring last checkpoint.\n", getpid());
+#endif
 #if ENABLE_CHECKPOINTING == FORK_CHECKPOINTING
 	smem_put(&env->smem->semaphore, 
 	         env->smem->message = CHECKPOINT_RESTORE);
@@ -139,8 +142,7 @@ int restore_last_checkpoint(struct checkpoint_env *env)
 	exit(0);
 }
 
-void syscall_handle_checkpointing(struct checkpoint_env *env, 
-                                  int restore_interval)
+void syscall_handle_checkpointing(struct checkpoint_env *env)
 {
 	/* We cannot successfully create a checkpoint from within the signal
 	   handler in a breakpoint with CRIU. This workaround creates a
@@ -157,21 +159,6 @@ void syscall_handle_checkpointing(struct checkpoint_env *env,
 		SAFE_NZ_TRY(create_criu_checkpoint(env));
 #endif
 		env->create_checkpoint = false;
-	}
-
-	/* Periodically restore to the last checkpoint, as set in
-	   config.restore_interval. This is used to assess the performance of
-	   the checkpoint/restore mechanism. Otherwise, a restore only takes
-	   place upon a divergence. */
-	if(restore_interval <= 0 || env->n_breakpoints <= 0
-	   || !env->last_checkpoint.valid) {
-		return;
-	}
-	if(env->breakpoints[0].hits % restore_interval == 0) {
-		SAFE_LOGF("<%d> Restoring last checkpoint.\n", getpid());
-		restore_last_checkpoint(env);
-		/* Should be unreachable. */
-		Z_TRY_EXCEPT(0, exit(1));
 	}
 }
 
@@ -344,6 +331,7 @@ create_fork_checkpoint(struct checkpoint_env *cenv)
 #endif
 	if(0 == child) { // child
 		s = checkpointed_environment_fix_up(cenv->tracee_env);
+		cenv->breakpoints[0].hits = 0;
 		smem_put(&cenv->smem->semaphore,
 		         cenv->smem->done_flag = true);
 			// Parent needs to synchronize with fix up

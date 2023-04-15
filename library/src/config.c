@@ -48,12 +48,6 @@ int parse_config(const char *path, struct config *dest)
 	}
 	dest->n_variants = n_variants;
 
-	if(config_lookup_int(&config, "restore_interval", 
-	                     &tmp_int)) {
-		Z_TRY(tmp_int >= 0);
-		dest->restore_interval = tmp_int;
-	}
-
 	if(config_lookup_int(&config, "replication_batch_size", &tmp_int)) {
 		dest->replication_batch_size = tmp_int;
 	} else {
@@ -66,8 +60,15 @@ int parse_config(const char *path, struct config *dest)
 		strncpy(dest->policy, "full", sizeof(dest->policy));
 	}
 
+	if(config_lookup_float(&config, "restore_probability", 
+	                     &tmp_float)) {
+		Z_TRY(tmp_float >= 0 && tmp_float < 1);
+		dest->restore_probability = tmp_float;
+	}
+
 	if(config_lookup_float(&config, "inject_fault_probability", &tmp_float))
 	{
+		Z_TRY(tmp_float >= 0 && tmp_float < 1);
 		dest->inject_fault_probability = tmp_float;
 	} else {
 		dest->inject_fault_probability = 0;

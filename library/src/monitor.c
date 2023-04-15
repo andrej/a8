@@ -96,6 +96,12 @@ long monmod_handle_syscall(struct syscall_trace_func_stack * const stack)
 	int s = 0;
 	struct pt_regs *regs = &(stack->regs);
 
+#if ENABLE_CHECKPOINTING
+	if(monitor.conf.restore_probability > 0
+	   && monitor.checkpoint_env->last_checkpoint.valid
+	   && random() < RAND_MAX*monitor.conf.restore_probability) {
+		SAFE_NZ_TRY(synchronize(&monitor, ERROR_EXCHANGE));
+	}
 	/* Cause an artificial divergence probabilistically to test system if
 	   so configured. We only inject faults once the first checkpoint has
 	   been created -- thus assuming that the checkpoints are reasonably
@@ -105,6 +111,7 @@ long monmod_handle_syscall(struct syscall_trace_func_stack * const stack)
 	   && random() < RAND_MAX*monitor.conf.inject_fault_probability) {
 		SYSCALL_NO_REG(regs) = -1;
 	}
+#endif
 
 	const long syscall_no = SYSCALL_NO_REG(regs);
 	const void *ret_addr = (void *)PC_REG(regs);
@@ -119,8 +126,7 @@ long monmod_handle_syscall(struct syscall_trace_func_stack * const stack)
 #endif
 
 #if ENABLE_CHECKPOINTING
-	syscall_handle_checkpointing(monitor.checkpoint_env, 
-	                             monitor.conf.restore_interval);
+	syscall_handle_checkpointing(monitor.checkpoint_env);
 #endif
 #if NO_HANDLER_TERMINATES
 	if(NULL == handler) {
@@ -342,9 +348,9 @@ void handle_cross_check_divergence(const struct monitor * const monitor,
 	SAFE_LZ_TRY(gettimeofday(&tv, NULL));
 	timersub(&tv, &monitor->start_tv, &rel_tv);
 #if !ENABLE_CHECKPOINTING
-	SAFE_LOG("[%3ld.%06ld] Divergence in '%s' called from %p, PID %d "
-	         "-- abort!\n", rel_tv.tv_sec, rel_tv.tv_usec, handler->name, 
-		 ret_addr, monitor->env.pid->local_pid);
+	SAFE_LOGF("[%3ld.%06ld] Divergence in '%s' called from %p, PID %d "
+	          "-- abort!\n", rel_tv.tv_sec, rel_tv.tv_usec, handler->name, 
+		  ret_addr, monitor->env.pid->local_pid);
 #else
 	SAFE_LOGF("[%3ld.%06ld] Divergence in '%s' called from %p, PID %d "
 	          "-- attempting to restore last checkpoint.\n",

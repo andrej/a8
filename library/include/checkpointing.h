@@ -85,8 +85,7 @@ int init_checkpoint_env(struct checkpoint_env *env,
 
 int restore_last_checkpoint(struct checkpoint_env *env);
 
-void restore_checkpoint_if_needed(struct checkpoint_env *env, 
-                                  int restore_interval);
+void syscall_handle_checkpointing(struct checkpoint_env *env);
 
 #endif
 #endif

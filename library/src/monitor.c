@@ -587,12 +587,29 @@ int monitor_arbitrate_child_comm(struct monitor *parent_monitor,
 	struct sockaddr_in own_addr = { .sin_family = AF_INET,
 	                                .sin_addr = INADDR_ANY,
 					.sin_port = 0 };
+#if USE_LIBVMA
+	/* libVMA does not persist open sockets across fork, so above approach
+	    of opening the child socket before the fork to obtain any open
+	    port does not work.
+	    
+	    Instead, when libVMA is used, this function is actually called
+	    _after_ the fork already took place, and we use hard coded ports
+	    instead. */
+	close(parent_monitor->comm.self.fd);
+	pid_t hard_port = 
+		((struct sockaddr_in *)&parent_monitor->comm.self.addr)
+		->sin_port + 1;
+	own_addr.sin_port = hard_port;
+#endif
 
 	uint64_t own_port;
 	SAFE_LZ_TRY(own_port = comm_init(child_comm, 
 	                                 parent_monitor->own_id, 
 	                                 (struct sockaddr *)&own_addr));
 	uint64_t variant_ports[parent_monitor->conf.n_variants];
+
+#if !USE_LIBVMA
+	/* Exchange open port information for the child communicator. */
 
 	SAFE_NZ_TRY(synchronize(parent_monitor, FORK_EXCHANGE));
 
@@ -661,6 +678,12 @@ int monitor_arbitrate_child_comm(struct monitor *parent_monitor,
 		memcpy(variant_ports, outbound->variant_ports,
 		       sizeof(variant_ports));
 	}
+#else
+	/* Use hard-coded ports if we are using libVMA. */
+	for(size_t i = 0; i < parent_monitor->conf.n_variants; i++) {
+		variant_ports[i] = hard_port;
+	}
+#endif
 
 	/* Finally, connect everyone to everyone on the new negotiated ports. */
 	for(size_t i = 0; i < parent_monitor->conf.n_variants; i++) {
@@ -675,6 +698,12 @@ int monitor_arbitrate_child_comm(struct monitor *parent_monitor,
 			                       ->conf.variants[i].addr)
 			->sin_addr;
 		child_addr.sin_port = variant_ports[i];
+#if USE_LIBVMA
+		usleep(200000*parent_monitor->own_id);
+			/* ... if you have a better idea, I'm all ears. We are
+			   in the child process and cannot use parents socket
+			   to synchronize. */
+#endif
 		SAFE_NZ_TRY(comm_connect(child_comm, 
 		                    parent_monitor->conf.variants[i].id, 
 		                    (struct sockaddr *)&child_addr));

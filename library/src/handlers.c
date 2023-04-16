@@ -21,6 +21,7 @@
 #include "environment.h"
 #include "monitor.h"
 #include "globals.h"
+#include "exchanges.h"
 
 #include "handler_table_definitions.h"
 #include "handlers_support.h"
@@ -2244,11 +2245,12 @@ SYSCALL_ENTER_PROT(monmod_fake_fork)
 	struct communicator *child_comm = (struct communicator *)*scratch;
 	memset(child_comm, 0, sizeof(*child_comm));
 	int dispatch = DISPATCH_SKIP;
-	SAFE_NZ_TRY_EXCEPT(
-		monitor_arbitrate_child_comm(&monitor, child_comm),
-		return DISPATCH_ERROR);
+	SAFE_NZ_TRY(synchronize(&monitor, FORK_EXCHANGE));
 	actual->ret = vmafork();
 	if(0 == actual->ret) {  // child
+		SAFE_NZ_TRY_EXCEPT(
+			monitor_arbitrate_child_comm(&monitor, child_comm),
+			return DISPATCH_ERROR);
 		canonical->ret = actual->ret;
 	}
 	if(0 != (redirect_exit(clone))) {  
@@ -2305,6 +2307,11 @@ SYSCALL_EXIT_PROT(fork)
 
 SYSCALL_ENTER_PROT(clone)
 {
+#if USE_LIBVMA
+	SAFE_WARN("clone() is not supported when using libVMA. fork() is "
+	          "only supported using the monmod_fake_fork handler.\n");
+	return DISPATCH_ERROR;
+#endif
 #if !MEASURE_TRACING_OVERHEAD
 	alloc_scratch(sizeof(struct communicator));
 	struct communicator *child_comm = (struct communicator *)*scratch;

@@ -74,11 +74,12 @@ POLICY_EXEMPT(nonsocket_ro)
 		//case SYSCALL_select_CANONICAL:
 		//case SYSCALL_poll_CANONICAL:
 		{
+			int fd = canonical->args[0];
 			const struct descriptor_info *di;
-			SAFE_NZ_TRY(
+			SAFE_Z_TRY(
 				di = env_get_canonical_descriptor_info(
 						(struct environment *)env, 
-						canonical->args[0]));
+						fd));
 			if(SOCKET_DESCRIPTOR == di->type) {
 				return false;
 			}
@@ -109,7 +110,7 @@ POLICY_EXEMPT(nonsocket_rw)
 		//case SYSCALL_pwritev_CANONICAL:
 		{
 			const struct descriptor_info *di;
-			SAFE_NZ_TRY(
+			SAFE_Z_TRY(
 				di = env_get_canonical_descriptor_info(
 						(struct environment *)env, 
 						canonical->args[0]));

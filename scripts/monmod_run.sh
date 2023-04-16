@@ -17,7 +17,7 @@ shift 2
 
 dbg_cmd="env"
 
-sudo ${script_dir}/reset_monmod.sh 
+sudo -S ${script_dir}/reset_monmod.sh 
 
 # Remove any previous checkpoints stored by CRIU
 if [ -d criu_images ];

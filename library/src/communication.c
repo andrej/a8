@@ -33,16 +33,12 @@ static int open_tcp_socket()
 		goto abort1);
 
 	ov = 1;
-	/* It is probably better to fail with an error if another
-	   instance is still hogging the port than to try to reuse it. If
-	   a lot of benchmarks are to be run back-to-back, this may have to
-	   be uncommeted:
 	NZ_TRY_EXCEPT(s.setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &ov, 
 			           sizeof(ov)),
 		goto abort2);
 	NZ_TRY_EXCEPT(s.setsockopt(fd, SOL_SOCKET, SO_REUSEPORT, &ov, 
 			           sizeof(ov)),
-		goto abort2); */
+		goto abort2);
 	// Minimal-latency socket: disable Nagle's algorithm
 	NZ_TRY_EXCEPT(s.setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &ov, 
 			           sizeof(ov)),

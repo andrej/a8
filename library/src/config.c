@@ -74,6 +74,13 @@ int parse_config(const char *path, struct config *dest)
 		dest->inject_fault_probability = 0;
 	}
 
+	if(config_lookup_int(&config, "socket_read_usleep", &tmp_int))
+	{
+		dest->socket_read_usleep = tmp_int;
+	} else {
+		dest->socket_read_usleep = 0;
+	}
+
 	for(int i = 0; i < n_variants; i++) {
 		Z_TRY(variant_config = config_setting_get_elem(variants_config,
 		                                               i));

@@ -71,6 +71,8 @@ struct config {
 	 * simulate attempted attacks or faults.
 	 */
 	double inject_fault_probability;
+
+	unsigned long socket_read_usleep;
 };
 
 /**

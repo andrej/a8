@@ -19,6 +19,7 @@
 
 
 #define ERROR_EXCHANGE         (unsigned char)0x11
+#define FAKE_ERROR_EXCHANGE    (unsigned char)0x22
 #define CROSS_CHECK_EXCHANGE   (unsigned char)0xAA
 #define REPLICATION_EXCHANGE   (unsigned char)0xBB
 #define CREATE_CP_EXCHANGE     (unsigned char)0xCC

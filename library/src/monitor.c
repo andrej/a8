@@ -97,10 +97,11 @@ long monmod_handle_syscall(struct syscall_trace_func_stack * const stack)
 	struct pt_regs *regs = &(stack->regs);
 
 #if ENABLE_CHECKPOINTING
-	if(monitor.conf.restore_probability > 0
+	if(monitor.is_leader
+	   && monitor.conf.restore_probability > 0
 	   && monitor.checkpoint_env->last_checkpoint.valid
 	   && random() < RAND_MAX*monitor.conf.restore_probability) {
-		SAFE_NZ_TRY(synchronize(&monitor, ERROR_EXCHANGE));
+		SAFE_NZ_TRY(synchronize(&monitor, FAKE_ERROR_EXCHANGE));
 	}
 	/* Cause an artificial divergence probabilistically to test system if
 	   so configured. We only inject faults once the first checkpoint has

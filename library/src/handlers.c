@@ -384,6 +384,15 @@ SYSCALL_ENTER_PROT(read)
 	struct descriptor_info *di = get_di(0);
 	remap_fd(di, 0);
 
+	/* Black magic ... wait a little so more bytes are available for
+	   reading, instead of immediately returning without any data just
+	   for the target program to call us again. */
+	if(0 < monitor.conf.socket_read_usleep 
+	   && di->type == SOCKET_DESCRIPTOR
+	   && is_open_locally(env, di)) {
+		usleep(monitor.conf.socket_read_usleep);
+	}
+
 	/* Argument 1*/
 	canonical->arg_types[0] = DESCRIPTOR_TYPE();
 

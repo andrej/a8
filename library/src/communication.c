@@ -353,10 +353,10 @@ int comm_receive_partial(const struct communicator * const comm, int peer_id,
 	Z_TRY(peer->status == PEER_CONNECTED);
 
 	// Get header
-	comm_receive_header(comm, peer, &msg);
+	NZ_TRY(comm_receive_header(comm, peer, &msg));
 
 	// Check message size
-	comm_receive_body(comm, peer, &msg, n, buf);
+	NZ_TRY(comm_receive_body(comm, peer, &msg, n, buf));
 
 	return 0;
 }
@@ -388,7 +388,7 @@ int comm_receive_dynamic(const struct communicator * const comm, int peer_id,
 	Z_TRY(peer = comm_get_peer(comm, peer_id));
 	Z_TRY(peer->status == PEER_CONNECTED);
 
-	comm_receive_header(comm, peer, &msg);
+	NZ_TRY(comm_receive_header(comm, peer, &msg));
 
 	recv_buf = malloc(msg.length);
 	if(NULL == recv_buf) {

@@ -185,7 +185,8 @@ long monmod_handle_syscall(struct syscall_trace_func_stack * const stack)
 
 	/* Phase 2: Cross-check system call & arguments with other variants. */
 	if(dispatch & (DISPATCH_CHECKED | DISPATCH_DEFERRED_CHECK)) {
-		SAFE_LZ_TRY(s = cross_check_args(&monitor, &canonical));
+		SAFE_LZ_TRY_EXCEPT(s = cross_check_args(&monitor, &canonical),
+		                   synchronize(&monitor, ERROR_EXCHANGE));
 		if(0 == s) {
 			handle_cross_check_divergence(&monitor, handler, 
 			                              &actual, &canonical, 

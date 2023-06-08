@@ -22,5 +22,6 @@
 #define __NR_wait           __NR_UNKNOWN_SYSCALL
 #define __NR_waitpid        __NR_UNKNOWN_SYSCALL
 #define __NR_wait3          __NR_UNKNOWN_SYSCALL
+#define __NR_readlink       __NR_UNKNOWN_SYSCALL
 
 #endif

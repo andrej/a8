@@ -31,7 +31,8 @@
 enum descriptor_type {
 	FILE_DESCRIPTOR,
 	SOCKET_DESCRIPTOR,
-	EPOLL_DESCRIPTOR
+	EPOLL_DESCRIPTOR,
+	PIPE_DESCRIPTOR
 };
 
 struct descriptor_info {

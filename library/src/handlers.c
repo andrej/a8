@@ -353,6 +353,19 @@ SYSCALL_ENTER_PROT(mprotect)
 	return DISPATCH_EVERYONE | DISPATCH_CHECKED;
 }
 
+/* ************************************************************************** *
+ * madvise                                                                    *
+ * int madvise(void *addr, size_t length, int advice);                        *
+ * ************************************************************************** */
+
+SYSCALL_ENTER_PROT(madvise)
+{
+	canonical->args[0] = (0 == canonical->args[0] ? 0 : 1);
+	canonical->arg_types[0] = IMMEDIATE_TYPE(void *);
+	canonical->arg_types[1] = IMMEDIATE_TYPE(size_t);
+	canonical->arg_types[2] = IMMEDIATE_TYPE(int);
+	return DISPATCH_EVERYONE | DISPATCH_CHECKED;
+}
 
 /* ************************************************************************** *
  * munmap                                                                     * 
@@ -2613,3 +2626,103 @@ SYSCALL_ENTER_PROT(rt_sigaction)
 	dispatch |= DISPATCH_SKIP;
 	return dispatch;
 }
+
+
+/* ************************************************************************** *
+ * readlink                                                                   *
+ * ssize_t readlink(const char *restrict pathname, char *restrict buf,        *
+ *                  size_t bufsiz);                                           *
+ * ************************************************************************** */
+
+SYSCALL_ENTER_PROT(readlink)
+{
+	canonical->args[3] = canonical->args[2];
+	canonical->args[2] = canonical->args[1];
+	canonical->args[1] = canonical->args[0];
+	canonical->args[0] = AT_FDCWD;
+	actual->no = __NR_readlinkat;
+	actual->args[3] = actual->args[2];
+	actual->args[2] = actual->args[1];
+	actual->args[1] = actual->args[0];
+	actual->args[0] = AT_FDCWD;
+	return redirect_enter(readlinkat);
+}
+
+SYSCALL_EXIT_PROT(readlink)
+{
+	return redirect_exit(readlinkat);
+}
+
+
+/* ************************************************************************** *
+ * readlinkat                                                                 *
+ * ssize_t readlinkat(int dirfd, const char *restrict pathname,               *
+ *                    char *restrict buf, size_t bufsiz);                     *
+ * ************************************************************************** */
+
+SYSCALL_ENTER_PROT(readlinkat)
+{
+	alloc_scratch(2 * sizeof(struct type));
+	struct type *ref_types = (struct type *)*scratch;
+	size_t bufsiz = actual->args[3];
+
+	struct descriptor_info *di = NULL;
+	if(AT_FDCWD != actual->args[0]) {
+		get_di(0);
+		remap_fd(di, 0);
+	}
+
+	canonical->arg_types[0] = DESCRIPTOR_TYPE();
+	canonical->arg_types[1] = POINTER_TYPE(&ref_types[0]);
+	ref_types[0] = STRING_TYPE();
+	canonical->arg_types[2] = POINTER_TYPE(&ref_types[1]);
+	canonical->arg_flags[2] = ARG_FLAG_REPLICATE | ARG_FLAG_WRITE_ONLY;
+	ref_types[1] = BUFFER_TYPE(bufsiz);
+	canonical->arg_types[3] = IMMEDIATE_TYPE(long);
+
+	return DISPATCH_EVERYONE | DISPATCH_CHECKED;
+}
+
+SYSCALL_EXIT_PROT(readlinkat)
+{
+	free_scratch();
+	return 0;
+}
+
+
+/* ************************************************************************** *
+ * pipe2                                                                      *
+ * int pipe2(int pipefd[2], int flags);                                       *
+ * ************************************************************************** */
+
+SYSCALL_ENTER_PROT(pipe2)
+{
+	alloc_scratch(sizeof(struct type));
+	struct type *ref_type = (struct type *)*scratch;
+	canonical->arg_types[0] = POINTER_TYPE(ref_type);
+	*ref_type               = BUFFER_TYPE(2 * sizeof(long));
+	canonical->arg_types[1] = IMMEDIATE_TYPE(int);
+	return DISPATCH_EVERYONE | DISPATCH_CHECKED;
+}
+
+SYSCALL_EXIT_PROT(pipe2)
+{
+	free_scratch();
+	struct descriptor_info *dis[2];
+	if(0 > actual->ret) {
+		return 0;
+	}
+	int *pipefd = (int *)actual->args[0];
+#if VERBOSITY >= 4
+	SAFE_LOGF("%s adding descriptor.\n", handler->name);
+#endif
+	int flags = DI_OPENED_LOCALLY;
+	int local_fd = -1;
+	enum descriptor_type type = (enum descriptor_type)PIPE_DESCRIPTOR;
+	dis[0] = env_add_local_descriptor(env, pipefd[0], flags, type);
+	dis[1] = env_add_local_descriptor(env, pipefd[1], flags, type);
+	pipefd[0] = env_canonical_fd_for(env, dis[0]);
+	pipefd[1] = env_canonical_fd_for(env, dis[1]);
+	return 0;
+}
+

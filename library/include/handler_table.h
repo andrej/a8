@@ -48,6 +48,9 @@ SYSCALL_EXIT_PROT(default_creates_fd);
  X( __NR_mprotect, mprotect,    SYSCALL_ENTER(mprotect), \
                                 NULL, \
                                 NULL ) /*TODO*/ \
+ X( __NR_madvise,  madvise,     SYSCALL_ENTER(madvise), \
+                                NULL, \
+                                NULL ) \
  X( __NR_read,     read,        SYSCALL_ENTER(read), \
                                 NULL, \
                                 SYSCALL_EXIT(read) ) \
@@ -255,6 +258,18 @@ SYSCALL_EXIT_PROT(default_creates_fd);
  X( __NR_kill,      kill,       SYSCALL_ENTER(kill), \
                                 NULL, \
                                 NULL ) \
+ X( __NR_readlink,  readlink,   SYSCALL_ENTER(readlink), \
+                                NULL, \
+                                SYSCALL_EXIT(readlink) ) \
+ X( __NR_readlinkat, readlinkat, SYSCALL_ENTER(readlinkat), \
+                                NULL, \
+                                SYSCALL_EXIT(readlinkat) ) \
+ X( __NR_umask,      umask,     SYSCALL_ENTER(default_checked_arg1), \
+                                NULL, \
+                                NULL )  \
+ X( __NR_pipe2,      pipe2,     SYSCALL_ENTER(pipe2), \
+                                NULL, \
+                                SYSCALL_EXIT(pipe2) )
  
 #include "handler_table_prototypes.h"
 

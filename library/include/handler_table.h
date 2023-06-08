@@ -269,7 +269,10 @@ SYSCALL_EXIT_PROT(default_creates_fd);
                                 NULL )  \
  X( __NR_pipe2,      pipe2,     SYSCALL_ENTER(pipe2), \
                                 NULL, \
-                                SYSCALL_EXIT(pipe2) )
+                                SYSCALL_EXIT(pipe2) ) \
+ X( __NR_sysinfo,    sysinfo,   SYSCALL_ENTER(default_checked), \
+                                NULL, \
+                                NULL )
  
 #include "handler_table_prototypes.h"
 

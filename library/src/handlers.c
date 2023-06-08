@@ -1,3 +1,4 @@
+#define _GNU_SOURCE
 #include <assert.h>
 #include <stdlib.h>
 #include <stddef.h>
@@ -1740,9 +1741,11 @@ SYSCALL_ENTER_PROT(fcntl) {
 		case F_GETFD:
 		case F_GETFL:
 		case F_GETOWN:
+		case F_GETPIPE_SZ:
 			break;
 		case F_SETFD:
 		case F_SETFL:
+		case F_SETPIPE_SZ:
 			canonical->arg_types[2] = IMMEDIATE_TYPE(int);
 			break;
 		case F_SETOWN: {
@@ -1768,6 +1771,7 @@ SYSCALL_EXIT_PROT(fcntl) {
 	switch(cmd) {
 		case F_GETFD:
 		case F_GETFL:
+		case F_GETPIPE_SZ:
 			break;
 		case F_GETOWN: {
 			struct pid_info *pi;
@@ -1784,6 +1788,7 @@ SYSCALL_EXIT_PROT(fcntl) {
 		case F_SETFD:
 		case F_SETFL:
 		case F_SETOWN:
+		case F_SETPIPE_SZ:
 			break;
 		default:
 			// As of yet unhandled fcntl command.
@@ -2350,6 +2355,8 @@ SYSCALL_ENTER_PROT(clone)
 		    /*| CLONE_STOPPED*/ | CLONE_SYSVSEM | CLONE_THREAD 
 		    | CLONE_VFORK | CLONE_VM ) )
 	{
+		SAFE_WARNF("Monmod currently only supports fork-like cloning. "
+		           "Observed flags: %lx.\n", flags);
 		return DISPATCH_ERROR;
 	}
 	if(0 != child_stack) {

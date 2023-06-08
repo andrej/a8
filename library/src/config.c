@@ -23,9 +23,15 @@ static int config_has_id(struct config *conf, int i, int id)
 /* ************************************************************************** *
  * API Functions                                                              *
  * ************************************************************************** */ 
+
+/* A bug in libconfig leads to a segmentation fault with lighttpd 1.4.71 when
+   the config_t is located on the stack. Put it on heap as global instead.
+   Only move this variable back into parse_config() function after verifying 
+   monmod still works running lighttpd 1.4.71. */
+config_t config = {};
+
 int parse_config(const char *path, struct config *dest)
 {
-	config_t config;
 	config_setting_t *variants_config, *variant_config, *breakpoints_config,
 	                 *breakpoint_config;
 	const char *tmp_str;

@@ -3,6 +3,7 @@
 *
 !*.*
 !*/
+!benchmarks
 !Makefile
 
 # Other ignores:

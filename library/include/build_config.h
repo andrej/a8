@@ -40,7 +40,7 @@
  * If set to true, execution of the program is terminated if a system call
  * that we do not have a handler for is attempted to be executed.
  */
-#define NO_HANDLER_TERMINATES 0 
+#define NO_HANDLER_TERMINATES 1 
 
 #define NO_CHECKPOINTING 0
 #define FORK_CHECKPOINTING 1
@@ -51,7 +51,7 @@
  * survivability aspect and allows benchmarking a pure MVEE implementation that
  * terminates upon divergence.
  */
-#define ENABLE_CHECKPOINTING FORK_CHECKPOINTING 
+#define ENABLE_CHECKPOINTING NO_CHECKPOINTING 
 
 /**
  * Since malloc() is non-reentrant, we cannot use it in system call handlers.

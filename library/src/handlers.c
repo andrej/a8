@@ -1831,6 +1831,25 @@ SYSCALL_EXIT_PROT(listen) { write_back_canonical_return(); return 0; }
 
 
 /* ************************************************************************** *
+ * accept                                                                     *
+ * int accept(int sockfd, struct sockaddr *restrict addr,                     *
+ *            socklen_t *restrict addrlen);                                   *
+ * ************************************************************************** */
+
+SYSCALL_ENTER_PROT(accept)
+{
+	canonical->no = SYSCALL_accept4_CANONICAL;
+	canonical->args[3] = 0;
+	return redirect_enter(accept4);
+}
+
+SYSCALL_EXIT_PROT(accept)
+{
+	return redirect_exit(accept4);
+}
+
+
+/* ************************************************************************** *
  * accept4                                                                    *
  * int accept4(int sockfd, struct sockaddr *restrict addr,                    *
  *             socklen_t *restrict addrlen, int flags);                       *
@@ -2036,7 +2055,7 @@ SYSCALL_ENTER_PROT(getsockname)
 	struct type *sockaddr_type = (struct type *)*scratch;
 	struct type *socklen_type = ((struct type *)*scratch) + 1;
 	if(NULL == (socklen_t *)actual->args[2]
-	   || *(socklen_t *)actual->args[2] != sizeof(struct sockaddr)) {
+	   || *(socklen_t *)actual->args[2] < sizeof(struct sockaddr)) {
 		/* A little restrictive. Anything bigger would be fine, but
 		   unexpected and could indicate something else going wrong. */
 		return DISPATCH_ERROR;
@@ -2696,6 +2715,23 @@ SYSCALL_EXIT_PROT(readlinkat)
 	return 0;
 }
 
+/* ************************************************************************** *
+ * pipe                                                                       *
+ * int pipe(int pipefd[2])                                                    *
+ * ************************************************************************** */
+
+SYSCALL_ENTER_PROT(pipe)
+{
+	canonical->no = SYSCALL_pipe2_CANONICAL;
+	canonical->args[1] = 0;
+	return redirect_enter(pipe2);
+}
+
+SYSCALL_EXIT_PROT(pipe)
+{
+	return redirect_exit(pipe2);
+}
+
 
 /* ************************************************************************** *
  * pipe2                                                                      *
@@ -2732,4 +2768,142 @@ SYSCALL_EXIT_PROT(pipe2)
 	pipefd[1] = env_canonical_fd_for(env, dis[1]);
 	return 0;
 }
+
+
+/* ************************************************************************** *
+ * rename                                                                     *
+ * int rename(const char *oldpath, const char *newpath);                      *
+ * ************************************************************************** */
+
+SYSCALL_ENTER_PROT(rename)
+{
+	canonical->no = SYSCALL_renameat2_CANONICAL;
+	actual->no = __NR_renameat2;
+	canonical->args[1] = canonical->args[0];
+	actual->args[1] = actual->args[0];
+	canonical->args[3] = canonical->args[1];
+	actual->args[3] = actual->args[1];
+	canonical->args[0] = AT_FDCWD;
+	actual->args[0] = AT_FDCWD;
+	canonical->args[2] = AT_FDCWD;
+	actual->args[2] = AT_FDCWD;
+	canonical->args[4] = 0;
+	actual->args[4] = 0;
+	return redirect_enter(renameat2);
+}
+
+SYSCALL_EXIT_PROT(rename)
+{
+	return redirect_exit(renameat2);
+}
+
+
+/* ************************************************************************** *
+ * renameat                                                                   *
+ * int renameat(int olddirfd, const char *oldpath,                            * 
+ *              int newdirfd, const char *newpath);                           *
+ * ************************************************************************** */
+
+SYSCALL_ENTER_PROT(renameat)
+{
+	canonical->no = SYSCALL_renameat2_CANONICAL;
+	actual->no = __NR_renameat2;
+	canonical->args[4] = 0;
+	actual->args[4] = 0;
+	return redirect_enter(renameat2);
+}
+
+SYSCALL_EXIT_PROT(renameat)
+{
+	return redirect_exit(renameat2);
+}
+
+
+/* ************************************************************************** *
+ * renameat2                                                                  *
+ * int renameat2(int olddirfd, const char *oldpath,                           * 
+ *               int newdirfd, const char *newpath, unsigned int flags);      *
+ * ************************************************************************** */
+
+SYSCALL_ENTER_PROT(renameat2)
+{
+	alloc_scratch(2 * sizeof(struct type));
+	struct type *oldpath_str_type = (struct type *)*scratch;
+	struct type *newpath_str_type = (struct type *)(*scratch 
+	                                                + sizeof(struct type));
+	struct descriptor_info *oldpath_di = NULL;
+	struct descriptor_info *newpath_di = NULL;
+	canonical->arg_types[0] = DESCRIPTOR_TYPE();
+	if(AT_FDCWD != canonical->args[0]) {
+		oldpath_di = get_di(0);
+		remap_fd(oldpath_di, 0);
+	}
+	canonical->arg_types[1] = POINTER_TYPE(oldpath_str_type);
+	*oldpath_str_type = STRING_TYPE();
+	canonical->arg_types[2] = DESCRIPTOR_TYPE();
+	if(AT_FDCWD != canonical->args[0]) {
+		newpath_di = get_di(2);
+		remap_fd(newpath_di, 2);
+	}
+	canonical->arg_types[3] = POINTER_TYPE(newpath_str_type);
+	*newpath_str_type = STRING_TYPE();
+	canonical->arg_types[4] = IMMEDIATE_TYPE(int);
+	return DISPATCH_CHECKED
+	       | dispatch_leader_if_needed(oldpath_di, 0)
+               | dispatch_leader_if_needed(newpath_di, 0);
+}
+
+SYSCALL_EXIT_PROT(renameat2)
+{
+	free_scratch();
+	return 0;
+}
+
+
+/* ************************************************************************** *
+ * unlink                                                                     *
+ * int unlink(const char *pathname);                                          *
+ * ************************************************************************** */
+
+SYSCALL_ENTER_PROT(unlink)
+{
+	canonical->no = SYSCALL_unlinkat_CANONICAL;
+	canonical->args[0] = AT_FDCWD;
+	canonical->args[1] = canonical->args[0];
+	return redirect_enter(unlinkat);
+}
+
+SYSCALL_EXIT_PROT(unlink)
+{
+	return redirect_exit(unlinkat);
+}
+
+
+/* ************************************************************************** *
+ * unlinkat                                                                   *
+ * int unlinkat(int dirfd, const char *pathname, int flags);                  *
+ * ************************************************************************** */
+
+SYSCALL_ENTER_PROT(unlinkat)
+{
+	alloc_scratch(sizeof(struct type));
+	struct type *pathname_type = (struct type*)*scratch;
+	struct descriptor_info *pathname_di = NULL;
+	canonical->arg_types[0] = DESCRIPTOR_TYPE();
+	if(AT_FDCWD != canonical->args[0]) {
+		pathname_di = get_di(0);
+		remap_fd(pathname_di, 0);
+	}
+	canonical->arg_types[1] = POINTER_TYPE(pathname_type);
+	*pathname_type = STRING_TYPE();
+	canonical->arg_types[2] = IMMEDIATE_TYPE(int);
+	return dispatch_leader_if_needed(pathname_di, DISPATCH_CHECKED);
+}
+
+SYSCALL_EXIT_PROT(unlinkat)
+{
+	free_scratch();
+	return 0;
+}
+
 

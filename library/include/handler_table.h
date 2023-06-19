@@ -174,9 +174,12 @@ SYSCALL_EXIT_PROT(default_creates_fd);
  X( __NR_eventfd2, eventfd2,    SYSCALL_ENTER(eventfd2), \
                                 NULL, \
                                 SYSCALL_EXIT(eventfd2)) \
+ X( __NR_accept,   accept,      SYSCALL_ENTER(accept), \
+                                NULL, \
+                                SYSCALL_EXIT(accept)) \
  X( __NR_accept4,  accept4,     SYSCALL_ENTER(accept4), \
                                 NULL, \
-                                SYSCALL_EXIT(accept4) ) /*TODO*/ \
+                                SYSCALL_EXIT(accept4)) \
  X( __NR_shutdown, shutdown,    SYSCALL_ENTER(shutdown), \
                                 NULL, \
                                 SYSCALL_EXIT(shutdown)) /*TODO*/ \
@@ -267,12 +270,33 @@ SYSCALL_EXIT_PROT(default_creates_fd);
  X( __NR_umask,      umask,     SYSCALL_ENTER(default_checked_arg1), \
                                 NULL, \
                                 NULL )  \
+ X( __NR_pipe,       pipe,      SYSCALL_ENTER(pipe), \
+                                NULL, \
+                                SYSCALL_EXIT(pipe) ) \
  X( __NR_pipe2,      pipe2,     SYSCALL_ENTER(pipe2), \
                                 NULL, \
                                 SYSCALL_EXIT(pipe2) ) \
  X( __NR_sysinfo,    sysinfo,   SYSCALL_ENTER(default_checked), \
                                 NULL, \
-                                NULL )
+                                NULL ) \
+ X( __NR_fsync,      fsync,     SYSCALL_ENTER(default_arg1_fd), \
+                                NULL, \
+                                NULL ) \
+ X( __NR_rename,     rename,    SYSCALL_ENTER(rename), \
+                                NULL, \
+                                SYSCALL_EXIT(rename) ) \
+ X( __NR_renameat,   renameat,  SYSCALL_ENTER(renameat), \
+                                NULL, \
+                                SYSCALL_EXIT(renameat) ) \
+ X( __NR_renameat2,  renameat2, SYSCALL_ENTER(renameat2), \
+                                NULL, \
+                                SYSCALL_EXIT(renameat2) ) \
+ X( __NR_unlink,     unlink,    SYSCALL_ENTER(unlink), \
+                                NULL, \
+                                SYSCALL_EXIT(unlink) ) \
+ X( __NR_unlinkat,   unlinkat,  SYSCALL_ENTER(unlinkat), \
+                                NULL, \
+                                SYSCALL_EXIT(unlinkat) ) \
  
 #include "handler_table_prototypes.h"
 

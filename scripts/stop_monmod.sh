@@ -1,4 +1,3 @@
-#!/bin/sh
+#!/bin/bash
 
-echo 0 > /sys/kernel/monmod/active
-
+killall -9 monmod_run.sh lighttpd nginx redis

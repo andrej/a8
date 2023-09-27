@@ -30,6 +30,11 @@ then
 	dbg_cmd="gdb --args env"
 fi
 
+if [ 1 = "$DOTIME" ];
+then
+	dbg_cmd="/usr/bin/time -f%e, env"
+fi
+
 LD_LIBRARY_PATH="$monmod_root/dependencies/libconfig-install/lib":\
 "$monmod_root/dependencies/criu-install/lib/$arch-linux-gnu":\
 $LD_LIBRARY_PATH \

@@ -64,7 +64,7 @@ static int start_server(in_port_t port)
 
 	addr.sin_family = AF_INET;
 	addr.sin_addr.s_addr = INADDR_ANY;
-	addr.sin_port = htons(port);
+	addr.sin_port = port;
 	NZ_TRY_EXCEPT(s.bind(fd, (struct sockaddr *)&addr, sizeof(addr)),
 	              goto abort);
 	NZ_TRY_EXCEPT(s.listen(fd, MAX_N_PEERS),
@@ -179,9 +179,9 @@ int comm_init(struct communicator *comm, int own_id, struct sockaddr *own_addr)
 					  &own_name_len),
 					  return -1);
 		Z_TRY_EXCEPT(own_name_len == sizeof(own_name), return -1);
-		own_port = ntohs(own_name.sin_port);
+		own_port = own_name.sin_port;
 	}
-	return own_port;
+	return ntohs(own_port);
 }
 
 int comm_destroy(struct communicator *comm)
@@ -243,8 +243,7 @@ int comm_connect(struct communicator *comm, int peer_id, struct sockaddr *sa)
 		welcome_id = comm->self.id;
 		peer_addr.sin_family = AF_INET;
 		peer_addr.sin_addr = ((struct sockaddr_in *)sa)->sin_addr;
-		peer_addr.sin_port = 
-			htons(((struct sockaddr_in *)sa)->sin_port);
+		peer_addr.sin_port = ((struct sockaddr_in *)sa)->sin_port;
 		LZ_TRY(fd = open_tcp_socket());
 		LZ_TRY_EXCEPT(s.connect(fd, (struct sockaddr *)&peer_addr, 
 		              sizeof(peer_addr)), goto abort);

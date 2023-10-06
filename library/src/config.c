@@ -109,7 +109,7 @@ int parse_config(const char *path, struct config *dest)
 		sa = (struct sockaddr_in *)&dest->variants[i].addr;
 		sa->sin_family = AF_INET;
 		sa->sin_addr.s_addr = inet_addr(tmp_str);
-		sa->sin_port = tmp_int;
+		sa->sin_port = htons(tmp_int);
 
 		// variant breakpoints
 		dest->variants[i].n_breakpoints = 0;

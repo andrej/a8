@@ -103,8 +103,6 @@ __attribute__((destructor))
 __attribute__((section("unprotected")))
 monmod_library_destroy()
 {
-#if !MEASURE_TRACING_OVERHEAD
 	unprotected_funcs.monitor_destroy(&monitor);
-#endif
 }
 

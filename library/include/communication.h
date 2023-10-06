@@ -41,6 +41,8 @@ struct __attribute__((packed)) message {
  * If 0 is passed for the sin_port field of own_addr, a random port is picked.
  * This port is returned from the function. On error, a negative value is
  * returned.
+ * 
+ * The port is expected to be in network byte order.
  */
 int comm_init(struct communicator *comm, int own_id, struct sockaddr *own_addr);
 int comm_destroy(struct communicator *comm);

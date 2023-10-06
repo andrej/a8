@@ -25,6 +25,8 @@ struct breakpoint_config {
  * A variant is one instance of the monitored program. Multiple variants can
  * run on the same host, but they will need to run on separate ports
  * (encoded in the struct sockaddr) and they will ned separate IDs.
+ * 
+ * The ports in the sockaddr are in network byte order.
  */
 struct variant_config {
 	int id;

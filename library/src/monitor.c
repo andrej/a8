@@ -19,6 +19,8 @@
 #include "exchanges.h"
 #include "communication.h"
 
+#include "test.h"
+
 
 /* ************************************************************************** *
  * Global Variables                                                           *
@@ -82,6 +84,7 @@ static void terminate(struct monitor * const monitor);
    monmod_init system call. */
 long monmod_handle_syscall(struct syscall_trace_func_stack * const stack)
 {
+	//test(&monitor.comm);
 #if MEASURE_TRACING_OVERHEAD
 	return monmod_trusted_syscall(SYSCALL_NO_REG(&stack->regs), 
            SYSCALL_ARG0_REG(&stack->regs), SYSCALL_ARG1_REG(&stack->regs), 
@@ -474,22 +477,7 @@ int monitor_init(struct monitor *monitor, int own_id, struct config *conf)
 
 	SAFE_Z_TRY(own_variant_conf = get_variant(conf, own_id));
 
-	/* Connect everyone to everyone. */
-	SAFE_NZ_TRY(monitor_init_comm(monitor));
-
 	SAFE_NZ_TRY(env_init(&monitor->env, monitor->is_leader));
-
-
-	/* Initialize Individual Basic Monitoring Components */
-#if MEASURE_TRACING_OVERHEAD
-	/* If we are only interested in measuring the tracing overhead, register
-	   the monitor now and exit, before setting up any of the network
-	   connections or checkpointing environment. */
-	register_monitor_in_kernel(monitor);
-	return 0;
-#endif
-
-	SAFE_NZ_TRY(replication_init(monitor, conf->replication_batch_size));
 
 	/* Checkpointing */
 #if ENABLE_CHECKPOINTING
@@ -505,6 +493,21 @@ int monitor_init(struct monitor *monitor, int own_id, struct config *conf)
 					&monitor->addr_ranges));
 	monitor->env.pid->local_pid = getpid();
 #endif
+
+	/* Connect everyone to everyone. */
+	SAFE_NZ_TRY(monitor_init_comm(monitor));
+
+	/* Initialize Individual Basic Monitoring Components */
+#if MEASURE_TRACING_OVERHEAD
+	/* If we are only interested in measuring the tracing overhead, register
+	   the monitor now and exit, before setting up any of the network
+	   connections or checkpointing environment. */
+	register_monitor_in_kernel(monitor);
+	return 0;
+#endif
+
+	SAFE_NZ_TRY(replication_init(monitor, conf->replication_batch_size));
+
 
 	/* Initiate random number generator used for fault injection */
 	srandom(time(NULL));
@@ -580,6 +583,9 @@ int monitor_child_fix_up(struct monitor *monitor,
 int monitor_arbitrate_child_comm(struct monitor *parent_monitor,
                                  struct communicator *child_comm)
 {
+#if USE_LIBVMA
+	const in_port_t hard_port_offset = 10;
+#endif
 	struct arbitration_msg {
 		uint64_t n_variants;
 		uint64_t variant_ports[];
@@ -598,16 +604,18 @@ int monitor_arbitrate_child_comm(struct monitor *parent_monitor,
 	    _after_ the fork already took place, and we use hard coded ports
 	    instead. */
 	close(parent_monitor->comm.self.fd);
-	pid_t hard_port = 
-		((struct sockaddr_in *)&parent_monitor->comm.self.addr)
-		->sin_port + 1;
-	own_addr.sin_port = hard_port;
+	in_port_t own_hard_port = 
+		htons(ntohs(((struct sockaddr_in *)&parent_monitor
+		                                   ->comm.self.addr)->sin_port)
+		      + hard_port_offset);
+	own_addr.sin_port = own_hard_port;
 #endif
 
 	uint64_t own_port;
 	SAFE_LZ_TRY(own_port = comm_init(child_comm, 
 	                                 parent_monitor->own_id, 
 	                                 (struct sockaddr *)&own_addr));
+	own_port = htons(own_port);
 	uint64_t variant_ports[parent_monitor->conf.n_variants];
 
 #if !USE_LIBVMA
@@ -662,8 +670,7 @@ int monitor_arbitrate_child_comm(struct monitor *parent_monitor,
 		for(int i = 0; i < parent_monitor->conf.n_variants; i++) {
 			int id = parent_monitor->conf.variants[i].id;
 			if(id == parent_monitor->leader_id) {
-				outbound->variant_ports[i] =
-					own_port;
+				outbound->variant_ports[i] = own_port;
 			} else {
 				SAFE_NZ_TRY(comm_receive(&parent_monitor->comm,
 				                         id, &received_sz,
@@ -683,6 +690,10 @@ int monitor_arbitrate_child_comm(struct monitor *parent_monitor,
 #else
 	/* Use hard-coded ports if we are using libVMA. */
 	for(size_t i = 0; i < parent_monitor->conf.n_variants; i++) {
+		const in_port_t hard_port = 
+			htons(ntohs(((struct sockaddr_in *)&parent_monitor
+			             ->conf.variants[i].addr)->sin_port)
+			      + hard_port_offset);
 		variant_ports[i] = hard_port;
 	}
 #endif

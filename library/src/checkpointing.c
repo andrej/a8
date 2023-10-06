@@ -8,6 +8,7 @@
 #include <sys/mman.h>
 #include <semaphore.h>
 #include <unistd.h>
+#include <netinet/in.h>
 #include "checkpointing.h"
 #include "custom_syscalls.h"
 #include "util.h"
@@ -81,7 +82,11 @@ int init_checkpoint_env(struct checkpoint_env *env,
 	   the parent process, as CRIU dumps the children of a process. */
 	env->dumper_restorer_ready = false;
 	NZ_TRY(sigaction(SIGUSR1, &sa, NULL));
+#if USE_LIBVMA
+	pid_t child = original_fork();
+#else
 	pid_t child = fork();
+#endif
 	if(0 != child) {
 		dumper_restorer_main(env, child);
 		raise(SIGKILL);
@@ -133,6 +138,9 @@ int restore_last_checkpoint(struct checkpoint_env *env)
 	SAFE_LOGF("<%d> Restoring last checkpoint.\n", getpid());
 #endif
 #if ENABLE_CHECKPOINTING == FORK_CHECKPOINTING
+	#if USE_LIBVMA
+	comm_destroy(&monitor.comm);
+	#endif
 	smem_put(&env->smem->semaphore, 
 	         env->smem->message = CHECKPOINT_RESTORE);
 #elif ENABLE_CHECKPOINTING == CRIU_CHECKPOINTING
@@ -150,10 +158,23 @@ void syscall_handle_checkpointing(struct checkpoint_env *env)
 	   flag was set in the breakpoint beforehand. */
 	if(env->create_checkpoint) {
 		SAFE_NZ_TRY(synchronize(env->monitor, CREATE_CP_EXCHANGE));
-#if VERBOSITY >= 2
+#if VERBOSITY >= 1
 		/* Log after synchronizing. We might not get to here if there
 		   was a disagreement during synchronization. */
-		SAFE_LOGF("<%d> Creating checkpoint.\n", getpid());
+		struct timeval tv, duration;
+		SAFE_NZ_TRY(gettimeofday(&tv, NULL));
+		timersub(&tv, &env->monitor->start_tv, &duration);
+		if(!env->last_checkpoint.valid) {
+			SAFE_LOGF("<%d> Creating first checkpoint after "
+			          "%ld.%06ld seconds.\n", getpid(),
+				  duration.tv_sec,
+				  duration.tv_usec);
+		}
+#endif
+#if VERBOSITY >= 2
+		if(env->last_checkpoint.valid) {
+			SAFE_LOGF("<%d> Creating checkpoint.\n", getpid());
+		}
 #endif
 #if ENABLE_CHECKPOINTING == FORK_CHECKPOINTING
 		SAFE_NZ_TRY(create_fork_checkpoint(env));
@@ -291,6 +312,29 @@ handle_breakpoint(struct checkpoint_env *env, void *loc)
 	return loc;
 }
 
+#if USE_LIBVMA
+static void recreate_connection()
+{
+	struct sockaddr addr = monitor.comm.self.addr;
+	in_port_t own_port;
+	comm_destroy(&monitor.comm);
+	SAFE_LZ_TRY(own_port = comm_init(&monitor.comm, monitor.own_id, &addr));
+
+	for(size_t i = 0; i < monitor.conf.n_variants; i++) {
+		if(monitor.conf.variants[i].id == monitor.own_id) {
+			continue;
+		}
+		usleep(200000*monitor.own_id);
+			/* ... if you have a better idea, I'm all ears. We are
+			   in the child process and cannot use parents socket
+			   to synchronize. */
+		SAFE_NZ_TRY(comm_connect(&monitor.comm, 
+		                    monitor.conf.variants[i].id, 
+		                    &monitor.conf.variants[i].addr));
+	}
+}
+#endif
+
 #if ENABLE_CHECKPOINTING == FORK_CHECKPOINTING
 static int
 create_fork_checkpoint(struct checkpoint_env *cenv)
@@ -356,7 +400,6 @@ create_fork_checkpoint(struct checkpoint_env *cenv)
 		}
 		/* The child remains paused and waits until it gets asked to 
 		   resume. */
-		cenv->last_checkpoint.valid = false;
 		enum checkpointing_message msg;
 		do {
 			msg = smem_get(&cenv->smem->semaphore,
@@ -383,6 +426,9 @@ create_fork_checkpoint(struct checkpoint_env *cenv)
 				smem_put(&cenv->smem->semaphore, 
 				         cenv->smem->done_flag = true);
 				kill_and_wait(getppid());
+				#if USE_LIBVMA
+				recreate_connection();
+				#endif
 				/* Immediately create a copy of the current
 				   checkpoint state upon restore. */
 				SAFE_NZ_TRY(create_fork_checkpoint(cenv));

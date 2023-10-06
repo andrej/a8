@@ -2,7 +2,6 @@
 
 script_dir=$(realpath $(dirname $0))
 monmod_root=$(realpath "$script_dir/..")
-lib="$monmod_root/library/build/libmonmod.so"
 arch=$(uname -m)
 
 if [ "$#" -lt 3 -o ! "$1" -eq "$1" -o ! -f "$2"  ]
@@ -35,9 +34,10 @@ then
 	dbg_cmd="/usr/bin/time -f%e, env"
 fi
 
-LD_LIBRARY_PATH="$monmod_root/dependencies/libconfig-install/lib":\
+LD_LIBRARY_PATH="$monmod_root/library/build":\
+"$monmod_root/dependencies/libconfig-install/lib":\
 "$monmod_root/dependencies/criu-install/lib/$arch-linux-gnu":\
 $LD_LIBRARY_PATH \
 $dbg_cmd \
-LD_PRELOAD="$lib":$LD_PRELOAD \
+LD_PRELOAD="libmonmod.so":$LD_PRELOAD \
 MONMOD_ID=$id MONMOD_CONFIG="$config" $@

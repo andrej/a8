@@ -9,6 +9,7 @@
 #include <stdbool.h>
 #include <semaphore.h>
 #include <sched.h>
+#include <setjmp.h>
 #include "config.h"
 #include "trap_instr.h"
 #include "environment.h"
@@ -71,6 +72,7 @@ struct checkpoint_env {
 #if ENABLE_CHECKPOINTING == FORK_CHECKPOINTING
 	struct checkpointing_smem *smem;
 	size_t smem_length;
+	jmp_buf jmp_buf;
 #elif ENABLE_CHECKPOINTING == CRIU_CHECKPOINTING
 	pid_t dumper_restorer_pid;
 	volatile bool dumper_restorer_ready;

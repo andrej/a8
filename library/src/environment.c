@@ -159,7 +159,9 @@ checkpointed_environment_fix_up(struct environment *env)
 	   fault injection. Otherwise, it may appen that we re-inject the same
 	   fault over and over again, and the program gets stuck in an infinite
 	   checkpoint/restore loop. */
-	srandom(time(NULL));
+	struct timeval tv;
+	SAFE_NZ_TRY(gettimeofday(&tv, NULL));
+	srandom(tv.tv_sec + tv.tv_usec);
 	/* epoll has somewhat unintuitive behavior across fork() compared to 
 	   other file descriptors, outlined further below in this discussion
 	   https://groups.google.com/g/fa.linux.kernel/c/LH9hqwpeyuw 

@@ -143,6 +143,8 @@ int restore_last_checkpoint(struct checkpoint_env *env)
 	#endif
 	smem_put(&env->smem->semaphore, 
 	         env->smem->message = CHECKPOINT_RESTORE);
+	/* Do NOT use env->smem after this point. It is now shared between the
+	   restored checkpoint and its child checkpoint! */
 #elif ENABLE_CHECKPOINTING == CRIU_CHECKPOINTING
 	kill(env->dumper_restorer_pid, SIGUSR2);
 	env->last_checkpoint.valid = false;
@@ -312,10 +314,19 @@ handle_breakpoint(struct checkpoint_env *env, void *loc)
 	return loc;
 }
 
+
+#if ENABLE_CHECKPOINTING == FORK_CHECKPOINTING
+/* ************************************************************************** *
+ * Fork Checkpointing                                                         *
+ * ************************************************************************** */
+
 #if USE_LIBVMA
-static void recreate_connection()
+/* Used for fork checkpointing when using libVMA, since libVMA does not persist
+   connections across fork. */
+static void _recreate_connections()
 {
 	struct sockaddr addr = monitor.comm.self.addr;
+	((struct sockaddr_in *)&addr)->sin_port += 1;
 	in_port_t own_port;
 	comm_destroy(&monitor.comm);
 	SAFE_LZ_TRY(own_port = comm_init(&monitor.comm, monitor.own_id, &addr));
@@ -328,14 +339,85 @@ static void recreate_connection()
 			/* ... if you have a better idea, I'm all ears. We are
 			   in the child process and cannot use parents socket
 			   to synchronize. */
+		struct sockaddr *other_addr = &monitor.conf.variants[i].addr;
+		((struct sockaddr_in *)other_addr)->sin_port += 1;
 		SAFE_NZ_TRY(comm_connect(&monitor.comm, 
 		                    monitor.conf.variants[i].id, 
-		                    &monitor.conf.variants[i].addr));
+		                    other_addr));
 	}
 }
 #endif
 
-#if ENABLE_CHECKPOINTING == FORK_CHECKPOINTING
+/* This is the "main()" of a fork checkpoint that is waiting to be restored or
+   deleted. It just waits, exits if no longer needed, or continues execution
+   at the checkpointed location upon request, along with duplicating itself for
+   another later restore if needed. */
+int _fork_checkpoint_main(struct checkpoint_env *cenv, pid_t parent)
+{
+	int s = 0;
+	s = checkpointed_environment_fix_up(cenv->tracee_env);
+	cenv->breakpoints[0].hits = 0;
+	// Parent needs to synchronize with fix up
+	smem_put(&cenv->smem->semaphore,
+			 cenv->smem->done_flag = true);
+	if(0 != s) {
+		return 1;
+	}
+	/* Register self for tracing. */
+	s = monmod_init(getpid(), 
+		            &monmod_syscall_trusted_addr,
+		            &monmod_syscall_trace_enter,
+		            cenv->addr_ranges->overall_start,
+		            cenv->addr_ranges->overall_len,
+		            cenv->addr_ranges->code_start,
+		            cenv->addr_ranges->code_len,
+		            cenv->addr_ranges->protected_data_start,
+		            cenv->addr_ranges->protected_data_len);
+	if(0 != s) {
+		return 1;
+	}
+	/* The child remains paused and waits until it gets asked to resume. */
+	enum checkpointing_message msg;
+	do {
+		msg = smem_get(&cenv->smem->semaphore,
+					   cenv->smem->message);
+		if(msg == CHECKPOINT_HOLD && getppid() != parent) {
+			/* Parent died before it was able to give us an instruction, and we 
+			   got reposessed by init; treat this case like a CHECKPOINT_DELETE 
+			   message.  */
+			msg = CHECKPOINT_DELETE;
+		}
+		if(msg == CHECKPOINT_HOLD) {
+			sched_yield();
+		}
+	} while(msg == CHECKPOINT_HOLD);
+	smem_put(&cenv->smem->semaphore,
+			 cenv->smem->message = CHECKPOINT_HOLD);
+	switch(msg) {
+		case CHECKPOINT_DELETE: {
+			smem_put(&cenv->smem->semaphore, 
+					 cenv->smem->done_flag = true);
+			exit(0);
+			break; /* unreachable */
+		}
+		case CHECKPOINT_RESTORE: {
+			smem_put(&cenv->smem->semaphore, 
+					 cenv->smem->done_flag = true);
+			// After putting this message, the parent will now exit momentarily. 
+			while(parent == getppid());
+			#if USE_LIBVMA
+			_recreate_connections();
+			#endif
+			/* This longjump resumes execution right before creation of the
+			   checkpoint. This duplicates this current checkpoint if we want to
+			   restore it again later. We use setjmp/longjmp instead of a 
+			   recursive create_fork_checkpoint() call to limit stack growth. */
+			longjmp(cenv->jmp_buf, 0);
+			return 0; /* unreachable */
+		}
+	}
+}
+
 static int
 create_fork_checkpoint(struct checkpoint_env *cenv)
 {
@@ -359,84 +441,41 @@ create_fork_checkpoint(struct checkpoint_env *cenv)
 		   it succeeds -- in both cases after the call, the child is
 		   gone). */
 		kill_and_wait(cenv->last_checkpoint.pid);
+		cenv->last_checkpoint.valid = false;
 	}
 
-	/* Set message in shared memory to CHECKPOINT_HOLD before fork() to
-	   avoid any race conditions. This causes the child to hold in a busy
-	   loop. No memory synchronization mechanisms are needed here since we
-	   just killed any previous checkpoint that may be trying to read. */
+	/* This is the point from which execution will continue in the checkpointed
+	   child process upon resotre. By restoring to this point, the checkpoint
+	   will immediately be duplicated (re-created) upon restore. This allows
+	   restoring to the "same" checkpoint multiple times. */
+	setjmp(cenv->jmp_buf);
+
+	/* Set message in shared memory to CHECKPOINT_HOLD before fork(). No memory 
+	   synchronization mechanisms are needed here since we just killed any 
+	   previous checkpoint that may be trying to read, and the new checkpoint 
+	   has not forked yet. If we land here through the setjmp above, i.e. this
+	   is a freshly restored ceckpoint, note that the parent process technically
+	   still has access to cenv->smem; however, it will exit momentarily and not
+	   use it, so no need to synchronize with it either. */
 	cenv->smem->message = CHECKPOINT_HOLD;
 	cenv->smem->done_flag = false;
 
-	/* Fork creates a copy of current process state. */
+	/* Fork creates a copy of most of the current process state. */
+	pid_t parent = getpid();
 	pid_t child = 0;
 #if !USE_LIBVMA
 	LZ_TRY(child = fork());
 #else
 	LZ_TRY(child = vmafork());
 #endif
-	if(0 == child) { // child
-		s = checkpointed_environment_fix_up(cenv->tracee_env);
-		cenv->breakpoints[0].hits = 0;
-		smem_put(&cenv->smem->semaphore,
-		         cenv->smem->done_flag = true);
-			// Parent needs to synchronize with fix up
+	if(0 == child) { // child; this is the checkpoint
+		s = _fork_checkpoint_main(cenv, parent);
 		if(0 != s) {
-			return 1;
+			printf("Error in checkpoint child process.\n");
+			exit(s);
 		}
-		/* Register self for tracing. */
-		s = monmod_init(
-			getpid(), 
-			&monmod_syscall_trusted_addr,
-			&monmod_syscall_trace_enter,
-			cenv->addr_ranges->overall_start,
-			cenv->addr_ranges->overall_len,
-			cenv->addr_ranges->code_start,
-			cenv->addr_ranges->code_len,
-			cenv->addr_ranges->protected_data_start,
-			cenv->addr_ranges->protected_data_len);
-		if(0 != s) {
-			return 1;
-		}
-		/* The child remains paused and waits until it gets asked to 
-		   resume. */
-		enum checkpointing_message msg;
-		do {
-			msg = smem_get(&cenv->smem->semaphore,
-			               cenv->smem->message);
-			if(msg == CHECKPOINT_HOLD && getppid() == 1) {
-				/* Parent died before it was able to give us an
-				   instruction, and we got reposessed by init;
-				   treat this like a CHECKPOINT_DELETE message. 
-				   */
-				msg = CHECKPOINT_DELETE;
-			}
-			if(msg == CHECKPOINT_HOLD) {
-				sched_yield();
-			}
-		} while(msg == CHECKPOINT_HOLD);
-		switch(msg) {
-			case CHECKPOINT_DELETE: {
-				smem_put(&cenv->smem->semaphore, 
-				         cenv->smem->done_flag = true);
-				exit(0);
-				break; /* unreachable */
-			}
-			case CHECKPOINT_RESTORE: {
-				smem_put(&cenv->smem->semaphore, 
-				         cenv->smem->done_flag = true);
-				kill_and_wait(getppid());
-				#if USE_LIBVMA
-				recreate_connection();
-				#endif
-				/* Immediately create a copy of the current
-				   checkpoint state upon restore. */
-				SAFE_NZ_TRY(create_fork_checkpoint(cenv));
-				return 0; /* resume execution out of 
-				             syscall handler */
-			}
-		}
-	} else {
+		return 0;
+	} else {  // parent; this will continue executing regularly
 		smem_await(!smem_get(&cenv->smem->semaphore,
 		                     cenv->smem->done_flag));
 		smem_put(&cenv->smem->semaphore,
@@ -447,7 +486,11 @@ create_fork_checkpoint(struct checkpoint_env *cenv)
 	}
 }
 
+
 #elif ENABLE_CHECKPOINTING == CRIU_CHECKPOINTING
+/* ************************************************************************** *
+ * CRIU Checkpointing                                                         *
+ * ************************************************************************** */
 static int create_criu_checkpoint(struct checkpoint_env *cenv)
 {
 	cenv->dumper_restorer_ready = false;

@@ -52,7 +52,7 @@ int synchronize(const struct monitor * const monitor, unsigned char reason)
 	                                        monitor->leader_id,
 					        reason),
 			   return -1);
-	if(0 == s) {
+	if(0 == s || FAKE_ERROR_EXCHANGE == reason) {
 		return monitor->handle_divergence(monitor, reason);
 	} else if(1 == s && ERROR_EXCHANGE == reason) {
 		return monitor->handle_error(monitor);

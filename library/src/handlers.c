@@ -168,15 +168,18 @@ SYSCALL_EXIT_PROT(access)
 SYSCALL_ENTER_PROT(faccessat)
 {
 	int dispatch = get_dispatch_by_path((const char *)canonical->args[1]);
-	alloc_scratch(sizeof(struct type));
-	if(AT_FDCWD != canonical->args[0]) {
+	alloc_scratch(sizeof(struct type)
+	              + MAX_PATH_LENGTH);
+	if(AT_FDCWD != (int)canonical->args[0]) {
 		struct descriptor_info *di = get_di(0);
 		remap_fd(di, 0);
 	}
 	struct type *string_type = (struct type *)*scratch;
+	char *fixed_path_buf = (char *)(*scratch + sizeof(struct type));
 	canonical->arg_types[0] = IMMEDIATE_TYPE(int);
 	canonical->arg_types[1] = POINTER_TYPE(string_type);
 	*string_type            = STRING_TYPE();
+	fix_path_arg(env, 1, fixed_path_buf);
 	canonical->arg_types[2] = IMMEDIATE_TYPE(int);
 	if(dispatch & DISPATCH_NEEDS_REPLICATION) {
 		canonical->ret_flags = ARG_FLAG_REPLICATE;
@@ -222,13 +225,15 @@ SYSCALL_EXIT_PROT(open)
 SYSCALL_ENTER_PROT(openat)
 {
 	struct descriptor_info *di = NULL;
-	if(AT_FDCWD != canonical->args[0]) {
+	if(AT_FDCWD != (int)canonical->args[0]) {
 		get_di(0);
 		remap_fd(di, 0);
 	}
 
-	alloc_scratch(sizeof(struct type));
+	alloc_scratch(sizeof(struct type)
+	              + MAX_PATH_LENGTH);
 	struct type *string_type = (struct type *)*scratch;
+	char *fixed_path_buf = (char *)(*scratch + sizeof(struct type));
 
 	int flags = canonical->args[2];
 
@@ -246,7 +251,10 @@ SYSCALL_ENTER_PROT(openat)
 	canonical->ret_type = IMMEDIATE_TYPE(long);
 	canonical->ret_flags = ARG_FLAG_REPLICATE;
 
-	return get_dispatch_by_path((const char *)canonical->args[1]);
+	int dispatch = get_dispatch_by_path((const char *)canonical->args[1]);
+	fix_path_arg(env, 1, fixed_path_buf);
+	
+	return dispatch;
 
 }
 
@@ -758,13 +766,15 @@ done:
 SYSCALL_ENTER_PROT(fstatat)
 {
 	struct descriptor_info *di = NULL;
-	if(AT_FDCWD != actual->args[0]) {
+	if(AT_FDCWD != (int)actual->args[0]) {
 		get_di(0);
 		remap_fd(di, 0);
 	}
-	alloc_scratch(2 * sizeof(struct type));
+	alloc_scratch(2 * sizeof(struct type)
+	              + MAX_PATH_LENGTH);
 	struct type *stat_buf_type = (struct type *)*scratch;
 	struct type *str_type = ((struct type *)*scratch) + 1;
+	char *fixed_path_buf = (char *)(*scratch + 2*sizeof(struct type));
 
 	int dispatch = get_dispatch_by_path((const char *)actual->args[1]);
 	if(!(dispatch & DISPATCH_UNCHECKED)) {
@@ -788,6 +798,8 @@ SYSCALL_ENTER_PROT(fstatat)
 	canonical->arg_types[0] = DESCRIPTOR_TYPE();
 	canonical->arg_types[1] = POINTER_TYPE(str_type);
 	*str_type               = STRING_TYPE();
+	fix_path_arg(env, 1, fixed_path_buf);
+
 	canonical->args[2]      = (long)normalized_stat;
 	canonical->arg_types[2] = POINTER_TYPE(stat_buf_type);
 	*stat_buf_type          = BUFFER_TYPE(NORMALIZED_STAT_STRUCT_SIZE);
@@ -795,6 +807,7 @@ SYSCALL_ENTER_PROT(fstatat)
 	canonical->arg_types[3] = IMMEDIATE_TYPE(int);
 	canonical->ret_type = IMMEDIATE_TYPE(long);
 	canonical->ret_flags = ARG_FLAG_REPLICATE;
+
 	return dispatch;
 }
 
@@ -2693,7 +2706,7 @@ SYSCALL_ENTER_PROT(readlinkat)
 	size_t bufsiz = actual->args[3];
 
 	struct descriptor_info *di = NULL;
-	if(AT_FDCWD != actual->args[0]) {
+	if(AT_FDCWD != (int)actual->args[0]) {
 		get_di(0);
 		remap_fd(di, 0);
 	}
@@ -2834,14 +2847,14 @@ SYSCALL_ENTER_PROT(renameat2)
 	struct descriptor_info *oldpath_di = NULL;
 	struct descriptor_info *newpath_di = NULL;
 	canonical->arg_types[0] = DESCRIPTOR_TYPE();
-	if(AT_FDCWD != canonical->args[0]) {
+	if(AT_FDCWD != (int)canonical->args[0]) {
 		oldpath_di = get_di(0);
 		remap_fd(oldpath_di, 0);
 	}
 	canonical->arg_types[1] = POINTER_TYPE(oldpath_str_type);
 	*oldpath_str_type = STRING_TYPE();
 	canonical->arg_types[2] = DESCRIPTOR_TYPE();
-	if(AT_FDCWD != canonical->args[0]) {
+	if(AT_FDCWD != (int)canonical->args[0]) {
 		newpath_di = get_di(2);
 		remap_fd(newpath_di, 2);
 	}
@@ -2890,7 +2903,7 @@ SYSCALL_ENTER_PROT(unlinkat)
 	struct type *pathname_type = (struct type*)*scratch;
 	struct descriptor_info *pathname_di = NULL;
 	canonical->arg_types[0] = DESCRIPTOR_TYPE();
-	if(AT_FDCWD != canonical->args[0]) {
+	if(AT_FDCWD != (int)canonical->args[0]) {
 		pathname_di = get_di(0);
 		remap_fd(pathname_di, 0);
 	}

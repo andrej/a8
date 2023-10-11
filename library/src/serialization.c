@@ -131,7 +131,7 @@ ssize_t deserialize(void *buf, size_t len, const struct type *type, void *dest,
 	switch(type->kind) {
 		case IGNORE:
 		{
-			if(len != type->immediate.size) {
+			if(len < type->immediate.size) {
 				return -1;
 			}
 			return type->immediate.size;
@@ -139,7 +139,7 @@ ssize_t deserialize(void *buf, size_t len, const struct type *type, void *dest,
 		case IMMEDIATE: 
 		case DESCRIPTOR:
 		{
-			if(len != type->immediate.size) {
+			if(len < type->immediate.size) {
 				return -1;
 			}
 			/* Copy sizeof(imm) from buf to deserialize_into. */

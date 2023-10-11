@@ -101,6 +101,13 @@
 #define redirect_exit(other) \
 	SYSCALL_EXIT(other)(env, handler, dispatch, actual, canonical, scratch)
 
+
+/* ************************************************************************** *
+ * Path Handling                                                              *
+ * ************************************************************************** */
+
+#define MAX_PATH_LENGTH 256
+
 static inline int get_dispatch_by_path(const char *path)
 {
 	static struct cache {
@@ -163,5 +170,39 @@ static inline int get_dispatch_by_path(const char *path)
 	}
 	return DISPATCH_EVERYONE | DISPATCH_CHECKED;
 }
+
+static inline int fix_path(struct environment *env, char *path, char *dst, 
+                           size_t dst_len)
+{
+    int pos = 0;
+    pid_t path_pid = 0;
+	/* Proc paths need their PID substituted from canonical to local PID if
+	   they are actually to be accessed. (This probably should only happen on 
+	   the leader.)*/
+    if(1 == sscanf(path, "/proc/%d/%n", &path_pid, &pos)) {
+        struct pid_info *pid_info = env_get_pid_info(env, path_pid);
+        if(NULL == pid_info) {
+            SAFE_WARNF("PID in path %s not a known canonical PID and thus not "
+                       "substituted.", path);
+            return 0;
+        }
+        snprintf(dst, dst_len, "/proc/%d/%s", 
+                 pid_info->local_pid,
+                 path + pos);
+        return 1;
+    }
+	return 0;
+}
+
+#define fix_path_arg(env, arg_no, fixed_buf) \
+	do { \
+		if(fix_path((env), \
+		            (char *)canonical->args[(arg_no)], \
+				    (fixed_buf), \
+		            MAX_PATH_LENGTH)) \
+		{ \
+			actual->args[(arg_no)] = (unsigned long long)(fixed_buf); \
+		} \
+	} while(0)
 
 #endif

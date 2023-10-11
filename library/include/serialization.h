@@ -111,6 +111,11 @@ ssize_t serialize_into(const void *inp, const struct type *type, void *buf);
 
 char *serialize(const void *inp, const struct type *type, size_t *len);
 
+/**
+ * NOTE: Deserialize may consume less than `len` bytes. The actual number of 
+ * consumed bytes is returned (or a negative value upon error). Deserialize will
+ * never consume more than `len` bytes. 
+ */
 ssize_t deserialize(void *buf, size_t len, const struct type *type, void *dest,
                     enum deserialize_approach approach);
 

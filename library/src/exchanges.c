@@ -328,18 +328,18 @@ static int write_back_replication_buffer(struct syscall_info *canonical,
 		}
 		SAFE_LZ_TRY_EXCEPT(
 			s = deserialize_overwrite(replication_buf + consumed,
-			                          replication_buf_len-consumed,
-		                                  &canonical->arg_types[i],
-				                  &canonical->args[i]),
+			                          replication_buf_len - consumed,
+		                              &canonical->arg_types[i],
+				                      &canonical->args[i]),
 			return 1);
 		consumed += s;
 	}
 	if(canonical->ret_flags & ARG_FLAG_REPLICATE) {
 		SAFE_LZ_TRY_EXCEPT(
 			s = deserialize_overwrite(replication_buf + consumed,
-			                          replication_buf_len-consumed,
-		                                  &canonical->ret_type,
-		                                  &canonical->ret),
+			                          replication_buf_len - consumed,
+		                              &canonical->ret_type,
+		                              &canonical->ret),
 			return 1);
 		consumed += s;
 	}

@@ -697,7 +697,7 @@ SYSCALL_ENTER_PROT(fstat)
 	remap_fd(di, 0);
 
 	int dispatch = 0; 
-	if(di->flags & DI_UNCHECKED) {
+	if(di->flags & DI_UNCHECKED && di->flags & DI_OPENED_LOCALLY) {
 		dispatch = DISPATCH_EVERYONE | DISPATCH_UNCHECKED;
 	} else {
 		/* Metadata of files is likely to cause a false positive 

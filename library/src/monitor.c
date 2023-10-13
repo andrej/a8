@@ -213,15 +213,6 @@ long monmod_handle_syscall(struct syscall_trace_func_stack * const stack)
 	}
 
 	if(dispatch & DISPATCH_NEEDS_REPLICATION) {
-#if VERBOSITY >= 4
-		if(monitor.is_leader) {
-			SAFE_LOG("Appending replication information to "
-			         "batch.\n");
-		} else {
-			SAFE_LOG("Awaiting replication information from "
-			         "leader.\n");
-		}
-#endif
 		/* Replicates contents of canonical.ret and canonical.args to 
 		   be the same across all nodes. It is the exit handler's 
 		   responsibility to copy this back to the actual results as

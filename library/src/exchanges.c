@@ -211,9 +211,12 @@ int replicate_results(const struct monitor * const monitor,
 	size_t recv_len = 0;
 	char *buf = NULL;
 
-
 	if(monitor->is_leader) {
 		const size_t len = get_replication_buffer_len(canonical);
+#if VERBOSITY >= 4
+		SAFE_LOGF("Appending %lu bytes of replication information to batch.\n",
+		          len);
+#endif
 		if(batch_comm_reserve_will_communicate(monitor->batch_comm,
 		                                       len)) {
 			SAFE_NZ_TRY(synchronize(monitor, REPLICATION_EXCHANGE));
@@ -232,6 +235,9 @@ int replicate_results(const struct monitor * const monitor,
 			batch_comm_broadcast_reserved(monitor->batch_comm),
 			goto abort1);
 	} else {
+#if VERBOSITY >= 4
+		SAFE_LOG("Awaiting replication information from leader.\n");
+#endif
 		if(batch_comm_receive_will_communicate(monitor->batch_comm)) {
 			SAFE_NZ_TRY(synchronize(monitor, REPLICATION_EXCHANGE));
 		}
@@ -252,7 +258,7 @@ abort1:
 	}
 abort0:
 	SAFE_NZ_TRY_EXCEPT(synchronize(monitor, ERROR_EXCHANGE),
-		           return 2);
+		               return 2);
 	return 1;
 }
 

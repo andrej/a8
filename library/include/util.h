@@ -38,15 +38,15 @@
    instead of stderr, which makes them suitable for use in syscall handlers,
    where stderr might be closed or pointing to something else. */
 #define SAFE_LOGF_LEN(n, msg, ...) { \
-	char log[n]; \
-	int len = 0; \
-	len = snprintf(log, sizeof(log), msg, __VA_ARGS__); \
-	if(len >= sizeof(log)) { \
-		log[sizeof(log)-1] = '\0'; \
+	char _logf_log[n]; \
+	int _logf_len = 0; \
+	_logf_len = snprintf(_logf_log, sizeof(_logf_log), (msg), __VA_ARGS__); \
+	if(_logf_len >= sizeof(_logf_log)) { \
+		_logf_log[sizeof(_logf_log)-1] = '\0'; \
 	} \
-	if(0 < len) { \
-		monmod_trusted_syscall(__NR_write, monmod_log_fd, (long)log, \
-		                       (long)len, 0, 0, 0); \
+	if(0 < _logf_len) { \
+		monmod_trusted_syscall(__NR_write, monmod_log_fd, (long)_logf_log, \
+		                       (long)_logf_len, 0, 0, 0); \
 	} \
 }
 #define SAFE_LOGF(msg, ...) SAFE_LOGF_LEN(256, msg, __VA_ARGS__)

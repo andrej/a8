@@ -2069,8 +2069,6 @@ SYSCALL_ENTER_PROT(getsockname)
 	struct type *socklen_type = ((struct type *)*scratch) + 1;
 	if(NULL == (socklen_t *)actual->args[2]
 	   || *(socklen_t *)actual->args[2] < sizeof(struct sockaddr)) {
-		/* A little restrictive. Anything bigger would be fine, but
-		   unexpected and could indicate something else going wrong. */
 		return DISPATCH_ERROR;
 	}
 
@@ -2675,6 +2673,7 @@ SYSCALL_ENTER_PROT(rt_sigaction)
 
 SYSCALL_ENTER_PROT(readlink)
 {
+	canonical->no = SYSCALL_readlinkat_CANONICAL;
 	canonical->args[3] = canonical->args[2];
 	canonical->args[2] = canonical->args[1];
 	canonical->args[1] = canonical->args[0];

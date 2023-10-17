@@ -79,6 +79,18 @@ runtests: tests
 clean:
 	rm -rf $(BUILD_DIR)
 
+.PHONY: install
+install: $(BUILD_DIR)/libmonmod.so
+	cp $^ /usr/lib/libmonmod.so
+	cp ../dependencies/libconfig-install/lib/libconfig.so.11 /usr/lib
+	chmod u+s /usr/lib/libmonmod.so  # Permission needed for libVMA execution
+	chmod u+s /usr/lib/libconfig.so.11
+# TODO: Add library for CRIU checkpointing in install target 
+
+.PHONY: uninstall
+uninstall:
+	rm /usr/lib/libmonmod.so
+
 -include $(DEPS)
 -include $(TEST_DEPS)
 

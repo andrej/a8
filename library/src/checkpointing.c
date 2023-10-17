@@ -63,12 +63,8 @@ int init_checkpoint_env(struct checkpoint_env *env,
 	/* Allocate shared memory for communication between checkpointed
 	   waiting processes and the main process (for fork checkpointing). 
 	   CRIU checkpointing uses signals exclusively for communication. */
-	void *smem = NULL;
-	Z_TRY(smem = mmap(NULL, monmod_page_size, PROT_READ | PROT_WRITE,
-	                  MAP_SHARED | MAP_ANONYMOUS, -1, 0));
-	env->smem = (struct checkpointing_smem *)smem;
-	env->smem_length = monmod_page_size;
-	NZ_TRY(sem_init(&env->smem->semaphore, 1, 1));
+	
+	Z_TRY(env->smem = smem_init(sizeof(struct checkpointing_smem)));
 #endif
 
 	struct sigaction sa;
@@ -141,8 +137,9 @@ int restore_last_checkpoint(struct checkpoint_env *env)
 	#if USE_LIBVMA
 	comm_destroy(&monitor.comm);
 	#endif
-	smem_put(&env->smem->semaphore, 
-	         env->smem->message = CHECKPOINT_RESTORE);
+	smem_put(env->smem, 
+	         ((struct checkpointing_smem *)env->smem->data)
+			 	->message = CHECKPOINT_RESTORE);
 	/* Do NOT use env->smem after this point. It is now shared between the
 	   restored checkpoint and its child checkpoint! */
 #elif ENABLE_CHECKPOINTING == CRIU_CHECKPOINTING
@@ -358,8 +355,7 @@ int _fork_checkpoint_main(struct checkpoint_env *cenv, pid_t parent)
 	s = checkpointed_environment_fix_up(cenv->tracee_env);
 	cenv->breakpoints[0].hits = 0;
 	// Parent needs to synchronize with fix up
-	smem_put(&cenv->smem->semaphore,
-			 cenv->smem->done_flag = true);
+	smem_put(cenv->smem, checkpointing_smem_cast(cenv)->done_flag = true);
 	if(0 != s) {
 		return 1;
 	}
@@ -379,8 +375,8 @@ int _fork_checkpoint_main(struct checkpoint_env *cenv, pid_t parent)
 	/* The child remains paused and waits until it gets asked to resume. */
 	enum checkpointing_message msg;
 	do {
-		msg = smem_get(&cenv->smem->semaphore,
-					   cenv->smem->message);
+		msg = smem_get(cenv->smem, uint64_t,
+					   checkpointing_smem_cast(cenv)->message);
 		if(msg == CHECKPOINT_HOLD && getppid() != parent) {
 			/* Parent died before it was able to give us an instruction, and we 
 			   got reposessed by init; treat this case like a CHECKPOINT_DELETE 
@@ -391,18 +387,18 @@ int _fork_checkpoint_main(struct checkpoint_env *cenv, pid_t parent)
 			sched_yield();
 		}
 	} while(msg == CHECKPOINT_HOLD);
-	smem_put(&cenv->smem->semaphore,
-			 cenv->smem->message = CHECKPOINT_HOLD);
+	smem_put(cenv->smem,
+			 checkpointing_smem_cast(cenv)->message = CHECKPOINT_HOLD);
 	switch(msg) {
 		case CHECKPOINT_DELETE: {
-			smem_put(&cenv->smem->semaphore, 
-					 cenv->smem->done_flag = true);
+			smem_put(cenv->smem, 
+					 checkpointing_smem_cast(cenv)->done_flag = true);
 			exit(0);
 			break; /* unreachable */
 		}
 		case CHECKPOINT_RESTORE: {
-			smem_put(&cenv->smem->semaphore, 
-					 cenv->smem->done_flag = true);
+			smem_put(cenv->smem,
+					 checkpointing_smem_cast(cenv)->done_flag = true);
 			// After putting this message, the parent will now exit momentarily. 
 			while(parent == getppid());
 			#if USE_LIBVMA
@@ -429,10 +425,11 @@ create_fork_checkpoint(struct checkpoint_env *cenv)
 	/* First, kill previous checkpoint, if any. We only need the most 
 	   recent. */
 	if(cenv->last_checkpoint.valid) {
-		smem_put(&cenv->smem->semaphore, 
-		         cenv->smem->message = CHECKPOINT_DELETE);
-		smem_await(!smem_get(&cenv->smem->semaphore,
-		                     cenv->smem->done_flag));
+		smem_put(cenv->smem, 
+		         checkpointing_smem_cast(cenv)->message = CHECKPOINT_DELETE);
+		smem_await(!smem_get(cenv->smem,
+		                     uint64_t,
+		                     checkpointing_smem_cast(cenv)->done_flag));
 		/* At this point, we are sure that we are memory-synchronized
 		   with the checkpointed process, and it is about to exit --
 		   it is guaranteed to not acquire the semaphore again, but not
@@ -457,8 +454,8 @@ create_fork_checkpoint(struct checkpoint_env *cenv)
 	   is a freshly restored ceckpoint, note that the parent process technically
 	   still has access to cenv->smem; however, it will exit momentarily and not
 	   use it, so no need to synchronize with it either. */
-	cenv->smem->message = CHECKPOINT_HOLD;
-	cenv->smem->done_flag = false;
+	checkpointing_smem_cast(cenv)->message = CHECKPOINT_HOLD;
+	checkpointing_smem_cast(cenv)->done_flag = false;
 
 	/* Fork creates a copy of most of the current process state. */
 	pid_t parent = getpid();
@@ -476,10 +473,11 @@ create_fork_checkpoint(struct checkpoint_env *cenv)
 		}
 		return 0;
 	} else {  // parent; this will continue executing regularly
-		smem_await(!smem_get(&cenv->smem->semaphore,
-		                     cenv->smem->done_flag));
-		smem_put(&cenv->smem->semaphore,
-		         cenv->smem->done_flag = false);
+		smem_await(!smem_get(cenv->smem,
+		                     uint64_t,
+		                     checkpointing_smem_cast(cenv)->done_flag));
+		smem_put(cenv->smem,
+		         checkpointing_smem_cast(cenv)->done_flag = false);
 		cenv->last_checkpoint.valid = true;
 		cenv->last_checkpoint.pid = child;
 		return 0;

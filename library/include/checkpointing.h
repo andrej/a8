@@ -13,6 +13,7 @@
 #include "config.h"
 #include "trap_instr.h"
 #include "environment.h"
+#include "smem.h"
 
 struct checkpoint {
 	bool valid;
@@ -34,30 +35,12 @@ enum checkpointing_message {
 };
 
 struct checkpointing_smem {
-	sem_t semaphore;
 	volatile enum checkpointing_message message;
 	volatile bool done_flag;
 };
 
-#define smem_get(sem, smem_val) ({ \
-	volatile uint64_t val = 0; \
-	while(0 != unprotected_funcs.sem_wait(sem)); \
-	val = smem_val; \
-	unprotected_funcs.sem_post(sem); \
-	val; \
-})
-
-#define smem_put(sem, put_op) ({ \
-	while(0 != unprotected_funcs.sem_wait(sem)); \
-	put_op; \
-	unprotected_funcs.sem_post(sem); \
-})
-
-#define smem_await(cond) ({ \
-	while((cond)) { \
- 		sched_yield();\
-	} \
-})
+#define checkpointing_smem_cast(env) \
+	((struct checkpointing_smem *)(env)->smem->data)
 
 struct checkpoint_env {
 	struct environment *tracee_env;
@@ -70,7 +53,7 @@ struct checkpoint_env {
 	bool create_checkpoint;
 	struct monitor *monitor;
 #if ENABLE_CHECKPOINTING == FORK_CHECKPOINTING
-	struct checkpointing_smem *smem;
+	struct smem *smem;
 	size_t smem_length;
 	jmp_buf jmp_buf;
 #elif ENABLE_CHECKPOINTING == CRIU_CHECKPOINTING

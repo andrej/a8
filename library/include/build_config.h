@@ -23,12 +23,15 @@
  */
 #define CHECK_HASHES_ONLY 1
 
+#define USE_LIBVMA_NO 0
+#define USE_LIBVMA_LOCAL 1
+#define USE_LIBVMA_SERVER 2
 /**
  * Use libVMA for intra-monitor communication. This enables fast communication
  * with direct-memory-access without a round-trip through the kernel on
  * enabled Mellanox devices.
  */
-#define USE_LIBVMA 0
+#define USE_LIBVMA USE_LIBVMA_SERVER
 
 /**
  * If set to true, no monitoring happens. The monitor will go ahead and execute
@@ -100,5 +103,8 @@
 #define MAX_N_DESCRIPTOR_MAPPINGS 26
 #define MAX_N_PID_MAPPINGS 4
 #define MAX_N_EPOLL_DATA_INFOS 128
+
+// vma_redirect.h
+#define VMA_SERVER_SMEM_SIZE 524288
 
 #endif

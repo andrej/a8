@@ -10,10 +10,6 @@
 #include <sys/wait.h>
 #include <signal.h>
 
-#include "library_init.h"
-#include "environment.h"
-#include "monitor.h"
-
 /* The following two are defined in the main.lds linker script and capture the
    start and end address of any functions marked section("unprotected").
    Functions in this section will remain accessible even when the rest of the
@@ -37,12 +33,6 @@ struct unprotected_funcs {
 	// monmod_syscall.h
 	long (* syscall)(long, long, long, long, long, long, long);
 
-   // environment.h
-   typeof(checkpointed_environment_fix_up) *checkpointed_environment_fix_up;
-
-   // monitor.h
-   typeof(monitor_destroy) *monitor_destroy;
-
    // unistd.h
    pid_t (* fork)(void);
    pid_t (* getpid)(void);
@@ -56,12 +46,6 @@ struct unprotected_funcs {
 
    // <sys/mman.h>
    typeof(mprotect) *mprotect;
-
-   // custom_syscalls.h
-   typeof(monmod_init) *monmod_init;
-
-   // library_init.h
-   typeof(monmod_unprotected_reprotect) *monmod_unprotected_reprotect;
 
    // semaphore.h
    typeof(sem_wait) *sem_wait;

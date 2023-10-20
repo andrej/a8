@@ -97,12 +97,3 @@ void monmod_library_init()
 	   module code after this and exits out of it. */
 }
 #pragma GCC pop_options
-
-void 
-__attribute__((destructor)) 
-__attribute__((section("unprotected")))
-monmod_library_destroy()
-{
-	unprotected_funcs.monitor_destroy(&monitor);
-}
-

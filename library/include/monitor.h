@@ -34,7 +34,7 @@ void register_monitor_in_kernel();
 
 int monitor_init(struct monitor *monitor, int own_id, struct config *conf);
 
-int monitor_init_comm(struct monitor *monitor);
+int monitor_init_comm(struct communicator *comm, struct config *conf, int id);
 
 int monitor_destroy(struct monitor *monitor);
 

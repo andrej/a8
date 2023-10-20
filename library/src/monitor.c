@@ -18,8 +18,7 @@
 #include "unprotected.h"
 #include "exchanges.h"
 #include "communication.h"
-
-#include "test.h"
+#include "library_init.h"
 
 
 /* ************************************************************************** *
@@ -416,7 +415,7 @@ void register_monitor_in_kernel(struct monitor *monitor) {
 	SAFE_NZ_TRY(monmod_init(monitor->env.pid->local_pid, 
 	                        &monmod_syscall_trusted_addr,
 	                        &monmod_syscall_trace_enter,
-				start, len,
+	                        start, len,
 	                        code_start, protected_code_len,
 				protected_data_start, protected_data_len));
 
@@ -432,21 +431,17 @@ void register_monitor_in_kernel(struct monitor *monitor) {
 #endif
 }
 
-int monitor_init_comm(struct monitor *monitor)
+int monitor_init_comm(struct communicator *comm, struct config *conf, int id)
 {
 	struct variant_config *own_variant_conf;
-	SAFE_Z_TRY(own_variant_conf = get_variant(&monitor->conf, 
-	                                          monitor->own_id));
-
-	SAFE_LZ_TRY(comm_init(&monitor->comm, monitor->own_id, 
-	                      &own_variant_conf->addr));
-	for(size_t i = 0; i < monitor->conf.n_variants; i++) {
-		if(monitor->conf.variants[i].id == monitor->own_id) {
+	SAFE_Z_TRY(own_variant_conf = get_variant(conf, id));
+	SAFE_LZ_TRY(comm_init(comm, id, &own_variant_conf->addr));
+	for(size_t i = 0; i < conf->n_variants; i++) {
+		if(conf->variants[i].id == id) {
 			continue;
 		}
-		SAFE_NZ_TRY(comm_connect(&monitor->comm, 
-		                         monitor->conf.variants[i].id, 
-		                         &monitor->conf.variants[i].addr));
+		SAFE_NZ_TRY(comm_connect(comm, conf->variants[i].id, 
+		                         &conf->variants[i].addr));
 	}
 	return 0;
 }
@@ -468,6 +463,10 @@ int monitor_init(struct monitor *monitor, int own_id, struct config *conf)
 
 	SAFE_Z_TRY(own_variant_conf = get_variant(conf, own_id));
 
+	/* Connect everyone to everyone. */
+	SAFE_NZ_TRY(monitor_init_comm(&monitor->comm, &monitor->conf, 
+	                              monitor->own_id));
+
 	SAFE_NZ_TRY(env_init(&monitor->env, monitor->is_leader));
 
 	/* Checkpointing */
@@ -485,9 +484,6 @@ int monitor_init(struct monitor *monitor, int own_id, struct config *conf)
 	monitor->env.pid->local_pid = getpid();
 #endif
 
-	/* Connect everyone to everyone. */
-	SAFE_NZ_TRY(monitor_init_comm(monitor));
-
 	/* Initialize Individual Basic Monitoring Components */
 #if MEASURE_TRACING_OVERHEAD
 	/* If we are only interested in measuring the tracing overhead, register
@@ -498,7 +494,6 @@ int monitor_init(struct monitor *monitor, int own_id, struct config *conf)
 #endif
 
 	SAFE_NZ_TRY(replication_init(monitor, conf->replication_batch_size));
-
 
 	/* Initiate random number generator used for fault injection */
 	srandom(time(NULL));
@@ -515,9 +510,10 @@ int monitor_init(struct monitor *monitor, int own_id, struct config *conf)
 	return 0;
 }
 
-int
+void 
+__attribute__((destructor)) 
 __attribute__((section("unprotected")))
-monitor_destroy(struct monitor *monitor)
+monmod_library_destroy()
 {
 	is_exiting = true;
 	unprotected_funcs.exit(0);  /* any system call that gets us into

@@ -4,6 +4,7 @@
 #include <errno.h>
 #include <time.h>
 #include <sys/epoll.h>
+#include <sys/time.h>
 #include "environment.h"
 #include "communication.h"
 #include "util.h"

@@ -20,12 +20,16 @@ struct smem {
 
 #define smem_lock_if(smem, cond) ({ \
 	while(1) { \
-		smem_lock(smem); \
+		/* Do racy test without locking. */ \
 		if(cond) { \
-			break; \
+			/* Test was racy, now test properly that condition holds. */ \
+			smem_lock(smem); \
+			if(cond) { \
+				break; \
+			} \
+			smem_unlock(smem); \
 		} \
-		sched_yield(); \
-		smem_unlock(smem); \
+		mem_barrier; \
 	} \
 })
 

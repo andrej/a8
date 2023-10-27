@@ -2297,7 +2297,7 @@ SYSCALL_ENTER_PROT(getppid)
 
 SYSCALL_ENTER_PROT(monmod_fake_fork)
 {
-#if USE_LIBVMA
+#if USE_LIBVMA == USE_LIBVMA_LOCAL
 	alloc_scratch(sizeof(struct communicator));
 	struct communicator *child_comm = (struct communicator *)*scratch;
 	memset(child_comm, 0, sizeof(*child_comm));

@@ -78,7 +78,7 @@ int init_checkpoint_env(struct checkpoint_env *env,
 	   the parent process, as CRIU dumps the children of a process. */
 	env->dumper_restorer_ready = false;
 	NZ_TRY(sigaction(SIGUSR1, &sa, NULL));
-#if USE_LIBVMA
+#if USE_LIBVMA == USE_LIBVMA_LOCAL
 	pid_t child = original_fork();
 #else
 	pid_t child = fork();
@@ -134,9 +134,9 @@ int restore_last_checkpoint(struct checkpoint_env *env)
 	SAFE_LOGF("<%d> Restoring last checkpoint.\n", getpid());
 #endif
 #if ENABLE_CHECKPOINTING == FORK_CHECKPOINTING
-	#if USE_LIBVMA
+#if USE_LIBVMA == USE_LIBVMA_LOCAL
 	comm_destroy(&monitor.comm);
-	#endif
+#endif
 	smem_put(env->smem, 
 	         ((struct checkpointing_smem *)env->smem->data)
 			 	->message = CHECKPOINT_RESTORE);
@@ -317,7 +317,7 @@ handle_breakpoint(struct checkpoint_env *env, void *loc)
  * Fork Checkpointing                                                         *
  * ************************************************************************** */
 
-#if USE_LIBVMA
+#if USE_LIBVMA == USE_LIBVMA_LOCAL
 /* Used for fork checkpointing when using libVMA, since libVMA does not persist
    connections across fork. */
 static void _recreate_connections()
@@ -401,9 +401,9 @@ int _fork_checkpoint_main(struct checkpoint_env *cenv, pid_t parent)
 					 checkpointing_smem_cast(cenv)->done_flag = true);
 			// After putting this message, the parent will now exit momentarily. 
 			while(parent == getppid());
-			#if USE_LIBVMA
+#if USE_LIBVMA == USE_LIBVMA_LOCAL
 			_recreate_connections();
-			#endif
+#endif
 			/* This longjump resumes execution right before creation of the
 			   checkpoint. This duplicates this current checkpoint if we want to
 			   restore it again later. We use setjmp/longjmp instead of a 
@@ -460,7 +460,7 @@ create_fork_checkpoint(struct checkpoint_env *cenv)
 	/* Fork creates a copy of most of the current process state. */
 	pid_t parent = getpid();
 	pid_t child = 0;
-#if !USE_LIBVMA
+#if USE_LIBVMA != USE_LIBVMA_LOCAL
 	LZ_TRY(child = fork());
 #else
 	LZ_TRY(child = vmafork());

@@ -131,8 +131,6 @@ static inline int init_vma_redirect() {
 // -- Declarations --
 
 extern struct socket_fptrs s;
-pid_t original_fork(void);
-pid_t vmafork(void);
 int vma_server_main(struct smem *smem);
 
 #define VMAS_COMMANDS(X) \

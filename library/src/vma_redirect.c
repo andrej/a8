@@ -56,10 +56,6 @@ struct smem *vmas_smem = NULL;
 int vma_server_main(struct smem *vmas_smem)
 {
        while(1) {
-              // If we have no children left to serve, terminate.
-              if(-1 == waitpid(-1, NULL, WNOHANG) && ECHILD == errno) {
-                     break;
-              }
               // Wait for a request
               smem_lock_if(vmas_smem,
                            VMAS_STATE_REQUEST_SUBMITTED 

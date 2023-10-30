@@ -243,6 +243,9 @@ SYSCALL_ENTER_PROT(openat)
 	canonical->arg_types[1] = POINTER_TYPE(string_type);
 	           *string_type = STRING_TYPE();
 	canonical->arg_types[2] = IMMEDIATE_TYPE(int);
+	// Some flags are encoded differently between x86 ARM; do not cross-check
+	// those flags for now
+	canonical->args[2] &= ~(O_DIRECTORY | O_NOFOLLOW | O_DIRECT | O_LARGEFILE);
 	if(flags & (O_CREAT)) { // O_TMPFILE
 		canonical->arg_types[3] = IMMEDIATE_TYPE(mode_t);
 	} else {
@@ -371,7 +374,10 @@ SYSCALL_ENTER_PROT(madvise)
 {
 	canonical->args[0] = (0 == canonical->args[0] ? 0 : 1);
 	canonical->arg_types[0] = IMMEDIATE_TYPE(void *);
-	canonical->arg_types[1] = IMMEDIATE_TYPE(size_t);
+	// Ignore length argument for now since memory may contain arch-specific
+	// structures of different sizes.
+	// canonical->arg_types[1] = IMMEDIATE_TYPE(size_t);
+	canonical->arg_types[1] = IGNORE_TYPE();
 	canonical->arg_types[2] = IMMEDIATE_TYPE(int);
 	return DISPATCH_EVERYONE | DISPATCH_CHECKED;
 }
@@ -2756,7 +2762,10 @@ SYSCALL_ENTER_PROT(pipe2)
 	struct type *ref_type = (struct type *)*scratch;
 	canonical->arg_types[0] = POINTER_TYPE(ref_type);
 	*ref_type               = BUFFER_TYPE(2 * sizeof(long));
+	canonical->arg_flags[0] = ARG_FLAG_WRITE_ONLY;
 	canonical->arg_types[1] = IMMEDIATE_TYPE(int);
+	// Do not cross-check flags that are encoded differently for now
+	canonical->args[2] &= ~(O_DIRECT);
 	return DISPATCH_EVERYONE | DISPATCH_CHECKED;
 }
 

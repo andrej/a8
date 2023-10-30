@@ -30,8 +30,12 @@
  * Use libVMA for intra-monitor communication. This enables fast communication
  * with direct-memory-access without a round-trip through the kernel on
  * enabled Mellanox devices.
+ * 
+ * Note: When using USE_LIBVMA_LOCAL, disable NO_HANDLER_TERMINATES below (set
+ * to zero). It appears the libVMA library causes a tgkill call that we 
+ * currently have no handler for.
  */
-#define USE_LIBVMA USE_LIBVMA_SERVER
+#define USE_LIBVMA USE_LIBVMA_NO
 
 /**
  * If set to true, no monitoring happens. The monitor will go ahead and execute

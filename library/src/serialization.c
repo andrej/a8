@@ -361,9 +361,20 @@ size_t log_str_of(const void *inp, const struct type *type,
 		}
 		case IMMEDIATE: {
 			long long v = 0;
+			assert(sizeof(v) >= type->immediate.size);
 			// assumes little-endianness:
 			memcpy(&v, inp, type->immediate.size);
-			append("IMMEDIATE %lld", v);
+			if(type->immediate.size == sizeof(char)) {
+				append("CHAR %hhd", (char)v);
+			} else if(type->immediate.size == sizeof(short)) {
+				append("SHORT %hd", (short)v);
+			} else if(type->immediate.size == sizeof(int)) {
+				append("INT %d", (int)v);
+			} else if(type->immediate.size == sizeof(long)) {
+				append("LONG %ld", (long)v);
+			} else {
+				append("IMMEDIATE %lld", v);
+			}
 			break;
 		}
 		case POINTER: {

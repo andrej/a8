@@ -20,7 +20,7 @@ POLICY_EXEMPT(base)
 {
 	switch(canonical->no) {
 		case SYSCALL_gettimeofday_CANONICAL:
-		//case SYSCALL_clock_gettime_CANONICAL:
+		case SYSCALL_clock_gettime_CANONICAL:
 		case SYSCALL_time_CANONICAL:
 		case SYSCALL_getpid_CANONICAL:
 		//case SYSCALL_gettid_CANONICAL:

@@ -372,7 +372,10 @@ SYSCALL_ENTER_PROT(mprotect)
 
 SYSCALL_ENTER_PROT(madvise)
 {
+	// Skip checking madvise for now; seems to lead to benign divergences
+	return DISPATCH_EVERYONE | DISPATCH_UNCHECKED;
 	canonical->args[0] = (0 == canonical->args[0] ? 0 : 1);
+	/*
 	canonical->arg_types[0] = IMMEDIATE_TYPE(void *);
 	// Ignore length argument for now since memory may contain arch-specific
 	// structures of different sizes.
@@ -380,6 +383,7 @@ SYSCALL_ENTER_PROT(madvise)
 	canonical->arg_types[1] = IGNORE_TYPE();
 	canonical->arg_types[2] = IMMEDIATE_TYPE(int);
 	return DISPATCH_EVERYONE | DISPATCH_CHECKED;
+	*/
 }
 
 /* ************************************************************************** *

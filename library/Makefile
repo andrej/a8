@@ -11,6 +11,7 @@ INCLUDE_DIRS ?= include \
                 ..
 LIB_DIRS     ?= ../dependencies/criu-install/lib/$(ARCH)-linux-gnu
 LIBCONFIG_OBJECTS_DIR ?= ../dependencies/libconfig-1.7.3/lib/.libs
+VMA_SERVER_DIR ?= vma-server
 
 CC      := gcc
 CFLAGS  := -g -fpic $(INCLUDE_DIRS:%=-I%) \
@@ -31,10 +32,15 @@ LDLIBS  := -ldl -lcriu
 
 C_SOURCES := $(shell find $(SOURCE_DIRS) -maxdepth 1 -name \*.c)
 S_SOURCES := $(shell find $(SOURCE_DIRS) -maxdepth 1 -name \*.S)
-C_OBJECTS := $(C_SOURCES:%.c=$(BUILD_DIR)/%.o)
-S_OBJECTS := $(S_SOURCES:%.S=$(BUILD_DIR)/%.o)
-DEPS      := $(C_OBJECTS:%.o=%.d)
+ALL_C_OBJECTS := $(C_SOURCES:%.c=$(BUILD_DIR)/%.o)
+ALL_S_OBJECTS := $(S_SOURCES:%.S=$(BUILD_DIR)/%.o)
+DEPS      := $(ALL_C_OBJECTS:%.o=%.d)
 LIBCONFIG_OBJECTS := $(shell find $(LIBCONFIG_OBJECTS_DIR) -maxdepth 1 -name libconfig_la-\*.o)
+
+# Objects for libmonmod.so
+C_OBJECTS := $(filter-out $(BUILD_DIR)/vma-server/%,\
+                          $(ALL_C_OBJECTS))
+S_OBJECTS := $(ALL_S_OBJECTS)
 
 TEST_SUITE_DIR := ../test_suite
 TEST_SOURCES   := $(shell find $(TESTS_DIR) -maxdepth 1 -name \*.c)
@@ -48,7 +54,7 @@ TEST_LDFLAGS   :=
 TEST_LDLIBS    := ../dependencies/libconfig-install/lib/libconfig.a
 
 .PHONY: all
-all: $(BUILD_DIR)/libmonmod.so
+all: $(BUILD_DIR)/libmonmod.so $(BUILD_DIR)/vma-server
 
 $(BUILD_DIR)/%.o: %.S
 	mkdir -p $(@D)
@@ -61,6 +67,13 @@ $(BUILD_DIR)/%.o: %.c  # This rule also builds test objects
 
 $(BUILD_DIR)/libmonmod.so: $(C_OBJECTS) $(S_OBJECTS)
 	$(CC) $(LDFLAGS) -o $@ $^ $(LIBCONFIG_OBJECTS) $(LDLIBS) -Wl,--version-script=link.version 
+
+.PHONY: $(BUILD_DIR)/vma-server
+$(BUILD_DIR)/vma-server: 
+	make -f $(VMA_SERVER_DIR)/Makefile	\
+		CC="$(CC)" \
+		BUILD_DIR="$(BUILD_DIR)" \
+		INCLUDE_DIRS="$(INCLUDE_DIRS)"
 
 .PHONY: tests
 tests: $(TEST_OBJECTS) $(TEST_DEP_OBJS)
@@ -94,4 +107,3 @@ uninstall:
 
 -include $(DEPS)
 -include $(TEST_DEPS)
-

@@ -6,7 +6,6 @@
 
 #include <unistd.h>
 #include "vma_redirect.h"
-#include "unprotected.h"
 #include "smem.h"
 
 struct socket_fptrs s = {};
@@ -28,8 +27,8 @@ fork(void)
 }
 
 pid_t
-__attribute((visibility("default"),
-             section("unprotected")))
+__attribute__((visibility("default"),
+               section("unprotected")))
 original_fork(void)
 {
        pid_t (* _fork)() = dlsym(RTLD_NEXT, "fork");
@@ -52,24 +51,6 @@ vmafork(void)
 #if USE_LIBVMA == USE_LIBVMA_SERVER
 
 struct smem *vmas_smem = NULL;
-
-int vma_server_main(struct smem *vmas_smem)
-{
-       while(1) {
-              // Wait for a request
-              smem_lock_if(vmas_smem,
-                           VMAS_STATE_REQUEST_SUBMITTED 
-                           == vmas_smem_data->state);
-              if(vmas_cmd_quit == vmas_smem_data->command) {
-                     break;
-              }
-              vmas_smem_data->return_value = 
-                     vmas_dispatch(vmas_smem_data);
-              vmas_smem_data->state = VMAS_STATE_RESPONSE_READY;
-              smem_unlock(vmas_smem);
-       }
-       return 0;
-}
 
 // functions static inline int vmas_req_XXX(args ...)
 #define MAXLEN (VMA_SERVER_SMEM_SIZE/4)

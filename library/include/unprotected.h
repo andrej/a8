@@ -1,6 +1,8 @@
 #ifndef UNPROTECTED_H
 #define UNPROTECTED_H
 
+#ifndef NO_UNPROTECTED
+
 #include <unistd.h>
 #include <string.h>
 #include <sys/mman.h>
@@ -49,7 +51,9 @@ struct unprotected_funcs {
 
    // semaphore.h
    typeof(sem_wait) *sem_wait;
+   #define sem_wait unprotected_funcs.sem_wait
    typeof(sem_post) *sem_post;
+   #define sem_post unprotected_funcs.sem_post
 
    // stdlib.h
    typeof(exit) *exit;
@@ -74,4 +78,5 @@ void
 __attribute__((section("unprotected")))
 init_unprotected();
 
+#endif
 #endif

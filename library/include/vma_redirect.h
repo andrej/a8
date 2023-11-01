@@ -131,7 +131,6 @@ static inline int init_vma_redirect() {
 // -- Declarations --
 
 extern struct socket_fptrs s;
-int vma_server_main(struct smem *smem);
 
 #define VMAS_COMMANDS(X) \
 	X(socket) \
@@ -269,47 +268,6 @@ VMAS_COMMANDS(DEF_REQ_FUN)
 #undef DEF_REQ_FUN_ARG_LIST_PTR
 #undef DEF_REQ_FUN
 
-// functions static inline int vmas_do_XXX(char *reqbuf)
-// These functions get called on the server side process to execute the actual
-// socket function and write back the result, inside of vma_server_main().
-#define DEF_DO_FUN_ARG_LIST_IMM(T, N) \
-	((argstruct_t *)reqbuf)->N
-#define DEF_DO_FUN_ARG_LIST_PTR(T, L_static, L_dynamic, N)  \
-	((argstruct_t *)reqbuf)->N
-#define DEF_DO_FUN(NAME) \
-	static inline int \
-	vmas_do_ ## NAME(char *reqbuf) { \
-		typedef struct vmas_ ## NAME ## _args argstruct_t; \
-		return NAME(VMAS_ ## NAME ## _ARGS(DEF_DO_FUN_ARG_LIST_IMM, \
-		                                   DEF_DO_FUN_ARG_LIST_PTR, \
-                                           DEF_DO_FUN_ARG_LIST_PTR, \
-										   DEF_DO_FUN_ARG_LIST_PTR, \
-	                                       COMMA())); \
-	}
-
-VMAS_COMMANDS(DEF_DO_FUN)
-
-#undef DEF_DO_FUN_ARG_LIST_IMM
-#undef DEF_DO_FUN_ARG_LIST_PTR
-#undef DEF_DO_FUN
-
-// function static int vma_server_dispatch()
-#define VMAS_DISPATCH(NAME) \
-	case vmas_cmd_ ## NAME: \
-		return vmas_do_ ## NAME (smem->data);
-static int vmas_dispatch(struct vmas_smem_struct *smem)
-{
-	switch(smem->command) {
-		VMAS_COMMANDS(VMAS_DISPATCH)
-		default:
-			SAFE_LOGF("Unknown command to VMA server: %d\n", 
-			          (int)smem->command);
-			exit(1);
-	}
-	return -1; // unreachable
-}
-#undef VMAS_DISPATCH
-
 #undef MAXLEN
 #undef COMMA
 #undef NOTHING
@@ -323,7 +281,10 @@ static inline int init_vma_redirect() {
 		return 0;
 	}
 #if USE_LIBVMA == USE_LIBVMA_SERVER
-	SAFE_Z_TRY(vmas_smem = smem_init(sizeof(struct vmas_smem_struct)));
+	char smem_name[255];
+	snprintf(smem_name, sizeof(smem_name), "/vmas_smem_%d", getpid());
+	SAFE_Z_TRY(vmas_smem = smem_init_named(sizeof(struct vmas_smem_struct),
+	                                       smem_name));
 	if(0 == fork()) {
 		/* Child; set socket functions up to just call back to parent via
 		  shared memory */
@@ -331,16 +292,20 @@ static inline int init_vma_redirect() {
 			(fn##_fptr_t)&vmas_req_ ## fn;
 		VMAS_COMMANDS(DEFINE_VMAS_CLIENT_SOCKET_FN);
 		return 0;
+	} else {
+		/* Parent: This is the server handling the requests. */
+		char * const args[] = { "vma-server", smem_name, NULL };
+		setenv("LD_PRELOAD", "/usr/lib/libvma.so", 1);
+		LZ_TRY_EXCEPT(execvp("vma-server", args),
+		              exit(1));
 	}
-	/* Parent: This is the server handling the requests. */
 #endif
+#if USE_LIBVMA == USE_LIBVMA_LOCAL
 	void *handle = NULL;
 	Z_TRY(handle = dlopen("/usr/lib/libvma.so", RTLD_NOW));
 	#define DEFINE_LIBVMA_SOCKET_FN(fn) s.fn = (fn##_fptr_t)\
 							dlsym(handle, #fn);
 	SOCKET_FNS(DEFINE_LIBVMA_SOCKET_FN);
-#if USE_LIBVMA == USE_LIBVMA_SERVER
-	exit(vma_server_main(vmas_smem));
 #endif
 	return 0;
 }

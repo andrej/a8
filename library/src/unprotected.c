@@ -10,6 +10,9 @@
 #include "library_init.h"
 #include "monitor.h"
 
+#undef sem_wait
+#undef sem_post
+
 struct unprotected_funcs
 unprotected_funcs = {};
 

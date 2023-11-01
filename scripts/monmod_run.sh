@@ -34,6 +34,7 @@ then
 	dbg_cmd="/usr/bin/time -f%e, env"
 fi
 
+PATH="$monmod_root/library/build":$PATH \
 LD_LIBRARY_PATH="$monmod_root/library/build":\
 "$monmod_root/dependencies/libconfig-install/lib":\
 "$monmod_root/dependencies/criu-install/lib/$arch-linux-gnu":\

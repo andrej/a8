@@ -6,16 +6,16 @@ TESTS_DIR    ?= tests
 BUILD_DIR    ?= build
 INCLUDE_DIRS ?= include \
                 $(ARCH_DIR)/$(ARCH)/include \
-		../dependencies/libconfig-install/include \
-		../dependencies/criu-install/include \
-		..
-LIB_DIRS     ?= ../dependencies/libconfig-install/lib \
-                ../dependencies/criu-install/lib/$(ARCH)-linux-gnu
+                ../dependencies/libconfig-install/include \
+                ../dependencies/criu-install/include \
+                ..
+LIB_DIRS     ?= ../dependencies/criu-install/lib/$(ARCH)-linux-gnu
+LIBCONFIG_OBJECTS_DIR ?= ../dependencies/libconfig-1.7.3/lib/.libs
 
 CC      := gcc
 CFLAGS  := -g -fpic $(INCLUDE_DIRS:%=-I%) \
            -fvisibility=hidden \
-	   -fno-omit-frame-pointer 
+           -fno-omit-frame-pointer 
 ifdef opt
 CFLAGS  += -O3 -flto 
 endif
@@ -27,13 +27,14 @@ LDFLAGS := -g -shared $(LIB_DIRS:%=-L%) \
 ifdef opt
 LDFLAGS += -O3 -flto
 endif
-LDLIBS  := -lconfig -ldl -lcriu
+LDLIBS  := -ldl -lcriu
 
 C_SOURCES := $(shell find $(SOURCE_DIRS) -maxdepth 1 -name \*.c)
 S_SOURCES := $(shell find $(SOURCE_DIRS) -maxdepth 1 -name \*.S)
 C_OBJECTS := $(C_SOURCES:%.c=$(BUILD_DIR)/%.o)
 S_OBJECTS := $(S_SOURCES:%.S=$(BUILD_DIR)/%.o)
 DEPS      := $(C_OBJECTS:%.o=%.d)
+LIBCONFIG_OBJECTS := $(shell find $(LIBCONFIG_OBJECTS_DIR) -maxdepth 1 -name libconfig_la-\*.o)
 
 TEST_SUITE_DIR := ../test_suite
 TEST_SOURCES   := $(shell find $(TESTS_DIR) -maxdepth 1 -name \*.c)
@@ -59,7 +60,7 @@ $(BUILD_DIR)/%.o: %.c  # This rule also builds test objects
 	$(CC) $(CFLAGS) -o $@ -c $<
 
 $(BUILD_DIR)/libmonmod.so: $(C_OBJECTS) $(S_OBJECTS)
-	$(CC) $(LDFLAGS) -o $@ $^ $(LDLIBS)
+	$(CC) $(LDFLAGS) -o $@ $^ $(LIBCONFIG_OBJECTS) $(LDLIBS) -Wl,--version-script=link.version 
 
 .PHONY: tests
 tests: $(TEST_OBJECTS) $(TEST_DEP_OBJS)

@@ -1,0 +1,6 @@
+# see docs/linking.md for the rationale for this version script
+
+MONMOD_1 {
+	global: monmod_do_init; gettimeofday; time; clock_gettime; getpid; fork; original_fork; vmafork;
+	local: *;
+};

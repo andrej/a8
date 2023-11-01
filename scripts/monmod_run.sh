@@ -40,5 +40,5 @@ LD_LIBRARY_PATH="$monmod_root/library/build":\
 "$monmod_root/dependencies/criu-install/lib/$arch-linux-gnu":\
 $LD_LIBRARY_PATH \
 $dbg_cmd \
-LD_PRELOAD="libmonmod.so":$LD_PRELOAD \
+LD_PRELOAD="libmonmod.so:vsyscall_override.so":$LD_PRELOAD \
 MONMOD_ID=$id MONMOD_CONFIG="$config" $@

@@ -1,15 +1,5 @@
 # see docs/linking.md for the rationale for this version script
 
 GLIBC_2.17 {
-	global: 
-		monmod_do_init; 
-		gettimeofday; 
-		time; 
-		clock_gettime; 
-		getpid; 
-		fork; 
-		original_fork; 
-		vmafork;
-	local: 
-		*;
+	local: *;
 };

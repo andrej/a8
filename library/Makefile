@@ -35,10 +35,14 @@ S_SOURCES := $(shell find $(SOURCE_DIRS) -maxdepth 1 -name \*.S)
 ALL_C_OBJECTS := $(C_SOURCES:%.c=$(BUILD_DIR)/%.o)
 ALL_S_OBJECTS := $(S_SOURCES:%.S=$(BUILD_DIR)/%.o)
 DEPS      := $(ALL_C_OBJECTS:%.o=%.d)
-LIBCONFIG_OBJECTS := $(shell find $(LIBCONFIG_OBJECTS_DIR) -maxdepth 1 -name libconfig_la-\*.o)
+
+# Objects for vsyscall_override.so
+VSYSCALL_OVERRIDE_OBJECTS := $(BUILD_DIR)/src/vsyscall_override.o
 
 # Objects for libmonmod.so
-C_OBJECTS := $(filter-out $(BUILD_DIR)/vma-server/%,\
+LIBCONFIG_OBJECTS := $(shell find $(LIBCONFIG_OBJECTS_DIR) -maxdepth 1 -name libconfig_la-\*.o)
+C_OBJECTS := $(filter-out $(VSYSCALL_OVERRIDE_OBJECTS) \
+                          $(BUILD_DIR)/vma-server/%,\
                           $(ALL_C_OBJECTS))
 S_OBJECTS := $(ALL_S_OBJECTS)
 
@@ -54,7 +58,8 @@ TEST_LDFLAGS   :=
 TEST_LDLIBS    := ../dependencies/libconfig-install/lib/libconfig.a
 
 .PHONY: all
-all: $(BUILD_DIR)/libmonmod.so $(BUILD_DIR)/vma-server
+all: $(BUILD_DIR)/libmonmod.so $(BUILD_DIR)/vsyscall_override.so \
+     $(BUILD_DIR)/vma-server 
 
 $(BUILD_DIR)/%.o: %.S
 	mkdir -p $(@D)
@@ -67,6 +72,9 @@ $(BUILD_DIR)/%.o: %.c  # This rule also builds test objects
 
 $(BUILD_DIR)/libmonmod.so: $(C_OBJECTS) $(S_OBJECTS)
 	$(CC) $(LDFLAGS) -o $@ $^ $(LIBCONFIG_OBJECTS) $(LDLIBS) -Wl,--version-script=link.version 
+
+$(BUILD_DIR)/vsyscall_override.so: $(VSYSCALL_OVERRIDE_OBJECTS)
+	$(CC) $(LDFLAGS) -o $@ $^
 
 .PHONY: $(BUILD_DIR)/vma-server
 $(BUILD_DIR)/vma-server: 

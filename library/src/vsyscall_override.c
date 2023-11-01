@@ -3,8 +3,6 @@
 #include <unistd.h>
 #include <sys/syscall.h>
 
-#include "unprotected.h"
-
 /**
  * Certain system calls never enter kernel space through a mechanism called
  * "virtual system calls." Due to this, we are unable to monitor them --
@@ -25,28 +23,25 @@ __vdso_gettimeofday    LINUX_2.6
 __vdso_time            LINUX_2.6
 */
 
-int 
-__attribute__((visibility("default"),
-               section("unprotected")))
+int
+__attribute__((visibility("default")))
 gettimeofday(struct timeval *restrict tv, struct timezone *restrict tz)
 {
 
-	return unprotected_funcs.syscall(__NR_gettimeofday, (long)tv, (long)tz, 
-	                                 0, 0, 0, 0);
+	return syscall(__NR_gettimeofday, (long)tv, (long)tz, 0, 0, 0, 0);
 }
 void *vdso_gettimeofday = (void *)gettimeofday;
 
 time_t 
-__attribute__((visibility("default"),
-               section("unprotected")))
+__attribute__((visibility("default")))
 time(time_t *tloc)
 {
 #ifdef __NR_time
 
-	return unprotected_funcs.syscall(__NR_time, (long)tloc, 0, 0, 0, 0, 0);
+	return syscall(__NR_time, (long)tloc, 0, 0, 0, 0, 0);
 #else
 	struct timeval tv;
-	unprotected_funcs.syscall(__NR_gettimeofday, (long)&tv, 0, 0, 0, 0, 0);
+	syscall(__NR_gettimeofday, (long)&tv, 0, 0, 0, 0, 0);
 	if(NULL != tloc) {
 		*tloc = tv.tv_sec;
 	}
@@ -55,12 +50,10 @@ time(time_t *tloc)
 }
 
 int 
-__attribute__((visibility("default"),
-               section("unprotected")))
+__attribute__((visibility("default")))
 clock_gettime(clockid_t clockid, struct timespec *tp)
 {
-       return unprotected_funcs.syscall(__NR_clock_gettime, (long)clockid,
-                                        (long)tp, 0, 0, 0, 0);
+       return syscall(__NR_clock_gettime, (long)clockid, (long)tp, 0, 0, 0, 0);
 }
 
 /* From man(2) getpid:
@@ -78,10 +71,9 @@ clock_gettime(clockid_t clockid, struct timespec *tp)
        (For a discussion of one such case, see BUGS in clone(2).)
        Furthermore, the complexity of the caching code had been the
        source of a few bugs within glibc over the years.  */
-pid_t
-__attribute__((visibility("default"),
-               section("unprotected")))
+pid_t 
+__attribute__((visibility("default")))
 getpid(void)
 {
-	return unprotected_funcs.syscall(__NR_getpid, 0, 0, 0, 0, 0, 0);
+	return syscall(__NR_getpid, 0, 0, 0, 0, 0, 0);
 }

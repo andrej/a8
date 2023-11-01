@@ -28,7 +28,7 @@ LDFLAGS := -g -shared $(LIB_DIRS:%=-L%) \
 ifdef opt
 LDFLAGS += -O3 -flto
 endif
-LDLIBS  := -ldl -lcriu
+LDLIBS  := -lrt -ldl -lcriu
 
 C_SOURCES := $(shell find $(SOURCE_DIRS) -maxdepth 1 -name \*.c)
 S_SOURCES := $(shell find $(SOURCE_DIRS) -maxdepth 1 -name \*.S)

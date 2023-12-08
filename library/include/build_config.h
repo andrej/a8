@@ -35,7 +35,16 @@
  * to zero). It appears the libVMA library causes a tgkill call that we 
  * currently have no handler for.
  */
-#define USE_LIBVMA USE_LIBVMA_NO
+#define USE_LIBVMA USE_LIBVMA_SERVER
+
+/**
+ * This can only be set in combination with USE_LIBVMA==USE_LIBVMA_SERVER. When
+ * true, writes to sockets are "fire-and-forget": They return immediately and
+ * it is assumed that the data can successfully be sent. This improves 
+ * performance as write calls no longer block until the sent data is 
+ * acknowledged.
+*/
+#define USE_ASYNC_WRITE 1
 
 /**
  * If set to true, no monitoring happens. The monitor will go ahead and execute
@@ -109,6 +118,7 @@
 #define MAX_N_EPOLL_DATA_INFOS 128
 
 // vma_redirect.h
+#define VMA_SERVER_SMEM_SLOTS 8
 #define VMA_SERVER_SMEM_SIZE 524288
 
 #endif

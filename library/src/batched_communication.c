@@ -89,7 +89,7 @@ static int receive_next_batch(struct batch_communicator *bc)
 {
 	free_current_batch(bc);
 
-	struct message msg = {};
+	struct message_header msg = {};
 	size_t recv_len = 0;
 	size_t items_len = 0;
 	SAFE_NZ_TRY_EXCEPT(comm_receive_header(bc->comm, bc->recv_peer, &msg),
@@ -152,7 +152,7 @@ int batch_comm_flush(struct batch_communicator *bc)
 		const size_t bcast_len = bc->current_batch->length +
 		                         sizeof(*bc->current_batch);
 		SAFE_NZ_TRY_EXCEPT(comm_broadcast(bc->comm, bcast_len, 
-		                                  (char *)bc->current_batch),
+		                                 (char *)bc->current_batch),
 				   return 1);
 #if VERBOSITY >= 3
 		SAFE_LOGF("! Flushed batch of %ld bytes of previous syscall's "

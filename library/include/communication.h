@@ -29,9 +29,8 @@ struct communicator {
 	struct peer peers[MAX_N_PEERS];
 };
 
-struct __attribute__((packed)) message {
+struct __attribute__((packed)) message_header {
 	uint64_t length;
-	char data[];
 };
 
 /**
@@ -81,10 +80,10 @@ int comm_send(const struct communicator * const comm, int peer_id, size_t n,
 
 int comm_receive_header(const struct communicator * const comm, 
                         const struct peer *peer,
-                        struct message *msg);
+                        struct message_header *msg);
 
 int comm_receive_body(const struct communicator * const comm,
-                      const struct peer *peer, struct message *msg,
+                      const struct peer *peer, struct message_header *msg,
                       size_t *n, char *buf);
 
 /**

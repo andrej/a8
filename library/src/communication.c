@@ -488,11 +488,9 @@ int comm_all_agree(const struct communicator * const comm, int leader_id,
     if(comm->self.id == leader_id) {
         // Receive all buffers and compare.
         for(int i = 0; i < comm->n_peers; i++) {
-            NZ_TRY_EXCEPT(comm_receive_partial(comm, 
-                                               comm->peers[i].id, 
-                                   &n_received,
-                               recv_buf),
-                      ret = -1);
+            NZ_TRY_EXCEPT(comm_receive_partial(comm, comm->peers[i].id, 
+                                               &n_received, recv_buf),
+                          ret = -1);
             if(ret > 0) {
                 if(n_received != n) {
                     ret = 0;

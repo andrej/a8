@@ -156,7 +156,7 @@ void syscall_handle_checkpointing(struct checkpoint_env *env)
 	   checkpoint after system call handler entry after an appropriate
 	   flag was set in the breakpoint beforehand. */
 	if(env->create_checkpoint) {
-		SAFE_NZ_TRY(synchronize(env->monitor, CREATE_CP_EXCHANGE));
+		SAFE_NZ_TRY(synchronize(env->monitor, exchange_checkpoint_create));
 #if VERBOSITY >= 1
 		/* Log after synchronizing. We might not get to here if there
 		   was a disagreement during synchronization. */

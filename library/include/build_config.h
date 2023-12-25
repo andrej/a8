@@ -118,7 +118,11 @@
 #define MAX_N_EPOLL_DATA_INFOS 128
 
 // vma_redirect.h
-#define VMA_SERVER_SMEM_SLOTS 8
-#define VMA_SERVER_SMEM_SIZE 524288
+#define VMA_SERVER_SMEM_SLOTS 16
+//#define VMA_SERVER_SMEM_SIZE 524288
+#define VMA_SERVER_SMEM_SIZE 20480
+
+// Experimenting
+#define SKIP_SYNCHRONIZATION 1
 
 #endif

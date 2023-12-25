@@ -8,8 +8,8 @@ struct policy policies[] = {
 };
 
 #define POLICY_EXEMPT(X) bool POLICY_IS_EXEMPT_FN(X)( \
-			      const struct syscall_info * const canonical, \
-			      const struct environment * const env)
+        const struct syscall_info * const canonical, \
+        const struct environment * const env)
 
 POLICY_EXEMPT(full)
 {

@@ -8,8 +8,8 @@
 
 struct policy {
 	const char *name;
-	bool (*is_exempt)(const struct syscall_info * const, 
-	                  const struct environment * const);
+	bool (* const is_exempt)(const struct syscall_info * const, 
+	                         const struct environment * const);
 };
 
 extern struct policy policies[];
@@ -35,9 +35,9 @@ POLICIES(POLICY_DEF)
 #undef POLICY_DEF
 
 struct policy *policy_from_str(const char *str);
-static inline bool policy_is_exempt(struct policy *policy, 
-                                    struct syscall_info *canonical,
-				    const struct environment *env)
+static inline bool policy_is_exempt(struct policy * const policy, 
+                                    struct syscall_info * const canonical,
+                                    const struct environment * const env)
 {
 	if(NULL == policy) {
 		return false;

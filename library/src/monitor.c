@@ -61,7 +61,8 @@ static void syscall_execute_locally(struct syscall_handler const *const handler,
                                     struct syscall_info *actual, 
                                     struct syscall_info *canonical);
 
-static int handle_divergence(const struct monitor * const monitor, char reason);
+static int handle_divergence(const struct monitor * const monitor, 
+                             enum msg_type reason);
 
 static int handle_error(const struct monitor * const monitor);
 
@@ -103,7 +104,10 @@ long monmod_handle_syscall(struct syscall_trace_func_stack * const stack)
 	   && monitor.conf.restore_probability > 0
 	   && monitor.checkpoint_env->last_checkpoint.valid
 	   && random() < RAND_MAX*monitor.conf.restore_probability) {
-		SAFE_NZ_TRY(synchronize(&monitor, FAKE_ERROR_EXCHANGE));
+#if VERBOSITY > 1
+		SAFE_LOG("Leader inducing fake error.\n");
+#endif
+		SAFE_NZ_TRY(synchronize(&monitor, exchange_fake_error));
 	}
 	/* Cause an artificial divergence probabilistically to test system if
 	   so configured. We only inject faults once the first checkpoint has
@@ -179,7 +183,7 @@ long monmod_handle_syscall(struct syscall_trace_func_stack * const stack)
 
 	if(dispatch & DISPATCH_ERROR) {
 		SAFE_WARN("Dispatch error.\n");
-		SAFE_NZ_TRY(synchronize(&monitor, ERROR_EXCHANGE));
+		SAFE_NZ_TRY(synchronize(&monitor, exchange_error));
 		monmod_exit(1);
 	}
 
@@ -188,7 +192,7 @@ long monmod_handle_syscall(struct syscall_trace_func_stack * const stack)
 	/* Phase 2: Cross-check system call & arguments with other variants. */
 	if(dispatch & (DISPATCH_CHECKED | DISPATCH_DEFERRED_CHECK)) {
 		SAFE_LZ_TRY_EXCEPT(s = cross_check_args(&monitor, &canonical),
-		                   synchronize(&monitor, ERROR_EXCHANGE));
+		                   synchronize(&monitor, exchange_error));
 		if(0 == s) {
 			handle_cross_check_divergence(&monitor, handler, 
 			                              &actual, &canonical, 
@@ -226,7 +230,7 @@ long monmod_handle_syscall(struct syscall_trace_func_stack * const stack)
 		                  &canonical, &handler_scratch_space);
 		if(0 != s) {
 			SAFE_WARNF("Exit handler returned error %d.\n", s);
-			SAFE_NZ_TRY(synchronize(&monitor, ERROR_EXCHANGE));
+			SAFE_NZ_TRY(synchronize(&monitor, exchange_error));
 			monmod_exit(1);
 		}
 	}
@@ -315,9 +319,14 @@ static void syscall_execute_locally(struct syscall_handler const *const handler,
  * Divergence Handling                                                        *
  * ************************************************************************** */
 
-int handle_divergence(const struct monitor * const monitor, char reason)
+int handle_divergence(const struct monitor * const monitor, 
+                      enum msg_type reason)
 {
 	int s = 0;
+#if VERBOSITY > 0
+	SAFE_WARNF("Divergence due to reason %d %s.\n", 
+	           reason, msg_type_strrep[reason]);
+#endif
 #if ENABLE_CHECKPOINTING
 	if(monitor->checkpoint_env->last_checkpoint.valid) {
 		s = restore_last_checkpoint(monitor->checkpoint_env);
@@ -362,7 +371,7 @@ void handle_cross_check_divergence(const struct monitor * const monitor,
 		SAFE_LOGF_LEN(sizeof(log_buf), "%s", log_buf);
 	}
 #endif
-	handle_divergence(monitor, CROSS_CHECK_EXCHANGE);
+	handle_divergence(monitor, exchange_cross_check_follower_buffer);
 }
 
 static int handle_error(const struct monitor * const monitor)
@@ -523,7 +532,7 @@ monmod_library_destroy()
 static void terminate(struct monitor * const monitor)
 {
 	struct timeval end_tv, duration;
-	synchronize(monitor, TERMINATE_EXCHANGE);
+	synchronize(monitor, exchange_terminate);
 	replication_destroy(monitor);
 	comm_destroy(&monitor->comm);
 #if VERBOSITY >= 1
@@ -608,7 +617,7 @@ int monitor_arbitrate_child_comm(struct monitor *parent_monitor,
 #if !USE_LIBVMA
 	/* Exchange open port information for the child communicator. */
 
-	SAFE_NZ_TRY(synchronize(parent_monitor, FORK_EXCHANGE));
+	SAFE_NZ_TRY(synchronize(parent_monitor, exchange_fork));
 
 	/* We let everyone know the new ports for the servers we just 
 	   started using the existing parent connection. */

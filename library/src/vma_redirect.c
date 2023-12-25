@@ -53,7 +53,7 @@ vmafork(void)
 struct smem *vmas_smem = NULL;
 
 // functions static inline int vmas_req_XXX(args ...)
-#define MAXLEN (VMA_SERVER_SMEM_SIZE/4)
+#define MAXLEN VMA_SERVER_SMEM_SIZE
 #define COMMA() ,
 #define NOTHING
 #define IGNORE(...) 
@@ -92,19 +92,21 @@ struct smem *vmas_smem = NULL;
         const size_t request_head = \
             VMAS_LIST_IDX(vmas_smem_s->head + vmas_smem_s->n_submitted); \
         struct vmas_smem_command * const req = &VMAS_LIST_AT(request_head); \
+        smem_unlock(vmas_smem); \
         char *reqbuf = req->data; \
-        const size_t sz = sizeof(argstruct_t) + \
+        /*const size_t sz = sizeof(argstruct_t) + \
                           VMAS_ ## NAME ## _ARGS(ARG_SZ_IMM, ARG_SZ_INPUT_PTR, \
                                                  ARG_SZ_OUTPUT_PTR, \
                                                  ARG_SZ_RW_PTR, +); \
-        assert(sz < VMA_SERVER_SMEM_SIZE); \
-        vmas_smem_s->n_submitted++; /* Take one slot for this request. */ \
+        assert(sz < VMA_SERVER_SMEM_SIZE);*/ \
         /* Write arguments to request buffer. */ \
-        req->size = sz; \
+        /*req->size = sz; */\
         req->state = VMAS_STATE_REQUEST_SUBMITTED; \
         req->command = vmas_cmd_ ## NAME; \
         VMAS_ ## NAME ## _ARGS(WRITE_ARG_IMM, WRITE_ARG_PTR, IGNORE, \
                                WRITE_ARG_PTR, NOTHING) \
+        smem_lock(vmas_smem); \
+        vmas_smem_s->n_submitted++; /* Take one slot for this request. */ \
         smem_unlock(vmas_smem); \
         return request_head; \
     } 

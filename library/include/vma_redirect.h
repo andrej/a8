@@ -261,7 +261,7 @@ extern struct smem *vmas_smem;
 
 // -- server callback functions and structures --
 
-#define MAXLEN (VMA_SERVER_SMEM_SIZE/16)
+#define MAXLEN VMA_SERVER_SMEM_SIZE
 #define COMMA() ,
 #define NOTHING
 #define IGNORE(...) 

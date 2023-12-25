@@ -2312,7 +2312,7 @@ SYSCALL_ENTER_PROT(monmod_fake_fork)
 	struct communicator *child_comm = (struct communicator *)*scratch;
 	memset(child_comm, 0, sizeof(*child_comm));
 	int dispatch = DISPATCH_SKIP;
-	SAFE_NZ_TRY(synchronize(&monitor, FORK_EXCHANGE));
+	SAFE_NZ_TRY(synchronize(&monitor, exchange_fork));
 	actual->ret = vmafork();
 	if(0 == actual->ret) {  // child
 		SAFE_NZ_TRY_EXCEPT(

@@ -1,5 +1,5 @@
-#ifndef REPLICATION_H
-#define REPLICATION_H
+#ifndef EXCHANGES_H
+#define EXCHANGES_H
 
 /**
  * Contains all functionality concerned with replicating and cross-checking
@@ -10,23 +10,13 @@
  */
 
 #include <stdbool.h>
+#include "exchange_types.h"
 #include "util.h"
 #include "arch.h"
 #include "serialization.h"
 #include "communication.h"
 #include "handlers.h"
 #include "monitor.h"
-
-
-#define ERROR_EXCHANGE         (unsigned char)0x11
-#define FAKE_ERROR_EXCHANGE    (unsigned char)0x22
-#define CROSS_CHECK_EXCHANGE   (unsigned char)0xAA
-#define REPLICATION_EXCHANGE   (unsigned char)0xBB
-#define CREATE_CP_EXCHANGE     (unsigned char)0xCC
-#define RESTORE_CP_EXCHANGE    (unsigned char)0xDD
-#define FORK_EXCHANGE          (unsigned char)0xEE
-#define TERMINATE_EXCHANGE     (unsigned char)0xFF
-
 
 /**
  * After calling this function, all monitors are at the same point
@@ -45,7 +35,7 @@
  *  The follower will always detect divergences first, because it is the one
  *  catching up. 
  **/
-int synchronize(const struct monitor * const monitor, unsigned char reason);
+int synchronize(const struct monitor * const monitor, enum msg_type reason);
 
 /**
  * Compare serialized arguments in `canonical` with other instances. This may

@@ -5,7 +5,7 @@
 #include <unistd.h>
 #include "vma_redirect.h"
 
-#define MAXLEN (VMA_SERVER_SMEM_SIZE/16)
+#define MAXLEN VMA_SERVER_SMEM_SIZE
 #define COMMA() ,
 
 // functions static inline int vmas_do_XXX(char *reqbuf)
@@ -95,6 +95,7 @@ int vma_server_main()
               req->state = VMAS_STATE_RESPONSE_READY;
               vmas_smem_s->n_processed++;
               smem_unlock(vmas_smem);
+              sched_yield();
        }
        return 0;
 }

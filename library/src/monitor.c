@@ -61,10 +61,12 @@ static void syscall_execute_locally(struct syscall_handler const *const handler,
                                     struct syscall_info *actual, 
                                     struct syscall_info *canonical);
 
-static int handle_divergence(const struct monitor * const monitor, 
-                             enum msg_type reason);
-
 static int handle_error(const struct monitor * const monitor);
+
+static int handle_divergence(const struct monitor * const monitor);
+
+static int handle_message_divergence(uint8_t short_header_a, 
+                                     uint8_t short_header_b);
 
 static void
 handle_cross_check_divergence(const struct monitor * const monitor,
@@ -319,14 +321,15 @@ static void syscall_execute_locally(struct syscall_handler const *const handler,
  * Divergence Handling                                                        *
  * ************************************************************************** */
 
-int handle_divergence(const struct monitor * const monitor, 
-                      enum msg_type reason)
+static int handle_error(const struct monitor * const monitor)
+{
+	SAFE_WARN("Terminating due to error in all variants.\n");
+	monmod_exit(2);
+}
+
+static int handle_divergence(const struct monitor * const monitor)
 {
 	int s = 0;
-#if VERBOSITY > 0
-	SAFE_WARNF("Divergence due to reason %d %s.\n", 
-	           reason, msg_type_strrep[reason]);
-#endif
 #if ENABLE_CHECKPOINTING
 	if(monitor->checkpoint_env->last_checkpoint.valid) {
 		s = restore_last_checkpoint(monitor->checkpoint_env);
@@ -339,6 +342,33 @@ int handle_divergence(const struct monitor * const monitor,
 	}
 #endif
 	monmod_exit(2);
+}
+
+static int handle_message_divergence(uint8_t short_header_actual, 
+                                     uint8_t short_header_expected)
+{
+	const msg_type_t header_actual = (msg_type_t)short_header_actual;
+	const msg_type_t header_expected = (msg_type_t)short_header_expected;
+#if VERBOSITY >= 1
+	SAFE_LOGF("Diverging message headers. "
+	          "Actual: (%d) %s. "
+	          "Expected: (%d) %s.\n", 
+				header_actual, msg_type_str(header_actual),
+				header_expected, msg_type_str(header_expected));
+#endif
+    if(header_actual != header_expected 
+	   || exchange_fake_error == header_actual) {  // FIXME
+        return handle_divergence(&monitor);
+    } else if(header_actual == header_expected 
+	          && exchange_error == header_actual) { // FIXME
+#if VERBOSITY > 1
+        SAFE_LOGF("Comparing headers %d %s, %d %s.\n", 
+                  header_actual, msg_type_str(header_actual),
+                  header_expected, msg_type_str(header_expected));
+#endif
+        return handle_error(&monitor);
+    }
+    return 0;
 }
 
 static
@@ -371,13 +401,7 @@ void handle_cross_check_divergence(const struct monitor * const monitor,
 		SAFE_LOGF_LEN(sizeof(log_buf), "%s", log_buf);
 	}
 #endif
-	handle_divergence(monitor, exchange_cross_check_follower_buffer);
-}
-
-static int handle_error(const struct monitor * const monitor)
-{
-	SAFE_WARN("Terminating due to error in all variants.\n");
-	monmod_exit(2);
+	handle_divergence(monitor);
 }
 
 
@@ -445,6 +469,9 @@ int monitor_init_comm(struct communicator *comm, struct config *conf, int id)
 	struct variant_config *own_variant_conf;
 	SAFE_Z_TRY(own_variant_conf = get_variant(conf, id));
 	SAFE_LZ_TRY(comm_init(comm, id, &own_variant_conf->addr));
+#if !NO_HEADERS
+	comm_set_divergence_handler(comm, handle_message_divergence);
+#endif
 	for(size_t i = 0; i < conf->n_variants; i++) {
 		if(conf->variants[i].id == id) {
 			continue;
@@ -466,8 +493,6 @@ int monitor_init(struct monitor *monitor, int own_id, struct config *conf)
 	monitor->is_leader = conf->leader_id == own_id;
 	monitor->conf = *conf;
 	monitor->ancestry = 0;
-	monitor->handle_divergence = handle_divergence;
-	monitor->handle_error = handle_error;
 	SAFE_Z_TRY(monitor->policy = policy_from_str(conf->policy));
 
 	SAFE_Z_TRY(own_variant_conf = get_variant(conf, own_id));

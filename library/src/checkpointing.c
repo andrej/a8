@@ -349,7 +349,7 @@ static void _recreate_connections()
    deleted. It just waits, exits if no longer needed, or continues execution
    at the checkpointed location upon request, along with duplicating itself for
    another later restore if needed. */
-int _fork_checkpoint_main(struct checkpoint_env *cenv, pid_t parent)
+static int _fork_checkpoint_main(struct checkpoint_env *cenv, pid_t parent)
 {
 	int s = 0;
 	s = checkpointed_environment_fix_up(cenv->tracee_env);

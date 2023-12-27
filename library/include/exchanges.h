@@ -35,7 +35,7 @@
  *  The follower will always detect divergences first, because it is the one
  *  catching up. 
  **/
-int synchronize(const struct monitor * const monitor, enum msg_type reason);
+int synchronize(const struct monitor * const monitor, msg_type_t reason);
 
 /**
  * Compare serialized arguments in `canonical` with other instances. This may

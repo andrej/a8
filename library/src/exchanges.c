@@ -16,12 +16,10 @@ char preallocated_batch_comm_memory[PREALLOCATED_REPLICATION_SZ];
    on every system call. */
 char cross_check_buffer[CROSS_CHECK_BUFFER_SZ];
 
-static int send_header(const struct monitor const * const monitor,
-                       enum msg_type header);
-static int expect_header(const struct monitor const * const monitor,
-                         enum msg_type header);
-static int check_header(const struct monitor const * const monitor,
-                        enum msg_type header_a, enum msg_type header_b);
+static int send_header_without_payload(const struct monitor *monitor,
+                                       msg_type_t header);
+static int expect_header_without_payload(const struct monitor *monitor,
+                                         msg_type_t header);
 
 static size_t cross_check_get_buffer_size(struct syscall_info *const canonical);
 static char * cross_check_alloc_buffer(size_t n);
@@ -35,8 +33,8 @@ static int generate_replication_buffer(struct syscall_info *canonical,
                                        char *into, size_t len);
 
 static int write_back_replication_buffer(struct syscall_info *canonical,
-				         char *replication_buf,
-				         size_t replication_buf_len);
+                         char *replication_buf,
+                         size_t replication_buf_len);
 
 static char *receive_replication_buffer(const struct monitor * const monitor, 
                                         size_t *len);
@@ -54,73 +52,63 @@ const char *msg_type_strrep[] = {
  * ************************************************************************** */
 
 int synchronize(const struct monitor const * const monitor,
-                enum msg_type reason)
+                msg_type_t reason)
 {
     replication_flush(monitor);
-    send_header(monitor, reason);   // (6.1)
-    expect_header(monitor, reason); // (6.2)
-	return 0;
+#if !NO_HEADERS
+    send_header_without_payload(monitor, reason);   // (6.1)
+    expect_header_without_payload(monitor, reason); // (6.2)
+#endif
+    return 0;
 }
 
-static int send_header(const struct monitor const * const monitor,
-                       enum msg_type header)
+static const char unknown_msg_type_strrep[] = "unknown";
+const char *msg_type_str(msg_type_t msg)
 {
-    int s;
+    if(0 > msg || msg > n_msg_types) {
+        return unknown_msg_type_strrep;
+    }
+    return msg_type_strrep[msg];
+}
+
+static int send_header_without_payload(const struct monitor *monitor,
+                                       msg_type_t header)
+{
+	// assume little endian and fewer than 255 distinct message types
+	char short_header = (char)header;
+	comm_set_outbound_header(short_header);
     if(monitor->is_leader) {
-        s = comm_broadcast_p(&monitor->comm, header);
-        SAFE_NZ_TRY(s);
+		SAFE_NZ_TRY(comm_broadcast(&monitor->comm, 0, NULL));
     } else {
-        s = comm_send_p(&monitor->comm, monitor->leader_id, header);
-        SAFE_NZ_TRY(s);
+		SAFE_NZ_TRY(comm_send(&monitor->comm, monitor->leader_id, 0, NULL));
     }
     return 0;
 }
 
-static int expect_header(const struct monitor const * const monitor,
-                         enum msg_type header)
+static int expect_header_without_payload(const struct monitor *monitor,
+                                         msg_type_t header)
 {
-    enum msg_type header_b;
-    int s = 0; 
+    size_t header_sz = 0;
+	comm_expect_incoming_header((uint8_t)header);
     if(monitor->is_leader) { 
-        int ret = 0;
         for(int i = 0; i < monitor->comm.n_peers; i++) {
             const int peer_id = monitor->comm.peers[i].id;
             if(peer_id == monitor->own_id) {
                 continue;
             }
-            s = comm_receive_p(&monitor->comm, peer_id, &header_b);
-            SAFE_NZ_TRY_EXCEPT(s, return 1);
-            SAFE_NZ_TRY_EXCEPT(check_header(monitor, header, header_b), 
-			                   return 1);
+			header_sz = 0;
+            SAFE_NZ_TRY(comm_receive_partial(&monitor->comm, peer_id, 
+                                             &header_sz, NULL));
+			// FIXME this currently won't work properly if divergences occur
+			// with > 2 nodes, because the communicator will call the divergence
+			// routine on the first diverging received message, instead of 
+			// receiving messages from all nodes first and then handling the
+			// divergence
         }
-        return ret;
     } else {
-        s = comm_receive_p(&monitor->comm, monitor->leader_id, &header_b);
-        SAFE_NZ_TRY_EXCEPT(s, return 1);
-        SAFE_NZ_TRY_EXCEPT(check_header(monitor, header, header_b), 
-		                   return 1);
+        SAFE_NZ_TRY(comm_receive_partial(&monitor->comm, monitor->leader_id,
+                                         &header_sz, NULL));
     }
-    return 0;
-}
-
-static int check_header(const struct monitor const * const monitor,
-                        enum msg_type header_a, enum msg_type header_b)
-{
-	if(header_a != header_b || exchange_fake_error == header_a) {
-#if VERBOSITY > 1
-		SAFE_LOGF("Comparing headers %d %s, %d %s.\n", 
-		          header_a, msg_type_strrep[header_a],
-				  header_b, msg_type_strrep[header_b]);
-#endif
-		return monitor->handle_divergence(monitor, header_a);
-	} else if(header_a == header_b && exchange_error == header_a) {
-#if VERBOSITY > 1
-		SAFE_LOGF("Comparing headers %d %s, %d %s.\n", 
-		          header_a, msg_type_strrep[header_a],
-				  header_b, msg_type_strrep[header_b]);
-#endif
-		return monitor->handle_error(monitor);
-	}
 	return 0;
 }
 
@@ -133,71 +121,69 @@ int cross_check_args(const struct monitor * const monitor,
                       struct syscall_info *canonical) 
 {
     int s;
-	bool ret = true;
-	const size_t serialized_len = cross_check_get_buffer_size(canonical);
+    bool ret = true;
+    const size_t serialized_len = cross_check_get_buffer_size(canonical);
 
 #if CHECK_HASHES_ONLY
-	struct cross_check_message {
-		enum msg_type header;
-		unsigned long hash;
-	};
-	size_t msg_len = sizeof(struct cross_check_message);
-	char serialized_buf[serialized_len]; // temporary
-	struct cross_check_message msg;
-	struct cross_check_message * const msg_buf = &msg;
+    struct cross_check_message {
+        unsigned long hash;
+    };
+    size_t msg_len = sizeof(struct cross_check_message);
+    char serialized_buf[serialized_len]; // temporary for hashing
+    struct cross_check_message msg;
+    struct cross_check_message * const msg_buf = &msg;
 #else
-	struct cross_check_message {
-		enum msg_type header;
-		char data[];  // dynamically sized to serialized_len
-	};
-	size_t msg_len = sizeof(struct cross_check_message) + serialized_len;
-	struct cross_check_message * const msg_buf = 
+    struct cross_check_message {
+        char data[];  // dynamically sized to serialized_len
+    };
+    size_t msg_len = sizeof(struct cross_check_message) + serialized_len;
+    struct cross_check_message * const msg_buf = 
         (struct cross_check_message *)cross_check_alloc_buffer(msg_len);
-	char *serialized_buf = msg_buf->data;
+    char *serialized_buf = msg_buf->data;
 #endif
 
-	// Serialize own message buffer
-	SAFE_NZ_TRY_EXCEPT(cross_check_serialize_args(serialized_buf, canonical),
-	                   return false);
+    // Serialize own message buffer
+    SAFE_NZ_TRY_EXCEPT(cross_check_serialize_args(serialized_buf, canonical),
+                       return false);
 
 #if CHECK_HASHES_ONLY
-	msg_buf->hash = sdbm_hash(serialized_len, serialized_buf);
+    msg_buf->hash = sdbm_hash(serialized_len, serialized_buf);
 #endif
 
-	// Communication
-	enum msg_type header;
-	if(monitor->is_leader) { // Leader
-		// Flush batched replication buffer, if any
+    // Communication
+    if(monitor->is_leader) { // Leader
+        // Flush batched replication buffer, if any
         replication_flush(monitor);
 
-		// Tell followers we are expecting to receive cross-check buffers
+        // Tell followers we are expecting to receive cross-check buffers
         // (1.1) exchange_cross_check_leader_waiting
-		header = exchange_cross_check_leader_waiting;
-        SAFE_NZ_TRY(send_header(monitor, exchange_cross_check_leader_waiting));
+#if !NO_HEADERS
+        SAFE_NZ_TRY(send_header_without_payload(monitor, 
+		                exchange_cross_check_leader_waiting));
+#endif
 
-		int s = 0;
-		char recv_buf[msg_len];
-		struct cross_check_message * const recv_msg = 
-			(struct cross_check_message *)recv_buf;
-		size_t n_received = msg_len;
+        int s = 0;
+        char recv_buf[msg_len];
+        struct cross_check_message * const recv_msg = 
+            (struct cross_check_message *)recv_buf;
+        size_t n_received = msg_len;
 
         // Receive all buffers and compare.
         for(int i = 0; i < monitor->comm.n_peers; i++) {
+#if !NO_HEADERS
+            // (2.2) exchange_cross_check_follower_buffer
+			comm_expect_incoming_header(exchange_cross_check_follower_buffer);
+#endif
             SAFE_NZ_TRY_EXCEPT(comm_receive_partial(&monitor->comm, 
                                                     monitor->comm.peers[i].id, 
                                                     &n_received, recv_buf),
-						       ret = false);
-            // (2.2) exchange_cross_check_follower_buffer
-			SAFE_NZ_TRY_EXCEPT(
-				check_header(monitor, exchange_cross_check_follower_buffer, 
-				             recv_msg->header),
-				ret = false);
-			ret = ret && n_received == msg_len;
+                               ret = false);
+            ret = ret && n_received == msg_len;
 #if CHECK_HASHES_ONLY
-			ret = ret && msg_buf->hash == recv_msg->hash;
+            ret = ret && msg_buf->hash == recv_msg->hash;
 #else
-			ret = ret && 0 == memcmp(msg_buf->data, recv_msg->data, 
-								     serialized_len);
+            ret = ret && 0 == memcmp(msg_buf->data, recv_msg->data, 
+                                     serialized_len);
 #endif
         }
         // Communicate result back to followers.
@@ -205,108 +191,113 @@ int cross_check_args(const struct monitor * const monitor,
             s = comm_broadcast_p(&monitor->comm, ret);
             SAFE_NZ_TRY(s);
         }
-	} else { // Followers
+    } else { // Followers
+#if !NO_HEADERS
         // (2.1) exchange_cross_check_follower_buffer 
-        msg_buf->header = exchange_cross_check_follower_buffer;
+		comm_set_outbound_header(
+			(uint8_t)(msg_type_t)exchange_cross_check_follower_buffer);
+#endif
         SAFE_NZ_TRY(comm_send(&monitor->comm, monitor->leader_id, 
-		                      msg_len, (char *)msg_buf));
+                              msg_len, (char *)msg_buf));
+#if !NO_HEADERS
         // (1.2) exchange_cross_check_leader_waiting
-        SAFE_NZ_TRY(expect_header(monitor, 
-		                          exchange_cross_check_leader_waiting));
+		expect_header_without_payload(monitor,
+		                              exchange_cross_check_leader_waiting);
+#endif
         s = comm_receive_p(&monitor->comm, monitor->leader_id, &ret);
         SAFE_NZ_TRY(s);
     }
-	
+    
 #if !CHECK_HASHES_ONLY
-	if(cross_check_buffer != (char *)msg_buf) {
-		safe_free(msg_buf, msg_len);
-	}
+    if(cross_check_buffer != (char *)msg_buf) {
+        safe_free(msg_buf, msg_len);
+    }
 #endif
-	return ret;
+    return ret;
 }
 
 static size_t cross_check_get_buffer_size(struct syscall_info * const canonical)
 {
-	size_t n = 0;
-	/* If there is no normalize_args() handler, arg_types is initialized to
-	   all zeroes. Since IGNORE argument type maps to zero, this simply
-	   ignores all arguments and serializes only the system call number. */
-	for(int i = 0; i < N_SYSCALL_ARGS; i++) {
-		if(IGNORE == canonical->arg_types[i].kind ||
-		   ARG_FLAG_WRITE_ONLY & canonical->arg_flags[i]) {
-			continue;
-		}
-		n += get_serialized_size((const char *)&canonical->args[i], 
-		                         &canonical->arg_types[i]);
-	}
-	n += sizeof(uint64_t); // For syscall no
-	return n;
+    size_t n = 0;
+    /* If there is no normalize_args() handler, arg_types is initialized to
+       all zeroes. Since IGNORE argument type maps to zero, this simply
+       ignores all arguments and serializes only the system call number. */
+    for(int i = 0; i < N_SYSCALL_ARGS; i++) {
+        if(IGNORE == canonical->arg_types[i].kind ||
+           ARG_FLAG_WRITE_ONLY & canonical->arg_flags[i]) {
+            continue;
+        }
+        n += get_serialized_size((const char *)&canonical->args[i], 
+                                 &canonical->arg_types[i]);
+    }
+    n += sizeof(uint64_t); // For syscall no
+    return n;
 }
 
 static char * cross_check_alloc_buffer(size_t n)
 {
-	if(n > sizeof(cross_check_buffer)) {
-		char * const out = safe_malloc(n);
-		if(NULL == out) {
-			return NULL;
-		}
-		return out;
-	} else {
-		return cross_check_buffer;
-	}
+    if(n > sizeof(cross_check_buffer)) {
+        char * const out = safe_malloc(n);
+        if(NULL == out) {
+            return NULL;
+        }
+        return out;
+    } else {
+        return cross_check_buffer;
+    }
 }
 
 static int cross_check_serialize_args(char *out, struct syscall_info *canonical)
 {
-	size_t written = 0;
-	ssize_t s = 0;
-	*(uint64_t *)out = canonical->no;
-	written += sizeof(uint64_t);
-	for(int i = 0; i < N_SYSCALL_ARGS; i++) {
-		if(IGNORE == canonical->arg_types[i].kind ||
-		   ARG_FLAG_WRITE_ONLY & canonical->arg_flags[i]) {
-			continue;
-		}
-		s = serialize_into((const char *)&canonical->args[i], 
-		                   &canonical->arg_types[i], out + written);
-		if(s < 0) {
-			return 1;
-		}
-		written += s;
-	}
-	return 0;
+    size_t written = 0;
+    ssize_t s = 0;
+    *(uint64_t *)out = canonical->no;
+    written += sizeof(uint64_t);
+    for(int i = 0; i < N_SYSCALL_ARGS; i++) {
+        if(IGNORE == canonical->arg_types[i].kind ||
+           ARG_FLAG_WRITE_ONLY & canonical->arg_flags[i]) {
+            continue;
+        }
+        s = serialize_into((const char *)&canonical->args[i], 
+                           &canonical->arg_types[i], out + written);
+        if(s < 0) {
+            return 1;
+        }
+        written += s;
+    }
+    return 0;
 }
 
 void log_args(char *log_buf, size_t max_len, 
               struct syscall_info *actual,
               struct syscall_info *canonical)
 {
-	#define append(...) { \
-		if(written >= max_len) { \
-			return; \
-		} \
-		written += snprintf(log_buf + written, max_len - written, \
-		                    __VA_ARGS__); \
-	}
-	size_t written = 0;
-	append("Canonical no. %ld (actual no. %ld) args:\n", canonical->no, 
-	       actual->no);
-	for(int i = 0; i < N_SYSCALL_ARGS; i++) {
-		if(IGNORE == canonical->arg_types[i].kind) {
-			continue;
-		}
-		append("  Argument %d: (%ld) \n    ", i, actual->args[i]);
-		if(canonical->arg_flags[i] & ARG_FLAG_WRITE_ONLY) {
-			append("(write only)");
-		} else {
-			written += log_str_of((const char *)&canonical->args[i],
-					&canonical->arg_types[i],
-					log_buf + written, 
-					max_len - 1 - written);
-		}
-		append("\n");
-	}
-	#undef append
+    #define append(...) { \
+        if(written >= max_len) { \
+            return; \
+        } \
+        written += snprintf(log_buf + written, max_len - written, \
+                            __VA_ARGS__); \
+    }
+    size_t written = 0;
+    append("Canonical no. %ld (actual no. %ld) args:\n", canonical->no, 
+           actual->no);
+    for(int i = 0; i < N_SYSCALL_ARGS; i++) {
+        if(IGNORE == canonical->arg_types[i].kind) {
+            continue;
+        }
+        append("  Argument %d: (%ld) \n    ", i, actual->args[i]);
+        if(canonical->arg_flags[i] & ARG_FLAG_WRITE_ONLY) {
+            append("(write only)");
+        } else {
+            written += log_str_of((const char *)&canonical->args[i],
+                    &canonical->arg_types[i],
+                    log_buf + written, 
+                    max_len - 1 - written);
+        }
+        append("\n");
+    }
+    #undef append
 }
 
 
@@ -316,202 +307,214 @@ void log_args(char *log_buf, size_t max_len,
 
 int replication_init(struct monitor * const monitor, size_t flush_after)
 {
-	const struct peer *leader_peer = NULL;
-	if(!monitor->is_leader) {
-		Z_TRY(leader_peer = comm_get_peer(&monitor->comm, 
-		                                  monitor->leader_id));
-	}
-	monitor->batch_comm = &preallocated_batch_comm;
+    const struct peer *leader_peer = NULL;
+    if(!monitor->is_leader) {
+        Z_TRY(leader_peer = comm_get_peer(&monitor->comm, 
+                                          monitor->leader_id));
+    }
+    monitor->batch_comm = &preallocated_batch_comm;
 
-	NZ_TRY(init_batch_comm_at(&preallocated_batch_comm,
-	                          preallocated_batch_comm_memory,
-	                          &monitor->comm, leader_peer, 
-	                          PREALLOCATED_REPLICATION_SZ, 
-	                          flush_after));
-	return 0;
+    NZ_TRY(init_batch_comm_at(&preallocated_batch_comm,
+                              preallocated_batch_comm_memory,
+                              &monitor->comm, leader_peer, 
+                              PREALLOCATED_REPLICATION_SZ, 
+                              flush_after));
+    return 0;
 }
 
 void replication_destroy(struct monitor * const monitor)
 {
-	SAFE_NZ_TRY(batch_comm_flush(monitor->batch_comm));	
-	if(monitor->batch_comm != &preallocated_batch_comm) {
-		free_batch_comm(monitor->batch_comm);
-	}
+    SAFE_NZ_TRY(replication_flush(monitor)); 
+    if(monitor->batch_comm != &preallocated_batch_comm) {
+        free_batch_comm(monitor->batch_comm);
+    }
 }
 
 int replication_flush(struct monitor const * const monitor)
 {
-    enum msg_type header;
-	if(monitor->is_leader) {
-		// Allow followers waiting on batched communication to catch up.
-		const bool header_expected = 
-			batch_comm_flush_will_communicate(monitor->batch_comm);
-		if(header_expected) {
-			// (4.1) exchange_replication_leader
-			SAFE_NZ_TRY(send_header(monitor, exchange_replication_leader));
-		}
-		SAFE_NZ_TRY(batch_comm_flush(monitor->batch_comm));
-		if(header_expected) {
-			SAFE_LOG("Flushed some amount of replication info.\n"); // FIXME
+    msg_type_t header;
+    if(monitor->is_leader) {
+        // Allow followers waiting on batched communication to catch up.
+#if !NO_HEADERS
+        const bool header_expected = 
+            batch_comm_flush_will_communicate(monitor->batch_comm);
+        if(header_expected) {
+            // (4.1) exchange_replication_leader
+            comm_set_outbound_header(
+				(uint8_t)(msg_type_t)exchange_replication_leader);
+        }
+#endif
+        SAFE_NZ_TRY(batch_comm_flush(monitor->batch_comm));
+#if !NO_HEADERS
+        if(header_expected) {
             // (3.2) exchange_replication_follower_waiting
             // -> receipt of this message from the follower is also 
             //    alternatively checked in replicate_results
-            SAFE_NZ_TRY(expect_header(monitor, 
+            SAFE_NZ_TRY(expect_header_without_payload(monitor, 
                                       exchange_replication_follower_waiting));
-			SAFE_LOG("Received follower waiting for replication header.\n"); // FIXME
-		}
-	}
+        }
+#endif
+    }
     return 0;
 }
 
 int replicate_results(const struct monitor * const monitor,
                       struct syscall_info *canonical)
 {
-	char *msg_buf = NULL;
-	size_t msg_len = 0;
+    char *msg_buf = NULL;
+    size_t msg_len = 0;
 
-	if(monitor->is_leader) {
-		int n_exchanges = 0;
-		msg_len = get_replication_buffer_len(canonical);
+    if(monitor->is_leader) {
+        int n_exchanges = 0;
+        msg_len = get_replication_buffer_len(canonical);
 #if VERBOSITY >= 4
-		SAFE_LOGF("Appending %lu bytes of replication information to batch.\n",
-		          msg_len);
+        SAFE_LOGF("Appending %lu bytes of replication information to batch.\n",
+                  msg_len);
 #endif
-		if(batch_comm_reserve_will_communicate(monitor->batch_comm, msg_len)) {
-			// (4.1) exchange_replication_leader
-			SAFE_NZ_TRY(send_header(monitor, exchange_replication_leader));
-			n_exchanges++;
-		}
-		SAFE_Z_TRY(msg_buf = batch_comm_reserve(monitor->batch_comm, msg_len));
-		SAFE_NZ_TRY(generate_replication_buffer(canonical, msg_buf, msg_len));
-		if(batch_comm_broadcast_reserved_will_communicate(monitor->batch_comm)){
-			// (4.1) exchange_replication_leader
-			SAFE_NZ_TRY(send_header(monitor, exchange_replication_leader));
-			n_exchanges++;
-		}
-		SAFE_NZ_TRY(batch_comm_broadcast_reserved(monitor->batch_comm));
-		for(int i = 0; i < n_exchanges; i++) {
+#if !NO_HEADERS
+        if(batch_comm_reserve_will_communicate(monitor->batch_comm, msg_len)) {
+            // (4.1) exchange_replication_leader
+			comm_set_outbound_header(
+				(uint8_t)(msg_type_t)exchange_replication_leader);
+            n_exchanges++;
+        }
+#endif
+        SAFE_Z_TRY(msg_buf = batch_comm_reserve(monitor->batch_comm, msg_len));
+        SAFE_NZ_TRY(generate_replication_buffer(canonical, msg_buf, msg_len));
+#if !NO_HEADERS
+        if(batch_comm_broadcast_reserved_will_communicate(monitor->batch_comm)){
+            // (4.1) exchange_replication_leader
+			comm_set_outbound_header(
+				(uint8_t)(msg_type_t)exchange_replication_leader);
+            n_exchanges++;
+        }
+#endif
+        SAFE_NZ_TRY(batch_comm_broadcast_reserved(monitor->batch_comm));
+#if !NO_HEADERS
+        for(int i = 0; i < n_exchanges; i++) {
             // For each actual network communication we send out, we should
             // receive a matching header from the follower saying that it is
             // expecting replication information. Verify this and throw away.
             // (3.2) exchange_replication_follower_waiting
             // -> receipt of this message from the follower is also 
             //    alternatively checked in replication_flush
-            SAFE_NZ_TRY(expect_header(monitor, 
+            SAFE_NZ_TRY(expect_header_without_payload(monitor, 
                                       exchange_replication_follower_waiting));
-		}
-	} else {
-#if VERBOSITY >= 4
-		SAFE_LOG("Awaiting replication information from leader.\n");
+        }
 #endif
-		if(batch_comm_receive_will_communicate(monitor->batch_comm)) {
+    } else {
+#if VERBOSITY >= 4
+        SAFE_LOG("Awaiting replication information from leader.\n");
+#endif
+#if !NO_HEADERS
+        if(batch_comm_receive_will_communicate(monitor->batch_comm)) {
             // (3.1) exchange_replication_follower_waiting
-            SAFE_NZ_TRY(send_header(monitor, 
+            SAFE_NZ_TRY(send_header_without_payload(monitor, 
                                     exchange_replication_follower_waiting));
-			// (4.2) exchange_replication_leader
-			SAFE_NZ_TRY(expect_header(monitor, exchange_replication_leader));
-		}
-		SAFE_LOG("About to receive replication info.\n"); // FIXME
-		SAFE_Z_TRY(msg_buf = batch_comm_receive(monitor->batch_comm, &msg_len));
-		SAFE_LOG("Received replication info.\n"); // FIXME
+            // (4.2) exchange_replication_leader
+            comm_expect_incoming_header(
+				(uint8_t)(msg_type_t)exchange_replication_leader);
+        }
+#endif
+        SAFE_Z_TRY(msg_buf = batch_comm_receive(monitor->batch_comm, &msg_len));
         // (4.2) exchange_replication_leader
-		SAFE_NZ_TRY(write_back_replication_buffer(canonical, msg_buf, msg_len));
-	}
+        SAFE_NZ_TRY(write_back_replication_buffer(canonical, msg_buf, msg_len));
+    }
 
-	return 0;
+    return 0;
 }
 
 static size_t get_replication_buffer_len(struct syscall_info *canonical)
 {
-	size_t n = sizeof(uint64_t);
-	for(size_t i = 0; i < N_SYSCALL_ARGS; i++) {
-		if(!(ARG_FLAG_REPLICATE & canonical->arg_flags[i])) {
-			continue;
-		}
-		n += get_serialized_size(&canonical->args[i], 
-		                         &canonical->arg_types[i]);
-	}
-	if(canonical->ret_flags & ARG_FLAG_REPLICATE) {
-		n += get_serialized_size(&canonical->ret, &canonical->ret_type);
-	}
-	return n;
+    size_t n = sizeof(uint64_t);
+    for(size_t i = 0; i < N_SYSCALL_ARGS; i++) {
+        if(!(ARG_FLAG_REPLICATE & canonical->arg_flags[i])) {
+            continue;
+        }
+        n += get_serialized_size(&canonical->args[i], 
+                                 &canonical->arg_types[i]);
+    }
+    if(canonical->ret_flags & ARG_FLAG_REPLICATE) {
+        n += get_serialized_size(&canonical->ret, &canonical->ret_type);
+    }
+    return n;
 }
 
 static int generate_replication_buffer(struct syscall_info *canonical,
                                        char *into, size_t len)
 {
-	ssize_t s = 0;
-	size_t written = 0;
-	SAFE_Z_TRY(into);  // assert
+    ssize_t s = 0;
+    size_t written = 0;
+    SAFE_Z_TRY(into);  // assert
 
-	*(uint64_t *)into = canonical->no;
-	written += sizeof(uint64_t);
+    *(uint64_t *)into = canonical->no;
+    written += sizeof(uint64_t);
 
-	for(size_t i = 0; i < N_SYSCALL_ARGS; i++) {
-		if(!(ARG_FLAG_REPLICATE & canonical->arg_flags[i])) {
-			continue;
-		}
-		SAFE_LZ_TRY_EXCEPT(
-			s = serialize_into(&canonical->args[i], 
-		                           &canonical->arg_types[i],
-			                   into + written),
-			return 1);
-		written += s;
-	}
-	if(canonical->ret_flags & ARG_FLAG_REPLICATE) {
-		SAFE_LZ_TRY_EXCEPT(
-			s = serialize_into(&canonical->ret,
-				           &canonical->ret_type,
-				           into + written),
-			return 1);
-		written += s;
-	}
+    for(size_t i = 0; i < N_SYSCALL_ARGS; i++) {
+        if(!(ARG_FLAG_REPLICATE & canonical->arg_flags[i])) {
+            continue;
+        }
+        SAFE_LZ_TRY_EXCEPT(
+            s = serialize_into(&canonical->args[i], 
+                                   &canonical->arg_types[i],
+                               into + written),
+            return 1);
+        written += s;
+    }
+    if(canonical->ret_flags & ARG_FLAG_REPLICATE) {
+        SAFE_LZ_TRY_EXCEPT(
+            s = serialize_into(&canonical->ret,
+                           &canonical->ret_type,
+                           into + written),
+            return 1);
+        written += s;
+    }
 
-	SAFE_Z_TRY(len == written);  // assert
-	return 0;
+    SAFE_Z_TRY(len == written);  // assert
+    return 0;
 }
 
 static int write_back_replication_buffer(struct syscall_info *canonical,
-				         char *replication_buf,
-				         size_t replication_buf_len)
+                         char *replication_buf,
+                         size_t replication_buf_len)
 {
-	size_t s = 0;
-	size_t consumed = 0;
+    size_t s = 0;
+    size_t consumed = 0;
 
-	if(replication_buf_len < sizeof(uint64_t)) {
-		return 1;
-	}
-	if(*(uint64_t *)replication_buf != canonical->no) {
-		return 2;
-	}
-	consumed += sizeof(uint64_t);
+    if(replication_buf_len < sizeof(uint64_t)) {
+        return 1;
+    }
+    if(*(uint64_t *)replication_buf != canonical->no) {
+        return 2;
+    }
+    consumed += sizeof(uint64_t);
 
-	for(size_t i = 0; i < N_SYSCALL_ARGS && consumed < replication_buf_len; 
-	    i++) {
-		if(!(ARG_FLAG_REPLICATE & canonical->arg_flags[i])) {
-			continue;
-		}
-		SAFE_LZ_TRY_EXCEPT(
-			s = deserialize_overwrite(replication_buf + consumed,
-			                          replication_buf_len - consumed,
-		                              &canonical->arg_types[i],
-				                      &canonical->args[i]),
-			return 1);
-		consumed += s;
-	}
-	if(canonical->ret_flags & ARG_FLAG_REPLICATE) {
-		SAFE_LZ_TRY_EXCEPT(
-			s = deserialize_overwrite(replication_buf + consumed,
-			                          replication_buf_len - consumed,
-		                              &canonical->ret_type,
-		                              &canonical->ret),
-			return 1);
-		consumed += s;
-	}
+    for(size_t i = 0; i < N_SYSCALL_ARGS && consumed < replication_buf_len; 
+        i++) {
+        if(!(ARG_FLAG_REPLICATE & canonical->arg_flags[i])) {
+            continue;
+        }
+        SAFE_LZ_TRY_EXCEPT(
+            s = deserialize_overwrite(replication_buf + consumed,
+                                      replication_buf_len - consumed,
+                                      &canonical->arg_types[i],
+                                      &canonical->args[i]),
+            return 1);
+        consumed += s;
+    }
+    if(canonical->ret_flags & ARG_FLAG_REPLICATE) {
+        SAFE_LZ_TRY_EXCEPT(
+            s = deserialize_overwrite(replication_buf + consumed,
+                                      replication_buf_len - consumed,
+                                      &canonical->ret_type,
+                                      &canonical->ret),
+            return 1);
+        consumed += s;
+    }
 
-	if(consumed != replication_buf_len) {
-		return 1;
-	}
+    if(consumed != replication_buf_len) {
+        return 1;
+    }
 
-	return 0;
+    return 0;
 }

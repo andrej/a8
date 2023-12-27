@@ -27,10 +27,16 @@ struct communicator {
 	struct peer self;
 	size_t n_peers;
 	struct peer peers[MAX_N_PEERS];
+#if !NO_HEADERS
+	int (*divergence_handler)(uint8_t, uint8_t);
+#endif
 };
 
 struct __attribute__((packed)) message_header {
-	uint64_t length;
+	uint32_t length; // length of body (does not include this header struct)
+#if !NO_HEADERS
+	uint8_t header; // uniquely identify message type
+#endif
 };
 
 /**
@@ -158,6 +164,37 @@ int comm_all_agree(const struct communicator * const comm, int leader_id,
                    size_t n, const char *buf);
 #define comm_all_agree_p(comm, leader_id, val) \
 		comm_all_agree((comm), (leader_id), sizeof(val), (char *)&(val))
+
+#if !NO_HEADERS
+static inline void 
+comm_set_divergence_handler(struct communicator *comm,
+                            int (* handler)(uint8_t, uint8_t))
+{
+    comm->divergence_handler = handler;
+}
+
+extern uint8_t comm_outbound_header;
+/**
+ * comm_set_outbound_header - All following outbound messages will use this 
+ * one-byte identifier as their message type.
+ */
+static inline void comm_set_outbound_header(uint8_t header)
+{
+	comm_outbound_header = header;
+}
+
+extern uint8_t comm_incoming_header;
+extern uint8_t comm_expected_incoming_header;
+/**
+ * comm_expect_incoming_header - All the following incoming messages must have
+ * this identifier as their header. If any incoming communication does not have
+ * this header, the divergence handler of the communicator is called.
+ */
+static inline void comm_expect_incoming_header(uint8_t header)
+{
+	comm_expected_incoming_header = header;
+}
+#endif
 
 
 #endif

@@ -147,7 +147,6 @@ extern struct socket_fptrs s;
 #define NAME_LIST(N) vmas_cmd_ ## N,
 enum vma_server_command { 
     VMAS_COMMANDS(NAME_LIST)
-    vmas_cmd_quit
 };
 #undef NAME_LIST
 

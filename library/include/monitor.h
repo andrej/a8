@@ -22,9 +22,6 @@ struct monitor {
 	struct environment env;
 	struct policy *policy;
 	struct timeval start_tv;
-	int (* handle_divergence)(const struct monitor * const, 
-	                          enum msg_type reason);
-	int (* handle_error)(const struct monitor * const);
 	unsigned long ancestry;  // just for log numbers
 #if ENABLE_CHECKPOINTING
 	struct monmod_monitor_addr_ranges addr_ranges;

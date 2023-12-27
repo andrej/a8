@@ -210,6 +210,12 @@ static int delete_peer(struct communicator *comm, int id)
     return 0;
 }
 
+#if !NO_HEADERS
+uint8_t comm_outbound_header = 0;
+uint8_t comm_incoming_header = 0;
+uint8_t comm_expected_incoming_header = 0;
+#endif
+
 
 /* ************************************************************************** *
  * API Functions                                                              *
@@ -354,7 +360,10 @@ int comm_send(const struct communicator * const comm, int peer_id, size_t n,
 {
     const struct peer *peer;
     const struct message_header msg_header = {
-        .length = htonl(n)
+        .length = htonl(n),
+#if !NO_HEADERS
+        .header = comm_outbound_header
+#endif
     };
 
     NZ_TRY(sanity_checks(comm));
@@ -374,8 +383,19 @@ int comm_receive_header(const struct communicator * const comm,
     Z_TRY(peer->status == PEER_CONNECTED);
 
     // Read message header only
-    NZ_TRY(read_all(peer->fd, (char *)msg, sizeof(msg)));
+    NZ_TRY(read_all(peer->fd, (char *)msg, sizeof(*msg)));
     msg->length = ntohl(msg->length);
+
+#if !NO_HEADERS
+    // Check headers
+    comm_incoming_header = msg->header;
+    if(comm->divergence_handler) {
+        if(msg->header != comm_expected_incoming_header) {
+            return comm->divergence_handler(msg->header, 
+                                            comm_expected_incoming_header);
+        }
+    }
+#endif
 
     return 0;
 }
@@ -428,8 +448,8 @@ int comm_receive(const struct communicator * const comm, int peer_id, size_t *n,
     NZ_TRY(comm_receive_partial(comm, peer_id, &n_msg, buf));
     if(n_msg > *n) {
         WARNF("Message about to be received too long for "
-            "buffer. Length received %lu, buffer size %lu.\n",
-            n_msg, *n);
+              "buffer. Length received %lu, buffer size %lu.\n",
+              n_msg, *n);
         return 1;
     }
     *n = n_msg;

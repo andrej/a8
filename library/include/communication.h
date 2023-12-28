@@ -23,21 +23,34 @@ struct peer {
 	struct sockaddr addr;
 };
 
+#if !NO_HEADERS
+struct communicator;
+struct message_header;
+typedef uint8_t comm_header_t;
+typedef int (*comm_check_header_func_t)(const struct communicator *comm,
+								        const struct peer *peer, 
+								        const struct message_header *msg,
+								        comm_header_t expected);
+#endif
+
 struct communicator {
 	struct peer self;
 	size_t n_peers;
 	struct peer peers[MAX_N_PEERS];
 #if !NO_HEADERS
-	int (*divergence_handler)(uint8_t, uint8_t);
+	comm_check_header_func_t check_header_func;
+	comm_header_t expected_next_header;
+	comm_header_t outgoing_next_header;
 #endif
 };
 
 struct __attribute__((packed)) message_header {
 	uint32_t length; // length of body (does not include this header struct)
 #if !NO_HEADERS
-	uint8_t header; // uniquely identify message type
+	comm_header_t header; // uniquely identify message type
 #endif
 };
+
 
 /**
  * comm_init - Initialize communicator, including server startup. Must be called
@@ -89,7 +102,7 @@ int comm_receive_header(const struct communicator * const comm,
                         struct message_header *msg);
 
 int comm_receive_body(const struct communicator * const comm,
-                      const struct peer *peer, struct message_header *msg,
+                      const struct peer *peer, const struct message_header *msg,
                       size_t *n, char *buf);
 
 /**
@@ -127,8 +140,8 @@ int comm_receive(const struct communicator * const comm, int peer_id, size_t *n,
 	size_t n = sizeof(*(val)); \
 	retval = comm_receive((comm), (peer_id), &n, (char *)(val)); \
 	if(n != sizeof(*(val))) { \
-		WARNF("Cannot receive primitive, unexpected size %lu instead" \
-		      "of %lu", n, sizeof(*(val))); \
+		WARNF("Cannot receive primitive, unexpected size %lu instead " \
+		      "of %lu\n", n, sizeof(*(val))); \
 		retval = 1; \
 	} \
 	retval; \
@@ -167,32 +180,31 @@ int comm_all_agree(const struct communicator * const comm, int leader_id,
 
 #if !NO_HEADERS
 static inline void 
-comm_set_divergence_handler(struct communicator *comm,
-                            int (* handler)(uint8_t, uint8_t))
+comm_set_check_header_func(struct communicator *comm,
+                           comm_check_header_func_t handler)
 {
-    comm->divergence_handler = handler;
+    comm->check_header_func = handler;
 }
 
-extern uint8_t comm_outbound_header;
 /**
  * comm_set_outbound_header - All following outbound messages will use this 
  * one-byte identifier as their message type.
  */
-static inline void comm_set_outbound_header(uint8_t header)
+static inline void comm_set_outbound_header(struct communicator *comm,
+                                            comm_header_t header)
 {
-	comm_outbound_header = header;
+	comm->outgoing_next_header = header;
 }
 
-extern uint8_t comm_incoming_header;
-extern uint8_t comm_expected_incoming_header;
 /**
  * comm_expect_incoming_header - All the following incoming messages must have
  * this identifier as their header. If any incoming communication does not have
  * this header, the divergence handler of the communicator is called.
  */
-static inline void comm_expect_incoming_header(uint8_t header)
+static inline void comm_expect_incoming_header(struct communicator *comm,
+                                               comm_header_t header)
 {
-	comm_expected_incoming_header = header;
+	comm->expected_next_header = header;
 }
 #endif
 

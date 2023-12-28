@@ -89,6 +89,7 @@ ssize_t serialize_into(const void * const inp, const struct type * const type,
             size_t len = strlen(inp);
             *(uint64_t *)buf = len + 1;
             strncpy(buf + sizeof(uint64_t), inp, len);
+            ((char *)buf + sizeof(uint64_t))[len] = '\0';
             return sizeof(uint64_t) + len + 1;
         }
         case BUFFER: {

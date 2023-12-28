@@ -35,7 +35,7 @@
  *  The follower will always detect divergences first, because it is the one
  *  catching up. 
  **/
-int synchronize(const struct monitor * const monitor, msg_type_t reason);
+int synchronize(struct monitor *monitor, msg_type_t reason);
 
 /**
  * Compare serialized arguments in `canonical` with other instances. This may
@@ -48,7 +48,7 @@ int synchronize(const struct monitor * const monitor, msg_type_t reason);
  * A negative return value indicates an error, such as network communication
  * error, during cross-checking.
  */
-int cross_check_args(const struct monitor * const monitor,
+int cross_check_args(struct monitor *monitor,
                      struct syscall_info *canonical);
 
 void log_args(char *buf, size_t max_len, 
@@ -59,7 +59,7 @@ int replication_init(struct monitor * const monitor, size_t flush_after);
 
 void replication_destroy(struct monitor *monitor);
 
-int replicate_results(const struct monitor * const monitor,
+int replicate_results(struct monitor *monitor,
                       struct syscall_info *canonical);
 
 

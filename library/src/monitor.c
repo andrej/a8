@@ -65,8 +65,12 @@ static int handle_error(const struct monitor * const monitor);
 
 static int handle_divergence(const struct monitor * const monitor);
 
-static int handle_message_divergence(uint8_t short_header_a, 
-                                     uint8_t short_header_b);
+#if !NO_HEADERS
+static int handle_message_divergence(const struct communicator *comm,
+                                     const struct peer *peer,
+	                                 const struct message_header *msg,
+                                     comm_header_t short_header_expected);
+#endif
 
 static void
 handle_cross_check_divergence(const struct monitor * const monitor,
@@ -198,7 +202,7 @@ long monmod_handle_syscall(struct syscall_trace_func_stack * const stack)
 		if(0 == s) {
 			handle_cross_check_divergence(&monitor, handler, 
 			                              &actual, &canonical, 
-						      ret_addr);
+			                              ret_addr);
 		}
 	}
 
@@ -344,32 +348,39 @@ static int handle_divergence(const struct monitor * const monitor)
 	monmod_exit(2);
 }
 
-static int handle_message_divergence(uint8_t short_header_actual, 
-                                     uint8_t short_header_expected)
+#if !NO_HEADERS
+static int handle_message_divergence(const struct communicator *comm,
+                                     const struct peer *peer,
+	                                 const struct message_header *msg,
+                                     comm_header_t short_header_expected)
 {
+	const comm_header_t short_header_actual = msg->header;
 	const msg_type_t header_actual = (msg_type_t)short_header_actual;
 	const msg_type_t header_expected = (msg_type_t)short_header_expected;
-#if VERBOSITY >= 1
-	SAFE_LOGF("Diverging message headers. "
-	          "Actual: (%d) %s. "
-	          "Expected: (%d) %s.\n", 
-				header_actual, msg_type_str(header_actual),
-				header_expected, msg_type_str(header_expected));
+	size_t n = 0;
+#if VERBOSITY > 1
+	if(header_actual != header_expected) {
+		SAFE_LOGF("Diverging message headers. "
+                  "Actual: (%d) %s. "
+                  "Expected: (%d) %s.\n", 
+                  header_actual, msg_type_str(header_actual),
+                  header_expected, msg_type_str(header_expected));
+	}
 #endif
     if(header_actual != header_expected 
 	   || exchange_fake_error == header_actual) {  // FIXME
+		// Throw away rest of message, if any.
+		comm_receive_body(comm, peer, msg, &n, NULL);
         return handle_divergence(&monitor);
     } else if(header_actual == header_expected 
 	          && exchange_error == header_actual) { // FIXME
-#if VERBOSITY > 1
-        SAFE_LOGF("Comparing headers %d %s, %d %s.\n", 
-                  header_actual, msg_type_str(header_actual),
-                  header_expected, msg_type_str(header_expected));
-#endif
+		// Throw away rest of message, if any.
+		comm_receive_body(comm, peer, msg, &n, NULL);
         return handle_error(&monitor);
     }
     return 0;
 }
+#endif
 
 static
 void handle_cross_check_divergence(const struct monitor * const monitor,
@@ -470,7 +481,8 @@ int monitor_init_comm(struct communicator *comm, struct config *conf, int id)
 	SAFE_Z_TRY(own_variant_conf = get_variant(conf, id));
 	SAFE_LZ_TRY(comm_init(comm, id, &own_variant_conf->addr));
 #if !NO_HEADERS
-	comm_set_divergence_handler(comm, handle_message_divergence);
+	comm_set_outbound_header(comm, exchange_init);
+	comm_set_check_header_func(comm, handle_message_divergence);
 #endif
 	for(size_t i = 0; i < conf->n_variants; i++) {
 		if(conf->variants[i].id == id) {

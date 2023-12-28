@@ -7,6 +7,8 @@
     X(exchange_error) \
     /* Purposely induced error */ \
     X(exchange_fake_error) \
+    /* Initialization phase: nodes connecting to each other send their ID */ \
+    X(exchange_init) \
     /* Cross-check: Leader asynchronously sends this message right before it \
        starts waiting for/receiving buffers from followers */ \
     X(exchange_cross_check_leader_waiting) \
@@ -15,7 +17,7 @@
     /* Replication: Leader prefixes replication information buffers with this \
        header */ \
     X(exchange_replication_leader) \
-    /* Replication: Follower asynchronously sends this message right before it
+    /* Replication: Follower asynchronously sends this message right before it \
        sarts waiting for a exchange_replication_leader message */ \
     X(exchange_replication_follower_waiting) \
     /* About to create a checkpoint */ \

@@ -35,7 +35,7 @@
  * to zero). It appears the libVMA library causes a tgkill call that we 
  * currently have no handler for.
  */
-#define USE_LIBVMA USE_LIBVMA_NO
+#define USE_LIBVMA USE_LIBVMA_SERVER
 
 /**
  * This can only be set in combination with USE_LIBVMA==USE_LIBVMA_SERVER. When
@@ -122,6 +122,15 @@
 //#define VMA_SERVER_SMEM_SIZE 524288
 #define VMA_SERVER_SMEM_SIZE 20480
 
+/**
+ * Disable headers in all exchanged messages. By default, a one-byte header
+ * indicates the message type for all sent messages, such as cross-check or
+ * replication message. Some header-only messages, such as "leader expecting
+ * followers to report cross check buffers" are also sent (asynchronously). 
+ * This is required so that execution does not hang when one variant enters
+ * a cross-check while the other enters a replication. You can disable it to
+ * benchmark the impact of the headers alone.
+ */
 #define NO_HEADERS 0
 
 #endif

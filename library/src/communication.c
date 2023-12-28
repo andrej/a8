@@ -164,8 +164,7 @@ static size_t write_all(int fd, const char *src, size_t n)
 // Throw away the next n bytes to be read from the given file descriptor.
 static inline int flush_fd(int fd, size_t n)
 {
-    const size_t tmp_buf_size = 128;
-    char tmp[tmp_buf_size];
+    char tmp[128];
     size_t bytes_read = 0;
     while(n > 0) {
         const size_t to_read = (n > sizeof(tmp) ? sizeof(tmp) : n);
@@ -209,12 +208,6 @@ static int delete_peer(struct communicator *comm, int id)
            (MAX_N_PEERS-comm->n_peers) * sizeof(struct peer));
     return 0;
 }
-
-#if !NO_HEADERS
-uint8_t comm_outbound_header = 0;
-uint8_t comm_incoming_header = 0;
-uint8_t comm_expected_incoming_header = 0;
-#endif
 
 
 /* ************************************************************************** *
@@ -362,7 +355,7 @@ int comm_send(const struct communicator * const comm, int peer_id, size_t n,
     const struct message_header msg_header = {
         .length = htonl(n),
 #if !NO_HEADERS
-        .header = comm_outbound_header
+        .header = comm->outgoing_next_header
 #endif
     };
 
@@ -388,12 +381,9 @@ int comm_receive_header(const struct communicator * const comm,
 
 #if !NO_HEADERS
     // Check headers
-    comm_incoming_header = msg->header;
-    if(comm->divergence_handler) {
-        if(msg->header != comm_expected_incoming_header) {
-            return comm->divergence_handler(msg->header, 
-                                            comm_expected_incoming_header);
-        }
+    if(comm->check_header_func) {
+        return comm->check_header_func(comm, peer, msg,
+                                       comm->expected_next_header);
     }
 #endif
 
@@ -402,7 +392,7 @@ int comm_receive_header(const struct communicator * const comm,
 
 int comm_receive_body(const struct communicator * const comm,
                       const struct peer *peer,
-                      struct message_header *msg,
+                      const struct message_header *msg,
                       size_t *n, char *buf)
 {
     size_t read_n = 0;
@@ -411,7 +401,7 @@ int comm_receive_body(const struct communicator * const comm,
     read_n = (msg_length > *n ? *n : msg_length);
     read_all(peer->fd, buf, read_n);
     *n = msg_length;
-    if(read_n < msg_length) {
+    if(read_n < msg_length && msg_length - read_n > 0) {
         // Throw away the remainder of the message because the buffer
         // was too small.
         NZ_TRY(flush_fd(peer->fd, msg_length - read_n));

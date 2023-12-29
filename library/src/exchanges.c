@@ -1,5 +1,8 @@
 #include "exchanges.h"
 #include "batched_communication.h"
+#if USE_REPLICATION_CACHE
+#include "buffer_cache.h"
+#endif
 
 
 /* ************************************************************************** *
@@ -361,15 +364,25 @@ int replication_flush(struct monitor *monitor)
 int replicate_results(struct monitor *monitor,
                       struct syscall_info *canonical)
 {
-    char *msg_buf = NULL;
-    size_t msg_len = 0;
+    size_t len; // length of serialized buffer
+    size_t msg_len = 0; // + header
+    char *buf; // serialized buffer
+    char *msg_buf = NULL; // + header
+#if USE_REPLICATION_CACHE
+    cache_id cid = -1;
+#endif
 
     if(monitor->is_leader) {
         int n_exchanges = 0;
-        msg_len = get_replication_buffer_len(canonical);
+        len = get_replication_buffer_len(canonical);
+#if USE_REPLICATION_CACHE
+        msg_len = len + sizeof(cache_id);
+#else
+        msg_len = len;
+#endif
 #if VERBOSITY >= 4
         SAFE_LOGF("Appending %lu bytes of replication information to batch.\n",
-                  msg_len);
+                  len);
 #endif
 #if !NO_HEADERS
         if(batch_comm_reserve_will_communicate(monitor->batch_comm, msg_len)) {
@@ -380,7 +393,28 @@ int replicate_results(struct monitor *monitor,
         }
 #endif
         SAFE_Z_TRY(msg_buf = batch_comm_reserve(monitor->batch_comm, msg_len));
-        SAFE_NZ_TRY(generate_replication_buffer(canonical, msg_buf, msg_len));
+#if USE_REPLICATION_CACHE
+        buf = msg_buf + sizeof(cache_id);
+#else
+        buf = msg_buf;
+#endif
+        SAFE_NZ_TRY(generate_replication_buffer(canonical, buf, len));
+#if USE_REPLICATION_CACHE
+        cid = cache_contains_buffer(buf, len);
+        if(-1 == cid) {
+            cid = cache_buffer(buf, len);
+            *(cache_id *)msg_buf = -(cid + 1);
+        } else {
+#if VERBOSITY >= 4
+            SAFE_LOGF("%lu bytes of replication information found in cache "
+                      "with ID %hhd.\n", len, cid);
+#endif
+            batch_comm_cancel_reserved(monitor->batch_comm);
+            SAFE_Z_TRY(msg_buf = 
+                       batch_comm_reserve(monitor->batch_comm, 1));
+            *(cache_id *)msg_buf = cid + 1;
+        }
+#endif
 #if !NO_HEADERS
         if(batch_comm_broadcast_reserved_will_communicate(monitor->batch_comm)){
             // (4.1) exchange_replication_leader
@@ -417,8 +451,27 @@ int replicate_results(struct monitor *monitor,
         }
 #endif
         SAFE_Z_TRY(msg_buf = batch_comm_receive(monitor->batch_comm, &msg_len));
+#if USE_REPLICATION_CACHE
+        cid = *(cache_id *)msg_buf;
+        if(0 < cid) {
+            cid = cid - 1;
+            SAFE_Z_TRY(buf = retrieve_cached_buffer(cid, &len));
+#if VERBOSITY >= 4
+            SAFE_LOGF("%lu bytes of replication information found in cache "
+                      "with ID %hhd.\n", len, cid);
+#endif
+        } else {
+            cid = -(cid + 1);
+            buf = msg_buf + sizeof(cache_id);
+            len = msg_len - sizeof(cache_id);
+            cache_buffer_with_id(cid, buf, len);
+        }
+#else
+        buf = msg_buf;
+        len = msg_len;
+#endif
         // (4.2) exchange_replication_leader
-        SAFE_NZ_TRY(write_back_replication_buffer(canonical, msg_buf, msg_len));
+        SAFE_NZ_TRY(write_back_replication_buffer(canonical, buf, len));
     }
 
     return 0;

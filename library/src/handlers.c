@@ -446,6 +446,16 @@ SYSCALL_ENTER_PROT(read)
 	return dispatch_leader_if_needed(di, DISPATCH_CHECKED);
 }
 
+SYSCALL_POST_CALL_PROT(read)
+{
+	ssize_t actual_read_length = actual->ret;
+	if(actual_read_length < 0) {
+		actual_read_length = 0;
+	}
+	struct type *ref_types = (struct type *)*scratch;
+	ref_types[0] = BUFFER_TYPE(actual_read_length);
+}
+
 SYSCALL_EXIT_PROT(read)
 {
 	write_back_canonical_return();
@@ -1966,12 +1976,13 @@ SYSCALL_EXIT_PROT(ioctl) { write_back_canonical_return(); return 0; }
  *                  struct sockaddr *src_addr, socklen_t *addrlen);           *
  * ************************************************************************** */
 
+struct recvfrom_scratch {
+	struct type buf_type;
+	struct type src_addr_type;
+	struct type addrlen_type;
+};
+
 SYSCALL_ENTER_PROT(recvfrom) { 
-	struct recvfrom_scratch {
-		struct type buf_type;
-		struct type src_addr_type;
-		struct type addrlen_type;
-	};
 	alloc_scratch(sizeof(struct recvfrom_scratch));
 	struct recvfrom_scratch *_scratch = (struct recvfrom_scratch *)*scratch;
 	struct descriptor_info *di = get_di(0);
@@ -2006,6 +2017,15 @@ SYSCALL_ENTER_PROT(recvfrom) {
 	canonical->ret_type     = IMMEDIATE_TYPE(long);
 	canonical->ret_flags    = ARG_FLAG_REPLICATE;
 	return DISPATCH_LEADER | DISPATCH_NEEDS_REPLICATION | DISPATCH_CHECKED;
+}
+
+SYSCALL_POST_CALL_PROT(recvfrom) {
+	ssize_t actual_buf_len = actual->ret;
+	if(actual->ret < 0) {
+		actual_buf_len = 0;
+	}
+	struct recvfrom_scratch *_scratch = (struct recvfrom_scratch *)*scratch;
+	_scratch->buf_type = BUFFER_TYPE(actual_buf_len);
 }
 
 SYSCALL_EXIT_PROT(recvfrom) { 

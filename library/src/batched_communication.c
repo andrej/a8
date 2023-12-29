@@ -155,7 +155,7 @@ int batch_comm_flush(struct batch_communicator *bc)
 		                                 (char *)bc->current_batch),
 				   return 1);
 #if VERBOSITY >= 3
-		SAFE_LOGF("! Flushed batch of %ld bytes of previous syscall's "
+		SAFE_LOGF("! Flushed batch of %d bytes of previous syscall's "
 		          "replication information.\n", 
 			  bc->current_batch->length);
 #endif

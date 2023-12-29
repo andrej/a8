@@ -52,7 +52,7 @@ SYSCALL_EXIT_PROT(default_creates_fd);
                                 NULL, \
                                 NULL ) \
  X( __NR_read,     read,        SYSCALL_ENTER(read), \
-                                NULL, \
+                                SYSCALL_POST_CALL(read), \
                                 SYSCALL_EXIT(read) ) \
  X( __NR_pread,    pread,       SYSCALL_ENTER(pread), \
                                 NULL, \
@@ -193,7 +193,7 @@ SYSCALL_EXIT_PROT(default_creates_fd);
                                 NULL, \
                                 SYSCALL_EXIT(ioctl)) /*TODO*/\
  X( __NR_recvfrom, recvfrom,    SYSCALL_ENTER(recvfrom), \
-                                NULL, \
+                                SYSCALL_POST_CALL(recvfrom), \
                                 SYSCALL_EXIT(recvfrom)) /*TODO*/\
  X( __NR_sendfile, sendfile,    SYSCALL_ENTER(sendfile), \
                                 NULL, \

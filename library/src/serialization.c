@@ -96,7 +96,7 @@ ssize_t serialize_into(const void * const inp, const struct type * const type,
             const struct buffer_reference *reference;
             size_t produced = 0;
             // encode actual buffer length -- receiving end may have
-            // different length in they buffer.length
+            // different length in their buffer.length
             *(uint64_t *)buf = type->buffer.length;
             produced += sizeof(uint64_t);
             if(type->buffer.length <= 0) {

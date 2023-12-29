@@ -104,7 +104,8 @@ extern size_t monmod_page_size;
  * Miscellaneous functions                                                    *
  * ************************************************************************** */
 
-static inline unsigned long sdbm_hash(size_t buf_len, unsigned char *buf) {
+static inline unsigned long sdbm_hash(size_t buf_len, const unsigned char *buf)
+{
 	unsigned long hash = 0;
 	unsigned int c = 0;
 	for(size_t i = 0; i < buf_len; i++) {

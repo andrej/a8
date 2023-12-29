@@ -35,7 +35,7 @@
  * to zero). It appears the libVMA library causes a tgkill call that we 
  * currently have no handler for.
  */
-#define USE_LIBVMA USE_LIBVMA_SERVER
+#define USE_LIBVMA USE_LIBVMA_NO
 
 /**
  * This can only be set in combination with USE_LIBVMA==USE_LIBVMA_SERVER. When
@@ -132,5 +132,14 @@
  * benchmark the impact of the headers alone.
  */
 #define NO_HEADERS 0
+
+/**
+ * Set to true in order to cache replication buffer. This will store the most
+ * N buffers of replication information on the leader and followers. 
+ */
+#define USE_REPLICATION_CACHE 0
+
+#define N_CACHE_ENTRIES 8
+#define CACHE_ENTRY_MAX_SZ 256
 
 #endif

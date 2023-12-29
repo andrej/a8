@@ -23,13 +23,13 @@
  * ************************************************************************** */
 
 struct __attribute__((packed)) batch_item {  // sent over network
-	uint64_t length;  // length of contents[] in bytes
+	uint32_t length;  // length of contents[] in bytes
 	char contents[];
 };
 
 struct __attribute__((packed)) batch {  // sent over network
-	uint64_t length;  // length of items[] in bytes
-	uint64_t capacity;  // capacity of items[] in bytes
+	uint32_t length;  // length of items[] in bytes
+	uint32_t capacity;  // capacity of items[] in bytes
 	struct batch_item items[];
 };
 

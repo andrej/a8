@@ -31,6 +31,19 @@
 #define MONMOD_MONITOR_HASH_PROTECTED    4
 #define MONMOD_MONITOR_COMPARE_PROTECTED 8
 #define MONMOD_MONITOR_PROTECTION        (MONMOD_MONITOR_FLAG_PROTECTED \
-                                          | MONMOD_MONITOR_COMPARE_PROTECTED)
+                                          | MONMOD_MONITOR_COMPARE_PROTECTED) 
+
+/**
+ * Scratch space size. This space is used to pass information from the system
+ * call entry to the exit handler.
+ */
+#define MONMOD_USE_SCRATCH 1
+#define MONMOD_SCRATCH_SZ 4096  // separate pages
+#define MONMOD_SCRATCH_SLOTS 4
+
+/**
+ * If set to 1, use xxhash, otherwise use sdbm_hash.
+ */
+#define MONMOD_USE_XXH 1
 
 #endif

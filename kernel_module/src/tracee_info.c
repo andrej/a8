@@ -76,6 +76,7 @@ struct tracee *add_tracee_info(pid_t pid)
 	if(0 != monmod_tracee_config_init(pid, &tracees[free_slot].config)) {
 		goto abort1;
 	}
+	tracees[free_slot].id = free_slot;
 	tracees[free_slot].pid = pid;
 	tracees[free_slot].state = TRACEE_INFO_VALID;
 

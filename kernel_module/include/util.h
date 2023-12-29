@@ -75,13 +75,31 @@ static inline int compare_user_region(const void __user *user_buffer,
 	   return memcmp(user_buffer, kernel_buffer, len); */
 }
 
+static inline unsigned long sdbm_hash(const unsigned char *buf, size_t len)
+{
+	unsigned long hash = 0;
+	unsigned int c = 0;
+	size_t i = 0;
+	for(; i < len; i++) {
+		c = buf[i];
+		hash = c + (hash << 6) + (hash << 16) - hash;
+	}
+	return hash;
+}
+
 static inline u64 hash_user_region(void __user const *start_addr, size_t len)
 {
-	u64 seed = 0;
+#if MONMOD_USE_XXH
+	const u64 seed = 0;
+#endif
 	if(!access_ok(VERIFY_READ, start_addr, len)) {
 		return 0;
 	}
+#if MONMOD_USE_XXH
 	return xxh32(start_addr, len, seed);
+#else
+	return sdbm_hash(start_addr, len);
+#endif
 }
 
 #endif

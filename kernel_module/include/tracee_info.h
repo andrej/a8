@@ -53,6 +53,7 @@ enum tracee_protection_state {
 
 struct tracee {
 	enum tracee_info_state state;
+	short id;
 	pid_t pid;
         void __user *trusted_addr;
         void __user *trace_func_addr;

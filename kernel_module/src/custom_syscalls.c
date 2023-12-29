@@ -146,6 +146,10 @@ struct reprotect_info {
 	struct syscall_trace_func_stack reprotect_stack;
 };
 
+#if MONMOD_USE_SCRATCH
+static char reprotect_scratch[MONMOD_SCRATCH_SLOTS][MONMOD_SCRATCH_SZ] = {};
+#endif
+
 int sys_monmod_reprotect(struct pt_regs *regs, struct tracee *tracee)
 {
 	struct reprotect_info *info = NULL;
@@ -155,13 +159,18 @@ int sys_monmod_reprotect(struct pt_regs *regs, struct tracee *tracee)
 	
 	/* Set up data structure for information to pass to exit handler. */
 	tracee->entry_info.custom_data = NULL;
+#if MONMOD_USE_SCRATCH
+	info = (struct reprotect_info *)reprotect_scratch[tracee->id];
+#else
 	info = kmalloc(sizeof(struct reprotect_info), GFP_KERNEL);
+#endif
 	if(NULL == info) {
 		printk(KERN_WARNING "monmod: <%d> Unable to allocate memory "
 		       "internal handling of monmod_reprotect call.\n",
 		       current->pid);
 		return -EBADE;
 	}
+
 	tracee->entry_info.custom_data = info;
 
 	info->write_back_regs = write_back_regs;
@@ -232,19 +241,15 @@ abort1:
 
 void sys_monmod_reprotect_exit(struct pt_regs *regs, struct tracee *tracee)
 {
-	struct reprotect_info info = {};
+	struct reprotect_info * const info = 
+		(struct reprotect_info *)tracee->entry_info.custom_data;
 	unsigned long mprotect_return_value = 0;
 
-	if(NULL == tracee->entry_info.custom_data) {
+	if(NULL == info) {
 		printk(KERN_WARNING "monmod: <%d> reprotect_exit called even "
 		       "though system call enter was never observed.\n", 
 		       current->pid);
-		return;
-	} else {
-		// Copy onto the stack and free before we forget.
-		info = *(struct reprotect_info *)tracee->entry_info.custom_data;
-		kfree(tracee->entry_info.custom_data);
-		tracee->entry_info.custom_data = NULL;
+		goto done;
 	}
 
 	mprotect_return_value = (unsigned long)SYSCALL_RET_REG(regs);
@@ -252,15 +257,15 @@ void sys_monmod_reprotect_exit(struct pt_regs *regs, struct tracee *tracee)
 	if(0 != mprotect_return_value) {
 		printk(KERN_WARNING "monmod: <%d> mprotect failed with return "
 		       "value %ld.\n", current->pid, mprotect_return_value);
-		return;
+		goto done;
 	}
 #endif
 	/* Restore the registers as given in the entry arguments. */
-	if(info.write_back_regs) {
+	if(info->write_back_regs) {
 		/* The redirected program counter was already written on system 
 		   call entry.
 		   This also overwrites the system call return register. */
-		memcpy(regs, &info.reprotect_stack.regs, sizeof(*regs));
+		memcpy(regs, &info->reprotect_stack.regs, sizeof(*regs));
 		tracee->entry_info.do_inject_return = false;
 	}
 
@@ -272,6 +277,11 @@ void sys_monmod_reprotect_exit(struct pt_regs *regs, struct tracee *tracee)
 	       (long long int)SYSCALL_RET_REG(regs));
 #endif
 
+done:
+#if !MONMOD_USE_SCRATCH
+		kfree(tracee->entry_info.custom_data);
+#endif
+		tracee->entry_info.custom_data = NULL;
 }
 
 /* Exposed to user space:

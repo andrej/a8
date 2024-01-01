@@ -27,32 +27,15 @@
 #include "handler_table_definitions.h"
 #include "handlers_support.h"
 
+const size_t n_handlers =
+		sizeof(syscall_handlers_arch)/sizeof(syscall_handlers_arch[0]);
+
 // These variables hold the scratch values between system call entry and exit
 // handlers
 __attribute__((section("unprotected_data")))
 char handler_scratch_buffer[HANDLER_SCRATCH_BUFFER_SZ] = {};
 void *next_preallocated = handler_scratch_buffer;
 
-struct syscall_handler const *get_handler(long no)
-{
-#if VERBOSITY >= 2
-	static size_t leaked = 0;
-	if(leaked < (char*)next_preallocated - handler_scratch_buffer) {
-		SAFE_WARNF("Previous system call handler leaked %ld bytes of "
-		           "scratch memory.\n",
-		           (char *)next_preallocated - handler_scratch_buffer
-			   - leaked);
-		leaked = (char*)next_preallocated - handler_scratch_buffer;
-	}
-#endif
-	const size_t n_handlers =
-		sizeof(syscall_handlers_arch)/sizeof(syscall_handlers_arch[0]);
-	no -= MIN_SYSCALL_NO;
-	if(0 > no || no >= n_handlers) {
-		return NULL;
-	}
-	return syscall_handlers_arch[no];
-}
 
 /* ************************************************************************** *
  * default                                                                    *

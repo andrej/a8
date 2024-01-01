@@ -10,7 +10,6 @@
 #include "checkpointing.h"
 #include "policy.h"
 #include "syscall_trace_func.h"
-#include "exchanges.h"
 
 struct monitor {
 	int own_id;

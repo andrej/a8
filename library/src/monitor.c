@@ -103,7 +103,7 @@ long monmod_handle_syscall(struct syscall_trace_func_stack * const stack)
 	}
 
 	int s = 0;
-	struct pt_regs *regs = &(stack->regs);
+	struct pt_regs * const regs = &(stack->regs);
 
 #if ENABLE_CHECKPOINTING
 	if(monitor.is_leader
@@ -217,7 +217,7 @@ long monmod_handle_syscall(struct syscall_trace_func_stack * const stack)
 			   replication, from actual into canonical. */
 			handler->post_call(&monitor.env, handler, dispatch, 
 			                   &actual, &canonical, 
-					   &handler_scratch_space);
+			                   &handler_scratch_space);
 		}
 	}
 
@@ -451,17 +451,21 @@ void register_monitor_in_kernel(struct monitor *monitor) {
 	           && &__unprotected_end == code_start + code_len
 	           && &__unprotected_start > code_start 
 	           && &__unprotected_start < code_start + code_len
-		   && protected_data_len > 0
-		   && len > 0 
-		   && start < protected_data_start
-		   && protected_data_start + protected_data_len < start + len);
+	           && protected_data_len > 0
+	           && len > 0 
+	           && start < protected_data_start
+	           && protected_data_start + protected_data_len < start + len);
 	
+#if VERBOSITY >= 1
+	SAFE_LOGF("Initializing monmod tracing with %lu bytes of protected data.\n",
+	          protected_data_len);
+#endif
 	SAFE_NZ_TRY(monmod_init(monitor->env.pid->local_pid, 
 	                        &monmod_syscall_trusted_addr,
 	                        &monmod_syscall_trace_enter,
 	                        start, len,
 	                        code_start, protected_code_len,
-				protected_data_start, protected_data_len));
+	                        protected_data_start, protected_data_len));
 
 #if ENABLE_CHECKPOINTING
 	monitor->addr_ranges = (struct monmod_monitor_addr_ranges) {

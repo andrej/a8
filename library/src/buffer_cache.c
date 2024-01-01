@@ -102,8 +102,8 @@ static inline void mark_accessed(cache_id id)
         new_head = access_history_tail;
         if(access_history_tail->prev != NULL) {
             access_history_tail = access_history_tail->prev;
-            access_history_tail->next = NULL;
         }
+        access_history_tail->next = NULL;
     }
     assert(new_head != NULL);
     struct access_history_item *old_head = access_history_head;

@@ -108,30 +108,37 @@ static int write_all(int fd, const char *src, size_t n)
 // until the sent data is acknowledged. We submit up to VMA_SERVER_SMEM_SLOTS
 // before awaiting the oldest write()s result. If the result indicates an error
 // occured while writing, we abort.
-static size_t async_requests[VMA_SERVER_SMEM_SLOTS] = {-1};
-static size_t async_request_lengths[VMA_SERVER_SMEM_SLOTS] = {-1};
-static size_t async_req_head = 0;
-static size_t async_req_length = 0;
+static size_t async_write_reqs[VMA_SERVER_SMEM_SLOTS] = {-1};
+static size_t async_write_req_lengths[VMA_SERVER_SMEM_SLOTS] = {-1};
+static size_t async_write_req_head = 0;
+static size_t async_write_req_length = 0;
 static void await_oldest_submitted_write()
 {
-    const size_t oldest = async_requests[async_req_head];
+    const size_t oldest = async_write_reqs[async_write_req_head];
     const size_t oldest_len 
-        = async_request_lengths[async_req_head];
+        = async_write_req_lengths[async_write_req_head];
     const int ret = vmas_req_async_await_write(oldest, -1, NULL, 0);
     // Abort if we were not successful after assuming we were
     assert(ret == oldest_len);
-    async_req_head = (async_req_head + 1) % VMA_SERVER_SMEM_SLOTS;
-    async_req_length--;
+    async_write_req_head = (async_write_req_head + 1) % VMA_SERVER_SMEM_SLOTS;
+    async_write_req_length--;
 }
 static void await_all_submitted_writes()
 {
-    while(async_req_length > 0) {
+    while(async_write_req_length > 0) {
         await_oldest_submitted_write();
     }
 }
 static int read_all(int fd, char *dest, size_t n)
 {
-    await_all_submitted_writes();
+    // Wait for free space in request queue.
+    //await_all_submitted_writes();
+    while((1UL != (unsigned long)(vmas_smem_s->free & (1UL << vmas_c_head)))
+          && async_write_req_length > 0) {
+        // the only reason this is not racy is that we are the only ones
+        // to modify n_submitted, i.e. vma-server does not modify it
+        await_oldest_submitted_write();
+    }
     size_t m = 0;
     while(n > 0) {
         LZ_TRY(m = s.read(fd, dest, n));
@@ -147,16 +154,19 @@ static size_t write_all(int fd, const char *src, size_t n)
     // write's results. If it returns non-zero (error), abort -- we already
     // assumed earlier it would succeed, now it turns out it didn't and we 
     // cannot recover from this (probably wouldn't recover anyways).
-    if(async_req_length >= VMA_SERVER_SMEM_SLOTS) {
-        // Queue full, await oldest
+    //while(async_write_req_length > 0) {
+    while((1UL != (unsigned long)(vmas_smem_s->free & (1UL << vmas_c_head)))
+          && async_write_req_length > 0) {
+        // the only reason this is not racy is that we are the only ones
+        // to modify n_submitted, i.e. vma-server does not modify it
         await_oldest_submitted_write();
     }
     const size_t tail = 
-        (async_req_head + async_req_length) % VMA_SERVER_SMEM_SLOTS;
-    async_requests[tail] = 
+        (async_write_req_head + async_write_req_length) % VMA_SERVER_SMEM_SLOTS;
+    async_write_reqs[tail] = 
         vmas_req_async_submit_write(fd, (char *)src, n);
-    async_request_lengths[tail] = n;
-    async_req_length++;
+    async_write_req_lengths[tail] = n;
+    async_write_req_length++;
     return 0; // Assume success
 }
 #endif

@@ -142,4 +142,39 @@ abort:
 	return NULL;
 }
 
+/**
+ * Use this type for atomic longs.
+ */
+typedef volatile unsigned long atomic_ulong_t;
+
+/**
+ * Atomically read bit N of L.
+ */
+static inline void atomic_set_bit(atomic_ulong_t *L, int N)
+{
+	unsigned long old_L;
+	const unsigned long bitmask = 1UL << N;
+	mem_barrier;
+	old_L = __atomic_fetch_or(L, bitmask, __ATOMIC_SEQ_CST);
+}
+
+/**
+ * Atomically wait for bit N of L to be 1 and simultaneously clear it. With
+ * multiple racing threads calling this function, only one thread will see the
+ * bit being set once.
+ */
+static inline void atomic_wait_and_clear_bit(atomic_ulong_t *L, int N)
+{
+	unsigned long old_L;
+	const unsigned long bitmask = 1UL << N;
+	do {
+		mem_barrier;
+		while((unsigned long)(*L & bitmask) == 0UL);  // Cheap, racy check first
+		old_L = __atomic_fetch_and(L, ~bitmask, __ATOMIC_SEQ_CST);
+	} while((unsigned long)(old_L & bitmask) == 0UL); 
+		// somebody else simultaneously cleared bit,
+	    // try again to wait for another set bit
+}
+
+
 #endif

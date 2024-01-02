@@ -150,51 +150,53 @@ enum vma_server_command {
 };
 #undef NAME_LIST
 
-enum vmas_command_state { 
-    VMAS_STATE_REQUEST_SUBMITTED, 
-    VMAS_STATE_RESPONSE_READY,
-    VMAS_STATE_RESPONSE_CONSUMED  // means this request may be freed
-};
-
 struct vmas_smem_command {
-    size_t size;  // size of entire structure
-    struct vmas_smem_command *next;
     enum vma_server_command command;
-    enum vmas_command_state state;
     long return_value;
     char data[VMA_SERVER_SMEM_SIZE];
 };
 
-/* The structure of the VMA Server Request Queue (a circular buffer) is as
-   follows:
+/* The commands go through the following cycle:
+   |--> free --> submitted --> processed --|
+   |                                       |
+   |---------------------------------------|
+   
+   The client submit function atomically waits for and clears free[c_head],
+   copies all arguments into the request buffer, asserts submitted[c_head],
+   and then increases c_head.
 
-   |           |
-   | free      |
-   | space     | 
-   |-----------|  head; start of list                  
-   | answered  |     |                                |
-   | queries   |     |  n_processed                   |
-   |           |     .                                |
-   |-----------|  next request not yet processed      |  n_submitted
-   | to-be-    |                                      |
-   | processed |                                      |
-   | queries   |                                      .
-   |-----------|  insert next request to be submitted here
-   | free      |
-   | space     |
-   |           |
+   The server processing function atomically waits for and clears 
+   submitted[s_head], processes the request and writes results back to the
+   buffer, asserts processed[s_head], and then increases s_head.
+
+   The client consume function atomically waits for and clears processed[i],
+   copies the results back and then asserts free[i], where i is an input 
+   parameter that must have been previously submitted.
+
+   As any of these three functions perform their actual processing, all bits
+   should be zero (submitted, processed, free), since the relevant bit is 
+   cleared upon function entry after waiting. Since all functions wait for some
+   bit atomically, no other function can progress while one is working. This
+   ensures atomic access.
+
+   Since c_head and s_head are currently not being set atomically, there can be
+   no races on these variables. This means currently this only supports a single
+   client and a single server. It could be extended to support multiple clients
+   by making c_head a variable in shared memory that is shared between clients
+   and only increased atomically. 
    */
 
 struct vmas_smem_struct { 
-    size_t head;
-    size_t n_processed;
-    size_t n_submitted;
+    atomic_ulong_t free;
+    atomic_ulong_t submitted;
+    atomic_ulong_t processed;
     struct vmas_smem_command commands[VMA_SERVER_SMEM_SLOTS];
 };
 
-
 extern struct smem *vmas_smem;
 #define vmas_smem_s ((struct vmas_smem_struct *)vmas_smem->data)
+
+extern int vmas_c_head;
 
 #define VMAS_LIST_IDX(idx) \
     ((idx) % VMA_SERVER_SMEM_SLOTS)
@@ -339,9 +341,9 @@ static inline int init_vma_redirect() {
     snprintf(smem_name, sizeof(smem_name), "/vmas_smem_%d", getpid());
     SAFE_Z_TRY(vmas_smem = smem_init_named(sizeof(struct vmas_smem_struct),
                                            smem_name));
-    vmas_smem_s->head = 0;
-    vmas_smem_s->n_processed = 0;
-    vmas_smem_s->n_submitted = 0;
+    vmas_smem_s->free = ~0UL;
+    vmas_smem_s->submitted = 0UL;
+    vmas_smem_s->processed = 0UL;
     if(0 == fork()) {
         /* Child; set socket functions up to just call back to parent via
           shared memory */

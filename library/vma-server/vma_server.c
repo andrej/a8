@@ -68,29 +68,17 @@ static int vmas_dispatch(struct vmas_smem_command *req)
 }
 #undef VMAS_DISPATCH
 
+static int s_head = 0;
+
 int vma_server_main()
 {
     while(1) {
-        // If n_processed == n_submitted we are caught up and have 
-        // answered all requests; wait for a new request.
-        smem_lock_if(vmas_smem,
-                        vmas_smem_s->n_processed < vmas_smem_s->n_submitted);
-        struct vmas_smem_command * const req = 
-            &VMAS_LIST_AT(vmas_smem_s->head + vmas_smem_s->n_processed);
-        // n_submitted should only be increased if a valid request has
-        // been added
-        if(req->state != VMAS_STATE_REQUEST_SUBMITTED) {
-            printf("head: %lu\n", vmas_smem_s->head);
-            printf("n_processed: %lu\n", vmas_smem_s->n_processed);
-            printf("n_submitted: %lu\n", vmas_smem_s->n_submitted);
-        }
-        assert(VMAS_STATE_REQUEST_SUBMITTED == req->state);
-        smem_unlock(vmas_smem);
+        // Wait for a new request.
+        atomic_wait_and_clear_bit(&vmas_smem_s->submitted, s_head);
+        struct vmas_smem_command * const req = &VMAS_LIST_AT(s_head);
         req->return_value = vmas_dispatch(req);
-        smem_lock(vmas_smem);
-        req->state = VMAS_STATE_RESPONSE_READY;
-        vmas_smem_s->n_processed++;
-        smem_unlock(vmas_smem);
+        atomic_set_bit(&vmas_smem_s->processed, s_head);
+        s_head = VMAS_LIST_IDX(s_head + 1);
         sched_yield();
     }
     return 0;

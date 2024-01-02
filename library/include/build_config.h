@@ -118,9 +118,9 @@
 #define MAX_N_EPOLL_DATA_INFOS 128
 
 // vma_redirect.h
-#define VMA_SERVER_SMEM_SLOTS 16
-//#define VMA_SERVER_SMEM_SIZE 524288
-#define VMA_SERVER_SMEM_SIZE 20480
+#define VMA_SERVER_SMEM_SLOTS 8
+#define VMA_SERVER_SMEM_SIZE 9216
+//#define VMA_SERVER_SMEM_SIZE 3584
 
 /**
  * Disable headers in all exchanged messages. By default, a one-byte header
@@ -137,7 +137,7 @@
  * Set to true in order to cache replication buffer. This will store the most
  * N buffers of replication information on the leader and followers. 
  */
-#define USE_REPLICATION_CACHE 1
+#define USE_REPLICATION_CACHE 0
 
 #define N_CACHE_ENTRIES 8
 #define CACHE_ENTRY_MAX_SZ 256

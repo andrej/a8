@@ -52,6 +52,8 @@ vmafork(void)
 
 struct smem *vmas_smem = NULL;
 
+int vmas_c_head = 0;
+
 // functions static inline int vmas_req_XXX(args ...)
 #define MAXLEN VMA_SERVER_SMEM_SIZE
 #define COMMA() ,
@@ -87,12 +89,9 @@ struct smem *vmas_smem = NULL;
                                    ARG_LIST_PTR, COMMA())) { \
         typedef struct vmas_ ## NAME ## _args argstruct_t; \
         /* Wait for a request slot to be available in the circular buffer. */ \
-        smem_lock_if(vmas_smem, \
-                     vmas_smem_s->n_submitted < VMA_SERVER_SMEM_SLOTS); \
-        const size_t request_head = \
-            VMAS_LIST_IDX(vmas_smem_s->head + vmas_smem_s->n_submitted); \
-        struct vmas_smem_command * const req = &VMAS_LIST_AT(request_head); \
-        smem_unlock(vmas_smem); \
+        const size_t i = vmas_c_head; \
+        atomic_wait_and_clear_bit(&vmas_smem_s->free, i); \
+        struct vmas_smem_command * const req = &VMAS_LIST_AT(i); \
         char *reqbuf = req->data; \
         /*const size_t sz = sizeof(argstruct_t) + \
                           VMAS_ ## NAME ## _ARGS(ARG_SZ_IMM, ARG_SZ_INPUT_PTR, \
@@ -100,15 +99,13 @@ struct smem *vmas_smem = NULL;
                                                  ARG_SZ_RW_PTR, +); \
         assert(sz < VMA_SERVER_SMEM_SIZE);*/ \
         /* Write arguments to request buffer. */ \
-        /*req->size = sz; */\
-        req->state = VMAS_STATE_REQUEST_SUBMITTED; \
         req->command = vmas_cmd_ ## NAME; \
         VMAS_ ## NAME ## _ARGS(WRITE_ARG_IMM, WRITE_ARG_PTR, IGNORE, \
                                WRITE_ARG_PTR, NOTHING) \
-        smem_lock(vmas_smem); \
-        vmas_smem_s->n_submitted++; /* Take one slot for this request. */ \
-        smem_unlock(vmas_smem); \
-        return request_head; \
+        /* Mark request submitted. */ \
+        atomic_set_bit(&vmas_smem_s->submitted, i); \
+        vmas_c_head = VMAS_LIST_IDX(i + 1); \
+        return i; \
     } 
 
 /* Await request response from server:
@@ -123,29 +120,21 @@ struct smem *vmas_smem = NULL;
           consumed as well.*/
 #define DEF_REQ_FUN_ASYNC_AWAIT(NAME) \
     int vmas_req_async_await_ ## NAME(\
-            size_t head, \
+            size_t i, \
             VMAS_ ## NAME ## _ARGS(ARG_LIST_IMM, ARG_LIST_PTR, ARG_LIST_PTR, \
                                    ARG_LIST_PTR, COMMA())) { \
         typedef struct vmas_ ## NAME ## _args argstruct_t; \
-        struct vmas_smem_command * const req =  &VMAS_LIST_AT(head); \
+        struct vmas_smem_command * const req =  &VMAS_LIST_AT(i); \
         char *reqbuf = req->data; \
         int return_value = 0; \
-        smem_lock_if(vmas_smem, VMAS_STATE_RESPONSE_READY == req->state); \
+        /* Wait for results to be ready. */ \
+        atomic_wait_and_clear_bit(&vmas_smem_s->processed, i); \
         /* Copy results from return buffers (if any). */ \
         VMAS_ ## NAME ## _ARGS(IGNORE, IGNORE, READ_ARG_PTR, READ_ARG_PTR, \
                                NOTHING) \
         return_value = req->return_value; \
-        req->state = VMAS_STATE_RESPONSE_CONSUMED; \
-        /* Free space in request queue if this is the oldest consumed complete \
-           reply. */ \
-        while(vmas_smem_s->n_processed > 0 && \
-              VMAS_STATE_RESPONSE_CONSUMED == \
-              VMAS_LIST_AT(vmas_smem_s->head).state) {\
-            vmas_smem_s->head = VMAS_LIST_IDX(vmas_smem_s->head + 1); \
-            vmas_smem_s->n_submitted--; \
-            vmas_smem_s->n_processed--; \
-        } \
-        smem_unlock(vmas_smem); \
+        /* Result consumed, free slot. */ \
+        atomic_set_bit(&vmas_smem_s->free, i); \
         return return_value; \
     }
 

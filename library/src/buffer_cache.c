@@ -66,7 +66,7 @@ static inline void mark_accessed(cache_id id)
 
     // If ID is present in access history, move it to the front.
     for(struct access_history_item *cur = access_history_head; 
-        cur->next != NULL; cur = cur->next) {
+        cur != NULL; cur = cur->next) {
         if(cur->id == id) {
             if(NULL == cur->prev) {
                 // Already at the front, no need to move.
@@ -79,10 +79,13 @@ static inline void mark_accessed(cache_id id)
             }
             // Cut cur out of the chain...
             cur->prev->next = cur->next;
+            if(cur->next != NULL) {
+                cur->next->prev = cur->prev;
+            }
             // ...and move it to the front.
             cur->next = access_history_head;  // old head
-            access_history_head->prev = cur;
             cur->prev = NULL;
+            access_history_head->prev = cur;
             access_history_head = cur;
             return;
         }
@@ -102,6 +105,8 @@ static inline void mark_accessed(cache_id id)
         new_head = access_history_tail;
         if(access_history_tail->prev != NULL) {
             access_history_tail = access_history_tail->prev;
+        } else {
+            assert(access_history_tail == access_history_head);
         }
         access_history_tail->next = NULL;
     }

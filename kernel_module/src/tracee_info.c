@@ -57,14 +57,13 @@ struct tracee *add_tracee_info(pid_t pid)
 	unsigned long flags;
 	size_t free_slot;
 
-	WARN_ON(!rcu_read_lock_held());
+	//WARN_ON(!rcu_read_lock_held());
 	spin_lock_irqsave(&tracee_info_mutex, flags);
 
 	if(!may_add_tracee_info) {
 		goto abort1;
 	}
-	for(free_slot = 0; free_slot < MAX_N_TRACEES; free_slot++)
-	{
+	for(free_slot = 0; free_slot < MAX_N_TRACEES; free_slot++) {
 		if(TRACEE_INFO_FREE == tracees[free_slot].state) {
 			break;
 		}

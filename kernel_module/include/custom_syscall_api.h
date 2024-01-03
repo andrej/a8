@@ -6,6 +6,9 @@
 #define __NR_monmod_destroy     330
 #define __NR_monmod_fake_fork   333
 
+#define __NR_monmod_min __NR_monmod_init
+#define __NR_monmod_max __NR_monmod_fake_fork
+
 #ifndef __ASSEMBLER__
 struct monmod_monitor_addr_ranges {
 	void *overall_start;

@@ -118,7 +118,7 @@ int sys_monmod_init(struct pt_regs *regs, struct tracee *tracee)
 struct tracee *sys_monmod_init_special_entry(struct tracee *tracee)
 {
 	const pid_t pid = current->pid;
-	BUG_ON(!rcu_read_lock_held());
+	//BUG_ON(!rcu_read_lock_held());
 	if(NULL != tracee) {
 		/* There may be at most one initialize call per PID. A second
 		init call could be a malicious attempt to move the protected

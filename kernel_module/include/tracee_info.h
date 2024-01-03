@@ -12,7 +12,7 @@
 /* ************************************************************************** *
  * Macros                                                                     *
  * ************************************************************************** */
-#define MAX_N_TRACEES 8
+#define MAX_N_TRACEES 4
 
 
 /* ************************************************************************** *
@@ -99,12 +99,12 @@ extern struct tracee tracees[MAX_N_TRACEES];
 static inline struct tracee *get_tracee_info(pid_t pid)
 {
 	size_t i;
-	WARN_ON(!rcu_read_lock_held());
+#if !MONMOD_SKIP_SANITY_CHECKS
+	//WARN_ON(!rcu_read_lock_held());
+#endif
 	for(i = 0; i < MAX_N_TRACEES; i++) {
-		if(TRACEE_INFO_VALID != tracees[i].state) {
-			continue;
-		}
-		if(pid == tracees[i].pid) {
+		if(pid == tracees[i].pid
+		   && TRACEE_INFO_VALID == tracees[i].state) {
 			return &tracees[i];
 		}
 	}

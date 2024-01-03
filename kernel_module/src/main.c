@@ -94,18 +94,17 @@ unprotect_monitor_enter(struct tracee *tracee, struct pt_regs *regs)
  * into the monitor memory area under the FLAG_PROTECTED protection scheme.
  */
 static inline bool syscall_breaks_protection(
-		struct tracee *tracee,
-		struct pt_regs *regs, long id)
+		const struct tracee * const tracee, 
+		const struct pt_regs * const regs, long id)
 {
-	void __user * const monitor_start = tracee->addrs.overall_start;
-	void __user * const monitor_end = monitor_start 
-	                                  + tracee->addrs.overall_len;
+	const void __user * const monitor_start = tracee->addrs.overall_start;
+	const void __user * const monitor_end = monitor_start 
+	                                        + tracee->addrs.overall_len;
 
 #if MONMOD_MONITOR_PROTECTION == MONMOD_MONITOR_FLAG_PROTECTED
-	if(BETWEEN((void __user *)PC_REG(regs), monitor_start, monitor_end)) {
-		if(tracee->protection_state == TRACEE_NOT_IN_MONITOR) {
-			return true;
-		}
+	if(tracee->protection_state == TRACEE_NOT_IN_MONITOR
+	   && BETWEEN((void __user *)PC_REG(regs), monitor_start, monitor_end)) {
+		return true;
 	}
 #endif
 
@@ -113,27 +112,26 @@ static inline bool syscall_breaks_protection(
 		case __NR_mmap:
 		case __NR_munmap:
 		case __NR_mprotect: {
-			void __user *addr = (void __user *)
-			                    SYSCALL_ARG0_REG(regs);
-			size_t len = (size_t)SYSCALL_ARG1_REG(regs);
+			const void __user * const addr = 
+				(const void __user *)SYSCALL_ARG0_REG(regs);
+			const size_t len = (size_t)SYSCALL_ARG1_REG(regs);
 			if(BETWEEN(addr, monitor_start, monitor_end)
 			   || BETWEEN(addr + len, monitor_start, monitor_end)
 			   || (addr <= monitor_start 
 			       && addr + len >= monitor_end) ) {
 				return true;
 			}
-			break;
+			return false;
 		}
-		// TODO: process_vm_writev
+		default:
+			return false;
 	}
-	return false;
 }
 
 /* Remove a tracee and remove all associated resources. */
 void destroy_tracee(struct tracee *tracee)
 {
 	del_tracee_info(tracee);
-
 }
 
 /* ************************************************************************** * 
@@ -184,7 +182,7 @@ static void regular_syscall_enter(struct pt_regs *regs, long id,
 		return;
 	}
 
-	if(!monmod_syscall_is_active(id) && __NR_monmod_fake_fork != id) {
+	if(!monmod_syscall_is_active(id)) {
 		return;
 	}
 
@@ -247,18 +245,12 @@ static void regular_syscall_exit(struct pt_regs *regs,
  * Probes                                                                     *
  * ************************************************************************** */
 
-static inline struct tracee *probe_prelude(void *__data, pid_t pid)
+static inline struct tracee *probe_prelude(const void * const __data, 
+                                           const pid_t pid)
 {
-	struct tracee *tracee = NULL;
 	// Exit as early as possible to not slow down other processes system
 	// calls. Keep in mind that any code here will be run for all system
 	// calls.
-	if(0 == monmod_global_config.active) {
-		return NULL;
-	}
-	if(NULL == (tracee = get_tracee_info(pid))) {
-		return NULL;
-	}
 #if !MONMOD_SKIP_SANITY_CHECKS
 	if(NULL != __data) {
 		printk(KERN_WARNING "monmod: sanity check failed -- probe "
@@ -266,14 +258,14 @@ static inline struct tracee *probe_prelude(void *__data, pid_t pid)
 		return NULL;
 	}
 #endif
-	return tracee;
+	return get_tracee_info(pid);
 }
 
 
 static void sys_enter_probe(void *__data, struct pt_regs *regs, long id)
 {
 	const pid_t pid = current->pid;
-	struct tracee *tracee = NULL;
+	struct tracee *tracee;
 
 	//rcu_read_lock();
 	tracee = probe_prelude(__data, pid);
@@ -295,15 +287,15 @@ static void sys_enter_probe(void *__data, struct pt_regs *regs, long id)
 	tracee->entry_info.inject_return = -ENOSYS;
 	tracee->entry_info.custom_data = NULL;
 
-	if(is_monmod_syscall(id)) {
+	if(!is_monmod_syscall(id)) {
+		regular_syscall_enter(regs, id, tracee);
+	} else {
 #if MONMOD_LOG_VERBOSITY >= 1
 		printk(KERN_INFO "monmod: <%d> >> Enter system call (%ld) "
 		       "(custom) from %px.\n", pid, id, 
 		       (void __user *)PC_REG(regs));
 #endif
 		custom_syscall_enter(regs, id, tracee);
-	} else {
-		regular_syscall_enter(regs, id, tracee);
 	}
 
 exit:
@@ -405,12 +397,8 @@ static void signal_generate_probe(void *__data, int sig, struct siginfo *info,
  * Initialization                                                             *
  * ************************************************************************** */
 
-static int __init monmod_init(void)
+static int register_tracepoints(void)
 {
-	if(0 != monmod_config_init()) {
-		printk(KERN_WARNING "monmod: Unable to initialize config.\n");
-		goto abort1;
-	}
 #define get_tp(_tp) \
 	tp_ ## _tp = monmod_find_kernel_tracepoint_by_name(#_tp); \
 	if(NULL == tp_ ## _tp) { \
@@ -429,51 +417,48 @@ static int __init monmod_init(void)
 
 	TRY(tracepoint_probe_register(tp_sys_enter, (void *)sys_enter_probe, 
 	                              NULL),
-	    goto abort2);
+	    goto abort1);
 	TRY(tracepoint_probe_register(tp_sys_exit, (void *)sys_exit_probe, 
 	                              NULL),
-	    goto abort3);
+	    goto abort2);
 	TRY(tracepoint_probe_register(tp_sched_process_exit,
 	                              (void *)sched_process_exit_probe,
 				      NULL),
-	    goto abort4);
+	    goto abort3);
 #if MONMOD_LOG_VERBOSITY >= 2
 	TRY(tracepoint_probe_register(tp_signal_deliver,
 	                              (void *)signal_deliver_probe,
 				      NULL),
-	    goto abort5);
+	    goto abort4);
 	TRY(tracepoint_probe_register(tp_signal_generate,
 	                              (void *)signal_generate_probe,
 				      NULL),
-	    goto abort6);
+	    goto abort5);
 #endif
 
-	printk(KERN_INFO "monmod: module loaded\n");
 	return 0;
 
 #if MONMOD_LOG_VERBOSITY >= 2
-abort6:
+abort5:
 	tracepoint_probe_unregister(tp_signal_deliver, 
 	                            (void *)signal_deliver_probe, 
 	                            NULL);
-abort5:
+abort4:
 	tracepoint_probe_unregister(tp_sched_process_exit, 
 	                            (void *)sched_process_exit_probe, 
 	                            NULL);
 #endif
-abort4:
+abort3:
 	tracepoint_probe_unregister(tp_sys_exit, (void *)sys_exit_probe, 
 	                            NULL);
-abort3:
+abort2:
 	tracepoint_probe_unregister(tp_sys_enter, (void *)sys_enter_probe, 
 	                            NULL);
-abort2:
-	monmod_config_free();
 abort1:
-	return -1;
+	return 1;
 }
 
-static void __exit monmod_exit(void)
+static void unregister_tracepoints(void)
 {
 #define free_tp(_tp) \
 	if(NULL != tp_ ## _tp) { \
@@ -493,6 +478,30 @@ static void __exit monmod_exit(void)
 #endif
 
 	tracepoint_synchronize_unregister();
+}
+
+static int __init monmod_init(void)
+{
+	if(0 != monmod_config_init()) {
+		printk(KERN_WARNING "monmod: Unable to initialize config.\n");
+		goto abort1;
+	}
+	if(0 != register_tracepoints()) {
+		goto abort2;
+	}
+
+	printk(KERN_INFO "monmod: module loaded\n");
+	return 0;
+
+abort2:
+	monmod_config_free();
+abort1:
+	return -1;
+}
+
+static void __exit monmod_exit(void)
+{
+	unregister_tracepoints();
 	free_tracee_infos(); // also frees tracee configs
 	monmod_config_free();
 	printk(KERN_INFO "monmod: module unloaded\n");

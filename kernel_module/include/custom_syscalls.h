@@ -7,8 +7,9 @@
 
 static inline bool is_monmod_syscall(long nr)
 {
-	return __NR_monmod_init == nr || __NR_monmod_reprotect == nr
-	       || __NR_monmod_destroy == nr;
+       return __NR_monmod_min <= nr && nr <= __NR_monmod_max;
+	//return __NR_monmod_init == nr || __NR_monmod_reprotect == nr
+	//       || __NR_monmod_destroy == nr;
 }
 
 void custom_syscall_enter(struct pt_regs *regs, long id,

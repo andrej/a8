@@ -6,18 +6,6 @@
 
 
 /* ************************************************************************** *
- * Internal Macros                                                            *
- * ************************************************************************** */
-
-#if !MONMOD_SKIP_SANITY_CHECKS
-#define _config_sanity_checks(else) { \
-}
-#else
-#define _config_sanity_checks(else)  
-#endif
-
-
-/* ************************************************************************** *
  * Global Variables                                                           *
  * ************************************************************************** */
 
@@ -142,25 +130,12 @@ void monmod_tracee_config_free(struct monmod_tracee_config *conf)
     kobject_put(&conf->kobj);
 }
 
-int monmod_syscall_is_active(u64 syscall_no)
-{
-    int index, offset;
-    _config_sanity_checks(return 0);   
-    index = _monmod_syscall_mask_index(syscall_no);
-    offset = _monmod_syscall_mask_offset(syscall_no);
-    if(index < 0 || offset < 0) {
-        return 0;
-    }
-    return (monmod_global_config.syscall_masks[index] >> offset) & 0x1;
-}
-
 int monmod_syscall_activate(u64 syscall_no)
 {
     int index, offset;
-    _config_sanity_checks(return 1);
     index = _monmod_syscall_mask_index(syscall_no);
     offset = _monmod_syscall_mask_offset(syscall_no);
-    if(index < 0 || offset < 0) {
+    if(index >= MONMOD_N_SYSCALL_MASKS) {
         return 1;
     }
     if(monmod_syscall_is_active(syscall_no)) {
@@ -173,10 +148,9 @@ int monmod_syscall_activate(u64 syscall_no)
 int monmod_syscall_deactivate(u64 syscall_no)
 {
     int index, offset;
-    _config_sanity_checks(return 1);
     index = _monmod_syscall_mask_index(syscall_no);
     offset = _monmod_syscall_mask_offset(syscall_no);
-    if(index < 0 || offset < 0) {
+    if(index >= MONMOD_N_SYSCALL_MASKS) {
         return 1;
     }
     if(!monmod_syscall_is_active(syscall_no)) {
@@ -190,31 +164,6 @@ int monmod_syscall_deactivate(u64 syscall_no)
 /* ************************************************************************** *
  * Internal Functions                                                         *
  * ************************************************************************** */
-
-inline int _monmod_syscall_mask_index(u64 no)
-{
-    int res;
-    if(no >= __NR_syscalls) {
-        return -1;
-    }
-    res = no / MONMOD_BITS_PER_MASK;
-#if !MONMOD_SKIP_SANITY_CHECKS
-    if(res > MONMOD_N_SYSCALL_MASKS) {
-        return -1;
-    }
-#endif
-    return res;
-}
-
-inline int _monmod_syscall_mask_offset(u64 no)
-{
-    int res;
-    if(no >= __NR_syscalls) {
-        return -1;
-    }
-    res = no % MONMOD_BITS_PER_MASK;
-    return res;
-}
 
 static inline int _config_callback_sanity_checks(const struct kobject *kobj,
                                                  const struct kobj_attribute *attr,
@@ -265,46 +214,10 @@ ssize_t _monmod_config_int_or_long_store(struct kobject *kobj,
     return count;
 }
 
-#define CONFIG_LONG_SHOW_FUN(name, container_type, member_name) \
-    ssize_t _monmod_config_ ## name ## _show(struct kobject *kobject,  \
-                                             struct kobj_attribute *attr, \
-                                             char *buf) \
-    { \
-        container_type *src = container_of(kobject, container_type, kobj); \
-        ssize_t ret = _monmod_config_long_show( \
-                        kobject, attr, buf, \
-                        (long)src->member_name); \
-        return ret; \
-    } 
-
-#define CONFIG_LONG_STORE_FUN(name, container_type, member_name, is_long) \
-    ssize_t _monmod_config_ ## name ## _store(struct kobject *kobject, \
-                                              struct kobj_attribute *attr, \
-                                              const char *buf, \
-                                              size_t count) \
-    { \
-        container_type *dst = container_of(kobject, container_type, kobj); \
-        ssize_t ret = _monmod_config_int_or_long_store( \
-                        kobject, attr, buf, count, is_long, \
-                        (long *)&dst->member_name); \
-        if(0 < ret) { \
-            printk(KERN_INFO "monmod: Set configuration " #name " to %ld\n", \
-                (long)dst->member_name); \
-        } else { \
-            printk(KERN_WARNING "monmod: Failed to set configuration " #name \
-                   " with return value %ld\n", ret); \
-        } \
-        return ret; \
-    }
-
 
 /* ************************************************************************** *
  * Config Setting Store / Show Callbacks                                      *
  * ************************************************************************** */
-
-CONFIG_LONG_SHOW_FUN(active, struct monmod_config, active)
-CONFIG_LONG_STORE_FUN(active, struct monmod_config, active, false)
-
 
 ssize_t _monmod_config_tracee_pids_show(struct kobject *kobject, 
                                         struct kobj_attribute *attr,
@@ -315,7 +228,7 @@ ssize_t _monmod_config_tracee_pids_show(struct kobject *kobject,
     if(0 != _config_callback_sanity_checks(kobject, attr, buf)) {
         return -1;
     }
-    rcu_read_lock();
+    //rcu_read_lock();
     for(i = 0; i < MAX_N_TRACEES; i++) {
         if(TRACEE_INFO_VALID != tracees[i].state) {
             continue;
@@ -323,7 +236,7 @@ ssize_t _monmod_config_tracee_pids_show(struct kobject *kobject,
         n_written += snprintf(buf + n_written, PAGE_SIZE - n_written,
                               "%d\n", tracees[i].pid);
     }
-    rcu_read_unlock();
+    //rcu_read_unlock();
     if(n_written > 0 && n_written < PAGE_SIZE) {
         // Include terminating NULL in n_written count
         n_written += 1;

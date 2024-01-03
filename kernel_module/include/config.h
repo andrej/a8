@@ -33,6 +33,8 @@
 
 #define MONMOD_NO_SYSCALL (__NR_syscalls+1)
 
+#define _monmod_syscall_mask_index(no)  ((no) / MONMOD_BITS_PER_MASK)
+#define _monmod_syscall_mask_offset(no) ((no) % MONMOD_BITS_PER_MASK)
 
 /* ************************************************************************** *
  * Data Types & Global Variables                                              *
@@ -45,8 +47,7 @@ struct monmod_tracee_config {
 
 struct monmod_config {
 	struct kobject kobj;
-        size_t n_tracees;
-        long active;
+    size_t n_tracees;
 	u64 syscall_masks[MONMOD_N_SYSCALL_MASKS];
 };
 
@@ -63,7 +64,20 @@ void monmod_config_free(void);
 int monmod_tracee_config_init(pid_t pid, struct monmod_tracee_config *conf);
 void monmod_tracee_config_free(struct monmod_tracee_config *conf);
 
-int monmod_syscall_is_active(u64 syscall_no);
+static inline int monmod_syscall_is_active(u64 syscall_no)
+{
+    const int index = _monmod_syscall_mask_index(syscall_no);
+    const int offset = _monmod_syscall_mask_offset(syscall_no);
+#if !MONMOD_SKIP_SANITY_CHECKS
+    if(index >= MONMOD_N_SYSCALL_MASKS) {
+        printk(KERN_WARNING "monmod: Out-of-bounds system call %ld with index "
+               "%d and offset %d.\n", syscall_no, index, offset);
+        return 0;
+    }
+#endif
+    return (monmod_global_config.syscall_masks[index] >> offset) & 0x1;
+}
+
 int monmod_syscall_activate(u64 syscall_no);
 int monmod_syscall_deactivate(u64 syscall_no);
 
@@ -73,12 +87,8 @@ int monmod_syscall_deactivate(u64 syscall_no);
  * (Exported in test header anyways so we can test them.)                     *
  * ************************************************************************** */
 
-int _monmod_syscall_mask_index(u64 syscall_no);
-int _monmod_syscall_mask_offset(u64 syscall_no);
-
 #define GLOBAL_ATTRIBUTES(X) \
     X(tracee_pids) \
-    X(active) \
     X(untraced_syscalls)
 
 #define TRACEE_ATTRIBUTES(X) \

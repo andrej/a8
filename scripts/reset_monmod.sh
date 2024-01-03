@@ -1,8 +1,6 @@
 #!/bin/sh
 
 ARCH=$(uname -m)
-echo 0 > /sys/kernel/monmod/active
-echo 1 > /sys/kernel/monmod/active
 
 # Make the following system calls untraced:
 # - brk

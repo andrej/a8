@@ -142,4 +142,9 @@
 #define N_CACHE_ENTRIES 8
 #define CACHE_ENTRY_MAX_SZ 256
 
+/**
+ * If (1), use XXH32 hash function. If (0), use sdbm_hash.
+ */
+#define USE_XXH 0
+
 #endif

@@ -1,5 +1,6 @@
 #include "exchanges.h"
 #include "batched_communication.h"
+#include "hash.h"
 #if USE_REPLICATION_CACHE
 #include "buffer_cache.h"
 #endif
@@ -150,7 +151,7 @@ int cross_check_args(struct monitor *monitor, struct syscall_info *canonical)
     SAFE_NZ_TRY(cross_check_serialize_args(serialized_buf, canonical));
 
 #if CHECK_HASHES_ONLY
-    msg_buf->hash = sdbm_hash(serialized_len, serialized_buf);
+    msg_buf->hash = hash(serialized_buf, serialized_len);
 #endif
 
     // Communication

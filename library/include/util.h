@@ -104,17 +104,6 @@ extern size_t monmod_page_size;
  * Miscellaneous functions                                                    *
  * ************************************************************************** */
 
-static inline unsigned long sdbm_hash(size_t buf_len, const unsigned char *buf)
-{
-	unsigned long hash = 0;
-	unsigned int c = 0;
-	for(size_t i = 0; i < buf_len; i++) {
-		c = buf[i];
-		hash = c + (hash << 6) + (hash << 16) - hash;
-	}
-	return hash;
-}
-
 /**
  * Safe alternative to malloc() that can be called from within system call
  * handlers. Since calloc() and malloc() are non-reentrant, we cannot safely

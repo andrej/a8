@@ -44,7 +44,7 @@
  * performance as write calls no longer block until the sent data is 
  * acknowledged.
 */
-#define USE_ASYNC_WRITE 1
+#define USE_ASYNC_WRITE 0
 
 /**
  * If set to true, no monitoring happens. The monitor will go ahead and execute
@@ -56,7 +56,7 @@
  * If set to true, execution of the program is terminated if a system call
  * that we do not have a handler for is attempted to be executed.
  */
-#define NO_HANDLER_TERMINATES 1
+#define NO_HANDLER_TERMINATES 0
 
 #define NO_CHECKPOINTING 0
 #define FORK_CHECKPOINTING 1
@@ -120,7 +120,7 @@
 // vma_redirect.h
 #define VMA_SERVER_SMEM_SLOTS 8
 #define VMA_SERVER_SMEM_SIZE 9216
-//#define VMA_SERVER_SMEM_SIZE 3584
+//#define VMA_SERVER_SMEM_SIZE (2<<14)
 
 /**
  * Disable headers in all exchanged messages. By default, a one-byte header

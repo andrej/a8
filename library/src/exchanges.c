@@ -181,7 +181,7 @@ int cross_check_args(struct monitor *monitor, struct syscall_info *canonical)
 #endif
             SAFE_NZ_TRY(comm_receive_partial(&monitor->comm, 
                                              monitor->comm.peers[i].id, 
-                                            &n_received, recv_buf));
+                                             &n_received, recv_buf));
             ret = ret && n_received == msg_len;
 #if CHECK_HASHES_ONLY
             ret = ret && msg_buf->hash == recv_msg->hash;

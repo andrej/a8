@@ -52,19 +52,12 @@ vmafork(void)
 
 struct smem *vmas_smem = NULL;
 
-int vmas_c_head = 0;
-
 // functions static inline int vmas_req_XXX(args ...)
-#define MAXLEN VMA_SERVER_SMEM_SIZE
 #define COMMA() ,
 #define NOTHING
 #define IGNORE(...) 
 #define ARG_LIST_IMM(T, N) T N
 #define ARG_LIST_PTR(T, L_static, L_dynamic, N) T *N
-#define ARG_SZ_IMM(T, N) 0
-#define ARG_SZ_INPUT_PTR(T, L_static, L_dynamic, N) L_dynamic
-#define ARG_SZ_OUTPUT_PTR(T, L_static, L_dynamic, N) L_static
-#define ARG_SZ_RW_PTR(T, L_static, L_dynamic, N) L_static
 #define WRITE_ARG_IMM(T, N) \
     ((argstruct_t *)reqbuf)->N = N;
 #define WRITE_ARG_PTR(T, L_static, L_dynamic, N) \
@@ -88,23 +81,19 @@ int vmas_c_head = 0;
             VMAS_ ## NAME ## _ARGS(ARG_LIST_IMM, ARG_LIST_PTR, ARG_LIST_PTR, \
                                    ARG_LIST_PTR, COMMA())) { \
         typedef struct vmas_ ## NAME ## _args argstruct_t; \
+        /*assert(sizeof(argstruct_t) <= VMA_SERVER_SMEM_SIZE);*/ \
         /* Wait for a request slot to be available in the circular buffer. */ \
-        const size_t i = vmas_c_head; \
+        const size_t i = vmas_smem_s->c_head; \
         atomic_wait_and_clear_bit(&vmas_smem_s->free, i); \
         struct vmas_smem_command * const req = &VMAS_LIST_AT(i); \
         char *reqbuf = req->data; \
-        /*const size_t sz = sizeof(argstruct_t) + \
-                          VMAS_ ## NAME ## _ARGS(ARG_SZ_IMM, ARG_SZ_INPUT_PTR, \
-                                                 ARG_SZ_OUTPUT_PTR, \
-                                                 ARG_SZ_RW_PTR, +); \
-        assert(sz < VMA_SERVER_SMEM_SIZE);*/ \
         /* Write arguments to request buffer. */ \
         req->command = vmas_cmd_ ## NAME; \
         VMAS_ ## NAME ## _ARGS(WRITE_ARG_IMM, WRITE_ARG_PTR, IGNORE, \
                                WRITE_ARG_PTR, NOTHING) \
         /* Mark request submitted. */ \
         atomic_set_bit(&vmas_smem_s->submitted, i); \
-        vmas_c_head = VMAS_LIST_IDX(i + 1); \
+        vmas_smem_s->c_head = VMAS_LIST_IDX(i + 1); \
         return i; \
     } 
 

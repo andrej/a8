@@ -608,7 +608,9 @@ int monitor_child_fix_up(struct monitor *monitor,
 	SAFE_Z_TRY(monitor->env.ppid = monitor->env.pid);
 	SAFE_Z_TRY(monitor->env.pid = 
 	           env_add_local_pid_info(&monitor->env, getpid()));
+#if !USE_LIBVMA
 	SAFE_NZ_TRY(comm_destroy(&monitor->comm));
+#endif
 	monitor->comm = *child_comm;
 
 	/* Register tracing in new child. */
@@ -620,7 +622,7 @@ int monitor_child_fix_up(struct monitor *monitor,
 int monitor_arbitrate_child_comm(struct monitor *parent_monitor,
                                  struct communicator *child_comm)
 {
-#if USE_LIBVMA
+#if USE_LIBVMA == USE_LIBVMA_LOCAL
 	const in_port_t hard_port_offset = 10;
 #endif
 	struct arbitration_msg {
@@ -632,7 +634,7 @@ int monitor_arbitrate_child_comm(struct monitor *parent_monitor,
 	struct sockaddr_in own_addr = { .sin_family = AF_INET,
 	                                .sin_addr = INADDR_ANY,
 					.sin_port = 0 };
-#if USE_LIBVMA
+#if USE_LIBVMA == USE_LIBVMA_LOCAL
 	/* libVMA does not persist open sockets across fork, so above approach
 	    of opening the child socket before the fork to obtain any open
 	    port does not work.
@@ -652,10 +654,14 @@ int monitor_arbitrate_child_comm(struct monitor *parent_monitor,
 	SAFE_LZ_TRY(own_port = comm_init(child_comm, 
 	                                 parent_monitor->own_id, 
 	                                 (struct sockaddr *)&own_addr));
+#if !NO_HEADERS
+	comm_set_outbound_header(child_comm, exchange_init);
+	comm_set_check_header_func(child_comm, handle_message_divergence);
+#endif
 	own_port = htons(own_port);
 	uint64_t variant_ports[parent_monitor->conf.n_variants];
 
-#if !USE_LIBVMA
+#if USE_LIBVMA != USE_LIBVMA_LOCAL
 	/* Exchange open port information for the child communicator. */
 
 	SAFE_NZ_TRY(synchronize(parent_monitor, exchange_fork));
@@ -748,7 +754,7 @@ int monitor_arbitrate_child_comm(struct monitor *parent_monitor,
 			                       ->conf.variants[i].addr)
 			->sin_addr;
 		child_addr.sin_port = variant_ports[i];
-#if USE_LIBVMA
+#if USE_LIBVMA == USE_LIBVMA_LOCAL
 		usleep(200000*parent_monitor->own_id);
 			/* ... if you have a better idea, I'm all ears. We are
 			   in the child process and cannot use parents socket

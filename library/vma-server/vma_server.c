@@ -5,7 +5,6 @@
 #include <unistd.h>
 #include "vma_redirect.h"
 
-#define MAXLEN VMA_SERVER_SMEM_SIZE
 #define COMMA() ,
 
 // functions static inline int vmas_do_XXX(char *reqbuf)
@@ -21,9 +20,9 @@
         typedef struct vmas_ ## NAME ## _args argstruct_t; \
         return NAME(VMAS_ ## NAME ## _ARGS(ARG_LIST_IMM, \
                                            ARG_LIST_PTR, \
-                                                 ARG_LIST_PTR, \
                                            ARG_LIST_PTR, \
-                                              COMMA())); \
+                                           ARG_LIST_PTR, \
+                                           COMMA())); \
     }
 
 VMAS_COMMANDS(DEF_DO_FUN)

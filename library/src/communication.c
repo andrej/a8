@@ -95,6 +95,9 @@ static int write_all(int fd, const char *src, size_t n)
     size_t m = 0;
     while(n > 0) {
         LZ_TRY(m = s.write(fd, src, n));
+        if(m < 0) {
+            return -1;
+        }
         n -= m;
         src += m;
     }
@@ -239,15 +242,14 @@ int comm_init(struct communicator *comm, int own_id, struct sockaddr *own_addr)
     struct sockaddr_in *sa = (struct sockaddr_in *)&comm->self.addr;
     sa->sin_family = AF_INET;
     sa->sin_port = own_port;
-    LZ_TRY_EXCEPT(comm->self.fd = 
-              start_server(own_addr_in->sin_port),
+    LZ_TRY_EXCEPT(comm->self.fd = start_server(own_addr_in->sin_port),
               return -1);
     if(0 == own_addr_in->sin_port) {
         struct sockaddr_in own_name = {};
         socklen_t own_name_len = sizeof(own_name);
-        LZ_TRY_EXCEPT(getsockname(comm->self.fd, 
-                                  (struct sockaddr *)&own_name,
-                      &own_name_len),
+        LZ_TRY_EXCEPT(s.getsockname(comm->self.fd, 
+                                    (struct sockaddr *)&own_name,
+                                    &own_name_len),
                       return -1);
         Z_TRY_EXCEPT(own_name_len == sizeof(own_name), return -1);
         own_port = own_name.sin_port;
@@ -319,7 +321,7 @@ int comm_connect(struct communicator *comm, int peer_id, struct sockaddr *sa)
         LZ_TRY_EXCEPT(s.connect(fd, (struct sockaddr *)&peer_addr, 
                       sizeof(peer_addr)), goto abort);
         NZ_TRY_EXCEPT(write_all(fd, (char *)&welcome_id, 
-                               sizeof(welcome_id)), goto abort);
+                                sizeof(welcome_id)), goto abort);
         NZ_TRY_EXCEPT(add_peer(comm, PEER_CONNECTED, peer_id, fd, 
                                (struct sockaddr *)&peer_addr), 
                   goto abort);

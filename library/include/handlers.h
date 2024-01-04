@@ -93,6 +93,7 @@ extern const size_t n_handlers;
 
 /* See comment in exchanges.h for replication_buffer. */
 extern char handler_scratch_buffer[HANDLER_SCRATCH_BUFFER_SZ];
+extern void *next_preallocated;
 
 static inline struct syscall_handler const *get_handler(long no)
 {

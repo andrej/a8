@@ -2343,7 +2343,7 @@ SYSCALL_ENTER_PROT(monmod_fake_fork)
 
 SYSCALL_ENTER_PROT(fork)
 {
-#if USE_LIBVMA
+#if USE_LIBVMA == USE_LIBVMA_LOCAL
 	/* Fork handlers not supported, use monmod_fake_fork. */
 	return DISPATCH_ERROR;
 #else
@@ -2377,7 +2377,7 @@ SYSCALL_EXIT_PROT(fork)
 
 SYSCALL_ENTER_PROT(clone)
 {
-#if USE_LIBVMA
+#if USE_LIBVMA == USE_LIBVMA_LOCAL
 	SAFE_WARN("clone() is not supported when using libVMA. fork() is "
 	          "only supported using the monmod_fake_fork handler.\n");
 	return DISPATCH_ERROR;
@@ -2434,6 +2434,8 @@ SYSCALL_EXIT_PROT(clone)
 	if(0 != child_pid) {
 		/* In parent: add child PID to environment. */
 #if !USE_LIBVMA
+		// Only destroy child communicator if not using libvma; when using
+		// libvma_server, we share the server between two clients now
 		SAFE_NZ_TRY(comm_destroy(child_comm));
 #endif
 		SAFE_Z_TRY(pid_info = env_add_local_pid_info(env, child_pid));

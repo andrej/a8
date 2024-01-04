@@ -142,7 +142,8 @@ extern struct socket_fptrs s;
     X(connect) \
     X(read) \
     X(write) \
-    X(close)
+    X(close) \
+    X(getsockname)
 
 #define NAME_LIST(N) vmas_cmd_ ## N,
 enum vma_server_command { 
@@ -153,7 +154,9 @@ enum vma_server_command {
 struct vmas_smem_command {
     enum vma_server_command command;
     long return_value;
-    char data[VMA_SERVER_SMEM_SIZE];
+    char data[VMA_SERVER_SMEM_SIZE
+              - sizeof(enum vma_server_command)
+              - sizeof(long)];
 };
 
 /* The commands go through the following cycle:
@@ -190,13 +193,14 @@ struct vmas_smem_struct {
     atomic_ulong_t free;
     atomic_ulong_t submitted;
     atomic_ulong_t processed;
+    int c_head;
     struct vmas_smem_command commands[VMA_SERVER_SMEM_SLOTS];
 };
 
 extern struct smem *vmas_smem;
 #define vmas_smem_s ((struct vmas_smem_struct *)vmas_smem->data)
 
-extern int vmas_c_head;
+#define vmas_reqbuf_size (sizeof(((struct vmas_smem_command *)NULL)->data))
 
 #define VMAS_LIST_IDX(idx) \
     ((idx) % VMA_SERVER_SMEM_SLOTS)
@@ -218,7 +222,8 @@ extern int vmas_c_head;
     IMM(int, socket) AND \
     IMM(int, level) AND \
     IMM(int, option_name) AND \
-    RPTR(char, MAXLEN, option_len, option_value) AND \
+    RPTR(char, (vmas_reqbuf_size-3*sizeof(int)-sizeof(socklen_t)), \
+         option_len, option_value) AND \
     IMM(socklen_t, option_len)
 
 // bind(int sockfd, struct sockaddr *addr, socklen_t addrlen)
@@ -247,22 +252,28 @@ extern int vmas_c_head;
 // read(int fd, char *buf, size_t count)
 #define VMAS_read_ARGS(IMM, RPTR, WPTR, RWPTR, AND) \
     IMM(int, fd) AND \
-    WPTR(char, MAXLEN, count, buf) AND \
+    WPTR(char, (vmas_reqbuf_size-sizeof(int)-sizeof(size_t)), count, buf) AND \
     IMM(size_t, count)
 
 // write(int fd, char *buf, size_t count)
 #define VMAS_write_ARGS(IMM, RPTR, WPTR, RWPTR, AND) \
     IMM(int, fd) AND \
-    RPTR(char, MAXLEN, count, buf) AND \
+    RPTR(char, (vmas_reqbuf_size-sizeof(int)-sizeof(size_t)), count, buf) AND \
     IMM(size_t, count)
 
 // close(int fd)
 #define VMAS_close_ARGS(IMM, RPTR, WPTR, RWPTR, AND) \
     IMM(int, fd)
 
+// getsockname(int sockfd, struct sockaddr *restrict addr, socklen_t *restrict addrlen)
+#define VMAS_getsockname_ARGS(IMM, RPTR, WPTR, RWPTR, AND) \
+    IMM(int, sockfd) AND \
+    WPTR(struct sockaddr, sizeof(struct sockaddr), *addrlen, addr) AND \
+    RWPTR(socklen_t, sizeof(socklen_t), sizeof(socklen_t), addrlen)
+
+
 // -- server callback functions and structures --
 
-#define MAXLEN VMA_SERVER_SMEM_SIZE
 #define COMMA() ,
 #define NOTHING
 #define IGNORE(...) 
@@ -271,7 +282,7 @@ extern int vmas_c_head;
 #define ARG_STRUCT_IMM(T, N) T N;
 #define ARG_STRUCT_PTR(T, L_static, L_dynamic, N) T N[L_static];
 #define DEF_ARG_STRUCT(NAME) \
-    struct vmas_ ## NAME ## _args {\
+    struct __attribute__((packed)) vmas_ ## NAME ## _args {\
         VMAS_ ## NAME ## _ARGS(ARG_STRUCT_IMM, \
                                ARG_STRUCT_PTR, \
                                ARG_STRUCT_PTR, \
@@ -344,6 +355,7 @@ static inline int init_vma_redirect() {
     vmas_smem_s->free = ~0UL;
     vmas_smem_s->submitted = 0UL;
     vmas_smem_s->processed = 0UL;
+    vmas_smem_s->c_head = 0;
     if(0 == fork()) {
         /* Child; set socket functions up to just call back to parent via
           shared memory */

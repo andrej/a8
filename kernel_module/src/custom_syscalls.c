@@ -147,7 +147,7 @@ struct reprotect_info {
 };
 
 #if MONMOD_USE_SCRATCH
-static char reprotect_scratch[MONMOD_SCRATCH_SLOTS][MONMOD_SCRATCH_SZ] = {};
+static char reprotect_scratch[MAX_N_TRACEES][MONMOD_SCRATCH_SZ] = {};
 #endif
 
 int sys_monmod_reprotect(struct pt_regs *regs, struct tracee *tracee)
@@ -156,10 +156,12 @@ int sys_monmod_reprotect(struct pt_regs *regs, struct tracee *tracee)
 	bool write_back_regs = (bool)SYSCALL_ARG0_REG(regs);
 	void __user *reprotect_stack_addr = (void __user *)
 	                                    SYSCALL_ARG1_REG(regs);
+	const short tracee_id = tracee->id;
 	
 	/* Set up data structure for information to pass to exit handler. */
 	tracee->entry_info.custom_data = NULL;
 #if MONMOD_USE_SCRATCH
+	BUG_ON(tracee_id < 0 || tracee_id >= sizeof(reprotect_scratch));
 	info = (struct reprotect_info *)reprotect_scratch[tracee->id];
 #else
 	info = kmalloc(sizeof(struct reprotect_info), GFP_KERNEL);

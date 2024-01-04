@@ -39,7 +39,6 @@
  */
 #define MONMOD_USE_SCRATCH 1
 #define MONMOD_SCRATCH_SZ 4096  // separate pages
-#define MONMOD_SCRATCH_SLOTS 4
 
 /**
  * If set to 1, use xxhash, otherwise use sdbm_hash.

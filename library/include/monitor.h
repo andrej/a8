@@ -2,6 +2,8 @@
 #define MONITOR_H
 
 #include <stdbool.h>
+#include <stdlib.h>
+#include <time.h>
 #include <sys/time.h>
 #include "communication.h"
 #include "batched_communication.h"
@@ -26,6 +28,7 @@ struct monitor {
 	struct monmod_monitor_addr_ranges addr_ranges;
 	struct checkpoint_env *checkpoint_env;
 #endif
+	long random_seed;
 };
 
 void register_monitor_in_kernel();
@@ -56,5 +59,29 @@ int monitor_arbitrate_child_comm(struct monitor *parent_monitor,
  */
 int monitor_child_fix_up(struct monitor *monitor, 
                          struct communicator *child_comm);
+
+/**
+ * Initialize (seed) random number generator used by monitor.
+ */
+static inline int monitor_init_random(struct monitor *monitor)
+{
+	char *prev_state = NULL;
+	const long seed = time(NULL) * (monitor->own_id + 1) * monitor->ancestry;
+	SAFE_Z_TRY(prev_state = initstate(seed, (char *)&monitor->random_seed, 
+				                      sizeof(monitor->random_seed)));
+	setstate(prev_state);
+}
+
+/**
+ * Return a random double.
+ */
+static inline double monitor_random(const struct monitor *monitor)
+{
+	char * const prev_state = setstate((char *)&monitor->random_seed);
+	const long r = random();
+	setstate(prev_state);
+	return (double)r / RAND_MAX;
+}
+
 
 #endif

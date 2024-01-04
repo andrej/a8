@@ -106,23 +106,26 @@ long monmod_handle_syscall(struct syscall_trace_func_stack * const stack)
 	struct pt_regs * const regs = &(stack->regs);
 
 #if ENABLE_CHECKPOINTING
-	if(monitor.is_leader
-	   && monitor.conf.restore_probability > 0
-	   && monitor.checkpoint_env->last_checkpoint.valid
-	   && random() < RAND_MAX*monitor.conf.restore_probability) {
-#if VERBOSITY > 1
-		SAFE_LOG("Leader inducing fake error.\n");
-#endif
-		SAFE_NZ_TRY(synchronize(&monitor, exchange_fake_error));
-	}
-	/* Cause an artificial divergence probabilistically to test system if
-	   so configured. We only inject faults once the first checkpoint has
-	   been created -- thus assuming that the checkpoints are reasonably
-	   set, before any exposed code runs. */
-	if(monitor.conf.inject_fault_probability > 0
-	   && monitor.checkpoint_env->last_checkpoint.valid
-	   && random() < RAND_MAX*monitor.conf.inject_fault_probability) {
-		SYSCALL_NO_REG(regs) = -1;
+	const double r = monitor_random(&monitor);
+	if(monitor.checkpoint_env->last_checkpoint.valid) {
+		if(monitor.is_leader && r < monitor.conf.restore_probability) {
+	#if VERBOSITY >= 2
+			SAFE_LOG("Leader inducing fake error.\n");
+	#endif
+			SAFE_NZ_TRY(synchronize(&monitor, exchange_fake_error));
+		}
+		/* Cause an artificial divergence probabilistically to test system if
+		so configured. We only inject faults once the first checkpoint has
+		been created -- thus assuming that the checkpoints are reasonably
+		set, before any exposed code runs. */
+		if(r < monitor.conf.inject_fault_probability) {
+	#if VERBOSITY >= 2
+			SAFE_LOGF("Variant %d inducing fake divergence: Replacing syscall "
+					"%ld with -1 (random %f).\n", 
+					monitor.own_id, SYSCALL_NO_REG(regs), r);
+	#endif
+			SYSCALL_NO_REG(regs) = -1;
+		}
 	}
 #endif
 
@@ -226,7 +229,14 @@ long monmod_handle_syscall(struct syscall_trace_func_stack * const stack)
 		   be the same across all nodes. It is the exit handler's 
 		   responsibility to copy this back to the actual results as
 		   appropriate. */
-		SAFE_NZ_TRY(replicate_results(&monitor, &canonical));
+		s = replicate_results(&monitor, &canonical);
+		if(0 != s) {
+#if VERBOSITY >= 2
+			SAFE_WARN("Divergence or error occured during replication.\n");
+#endif
+			SAFE_NZ_TRY(synchronize(&monitor, exchange_recoverable_error));
+			monmod_exit(1);
+		}
 	}
 
 	/* Phase 4: Run exit handlers, potentially denormalizing results. */
@@ -368,12 +378,13 @@ static int handle_message_divergence(const struct communicator *comm,
 	}
 #endif
     if(header_actual != header_expected 
-	   || exchange_fake_error == header_actual) {  // FIXME
+	   || exchange_fake_error == header_actual
+	   || exchange_recoverable_error == header_actual) {
 		// Throw away rest of message, if any.
 		comm_receive_body(comm, peer, msg, &n, NULL);
         return handle_divergence(&monitor);
     } else if(header_actual == header_expected 
-	          && exchange_error == header_actual) { // FIXME
+	          && exchange_error == header_actual) {
 		// Throw away rest of message, if any.
 		comm_receive_body(comm, peer, msg, &n, NULL);
         return handle_error(&monitor);
@@ -546,7 +557,7 @@ int monitor_init(struct monitor *monitor, int own_id, struct config *conf)
 	SAFE_NZ_TRY(replication_init(monitor, conf->replication_batch_size));
 
 	/* Initiate random number generator used for fault injection */
-	srandom(time(NULL));
+	monitor_init_random(monitor);
 
 	/* -- Register Tracing With Kernel Module -- */
 	register_monitor_in_kernel(monitor);
@@ -604,6 +615,7 @@ int monitor_child_fix_up(struct monitor *monitor,
 	close(monmod_log_fd);
 	NZ_TRY_EXCEPT(open_log_file(monitor->own_id, monitor->ancestry), 
 	              exit(0));
+
 	// Adjust PIDs.
 	SAFE_Z_TRY(monitor->env.ppid = monitor->env.pid);
 	SAFE_Z_TRY(monitor->env.pid = 
@@ -613,6 +625,8 @@ int monitor_child_fix_up(struct monitor *monitor,
 #endif
 	monitor->comm = *child_comm;
 
+	monitor_init_random(monitor);
+	
 	/* Register tracing in new child. */
 	register_monitor_in_kernel(monitor);
 

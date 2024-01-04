@@ -90,6 +90,8 @@ struct environment {
  */
 int env_init(struct environment *env, bool is_leader);
 
+void env_log_descriptors(struct environment *env);
+
 static inline struct descriptor_info *
 env_add_descriptor(struct environment *env, 
 		   int local_fd, int canonical_fd, int flags,
@@ -134,7 +136,8 @@ env_add_local_descriptor(struct environment *env,
 	size_t canonical = 3;
 	canonical = list_get_next_free_i(env->descriptors);
 	if(canonical < 0 || list_capacity(env->descriptors) <= canonical)  {
-		SAFE_WARN("No more space for descriptor mappings.");
+		env_log_descriptors(env);
+		SAFE_WARN("No more space for descriptor mappings.\n");
 		return NULL;
 	}
 	return env_add_descriptor(env, fd, canonical, flags, type);

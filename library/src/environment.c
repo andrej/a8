@@ -48,6 +48,36 @@ int env_init(struct environment *env, bool is_leader)
 	return 0;
 }
 
+void env_log_descriptors(struct environment *env)
+{
+	size_t i = 0;
+	SAFE_LOG("type     | can. | loc. | flags\n");
+	list_for_each(env->descriptors, i) {
+		if(!list_item_is_occupied(env->descriptors, i)) {
+			continue;
+		}
+		struct descriptor_info * const di = &env->descriptors.items[i];
+		switch(di->type) {
+			case FILE_DESCRIPTOR:
+				SAFE_LOG("file    ");
+				break;
+			case SOCKET_DESCRIPTOR:
+				SAFE_LOG("socket  ");
+				break;
+			case EPOLL_DESCRIPTOR:
+				SAFE_LOG("epoll   ");
+				break;
+			case PIPE_DESCRIPTOR:
+				SAFE_LOG("pipe    ");
+				break;
+			default:
+				SAFE_LOG("unknown?");
+				break;
+		}
+		SAFE_LOGF(" | %4lu | %4d | %4x\n", i, di->local_fd, di->flags);
+	}
+}
+
 struct epoll_data_info *get_epoll_data_info_for(struct environment *env,
                                                 int epfd,
 						int fd,

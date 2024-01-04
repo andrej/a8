@@ -102,7 +102,9 @@ SYSCALL_EXIT_PROT(default_creates_fd)
 			type = EPOLL_DESCRIPTOR;
 			break;
 	}
-	di = env_add_local_descriptor(env, local_fd, flags, type);
+	SAFE_Z_TRY_EXCEPT(
+		di = env_add_local_descriptor(env, local_fd, flags, type),
+		return 1);
 	actual->ret = env_canonical_fd_for(env, di);
 	return 0;
 }
@@ -1051,7 +1053,7 @@ SYSCALL_EXIT_PROT(dup3)
 #endif
 	Z_TRY_EXCEPT(env_add_descriptor(env, local_fd, newfd, di[0]->flags,
 	                                di[0]->type),
-	             newfd = -1);
+	             return 1);
 	
 	actual->ret = newfd;
 
@@ -1172,11 +1174,15 @@ SYSCALL_EXIT_PROT(socketpair)
 	if(dispatch & DISPATCH_UNCHECKED) {
 		flags |= DI_UNCHECKED;
 	}
-	di[0] = env_add_local_descriptor(env, local_fd[0], flags, 
-	                                 SOCKET_DESCRIPTOR);
-	di[1] = env_add_local_descriptor(env, local_fd[1], flags, 
-	                                 SOCKET_DESCRIPTOR);
-
+	Z_TRY_EXCEPT(
+		di[0] = env_add_local_descriptor(env, local_fd[0], flags, 
+										SOCKET_DESCRIPTOR),
+		return 1);
+	Z_TRY_EXCEPT(
+		di[1] = env_add_local_descriptor(env, local_fd[1], flags, 
+										SOCKET_DESCRIPTOR),
+		return 1);
+	
 	actual_fds[0] = env_canonical_fd_for(env, di[0]);
 	actual_fds[1] = env_canonical_fd_for(env, di[1]);
 
@@ -2792,8 +2798,12 @@ SYSCALL_EXIT_PROT(pipe2)
 	int flags = DI_OPENED_LOCALLY;
 	int local_fd = -1;
 	enum descriptor_type type = (enum descriptor_type)PIPE_DESCRIPTOR;
-	dis[0] = env_add_local_descriptor(env, pipefd[0], flags, type);
-	dis[1] = env_add_local_descriptor(env, pipefd[1], flags, type);
+	SAFE_Z_TRY_EXCEPT(
+		dis[0] = env_add_local_descriptor(env, pipefd[0], flags, type),
+		return 1);
+	SAFE_Z_TRY_EXCEPT(
+		dis[1] = env_add_local_descriptor(env, pipefd[1], flags, type),
+		return 1);
 	pipefd[0] = env_canonical_fd_for(env, dis[0]);
 	pipefd[1] = env_canonical_fd_for(env, dis[1]);
 	return 0;

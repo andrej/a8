@@ -5,6 +5,9 @@
     /* Error: This header should never be considered a match, even with itself \
     */ \
     X(exchange_error) \
+    /* Error that we may potentially be able to recover from with the last \
+       checkpoint. */ \
+    X(exchange_recoverable_error) \
     /* Purposely induced error */ \
     X(exchange_fake_error) \
     /* Initialization phase: nodes connecting to each other send their ID */ \

@@ -404,6 +404,7 @@ static int _fork_checkpoint_main(struct checkpoint_env *cenv, pid_t parent)
 #if USE_LIBVMA == USE_LIBVMA_LOCAL
 			_recreate_connections();
 #endif
+			monitor_init_random(cenv->monitor);
 			/* This longjump resumes execution right before creation of the
 			   checkpoint. This duplicates this current checkpoint if we want to
 			   restore it again later. We use setjmp/longjmp instead of a 

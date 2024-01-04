@@ -472,7 +472,12 @@ int replicate_results(struct monitor *monitor,
         len = msg_len;
 #endif
         // (4.2) exchange_replication_leader
-        SAFE_NZ_TRY(write_back_replication_buffer(canonical, buf, len));
+        int s = write_back_replication_buffer(canonical, buf, len);
+        if(s == 2) {
+            return 1;
+        } else {
+            SAFE_NZ_TRY(s);
+        }
     }
 
     return 0;

@@ -63,10 +63,11 @@ int monitor_child_fix_up(struct monitor *monitor,
 /**
  * Initialize (seed) random number generator used by monitor.
  */
-static inline int monitor_init_random(struct monitor *monitor)
+static inline int monitor_init_random(struct monitor *monitor, int add_seed)
 {
 	char *prev_state = NULL;
-	const long seed = time(NULL) * (monitor->own_id + 1) * monitor->ancestry;
+	const long seed = time(NULL) * (monitor->own_id + 1) * monitor->ancestry
+	                  + add_seed;
 	SAFE_Z_TRY(prev_state = initstate(seed, (char *)&monitor->random_seed, 
 				                      sizeof(monitor->random_seed)));
 	setstate(prev_state);

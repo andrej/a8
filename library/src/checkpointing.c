@@ -404,12 +404,11 @@ static int _fork_checkpoint_main(struct checkpoint_env *cenv, pid_t parent)
 #if USE_LIBVMA == USE_LIBVMA_LOCAL
 			_recreate_connections();
 #endif
-			monitor_init_random(cenv->monitor);
 			/* This longjump resumes execution right before creation of the
 			   checkpoint. This duplicates this current checkpoint if we want to
 			   restore it again later. We use setjmp/longjmp instead of a 
 			   recursive create_fork_checkpoint() call to limit stack growth. */
-			longjmp(cenv->jmp_buf, 0);
+			longjmp(cenv->jmp_buf, 1);
 			return 0; /* unreachable */
 		}
 	}
@@ -419,6 +418,7 @@ static int
 create_fork_checkpoint(struct checkpoint_env *cenv)
 {
 	int s = 0;
+	int n_restores = 0;
 	/* We perform a very lightweight, incomplete checkpointing by simply
 	   forking a new copy of the process and holding it at this point until
 	   signalled through shared memory that the process should continue. */
@@ -446,7 +446,11 @@ create_fork_checkpoint(struct checkpoint_env *cenv)
 	   child process upon resotre. By restoring to this point, the checkpoint
 	   will immediately be duplicated (re-created) upon restore. This allows
 	   restoring to the "same" checkpoint multiple times. */
-	setjmp(cenv->jmp_buf);
+	if(0 != setjmp(cenv->jmp_buf)) {
+		// Nonzero return means we got here through a checkpoint restore
+		n_restores++;
+		monitor_init_random(cenv->monitor, n_restores);
+	}
 
 	/* Set message in shared memory to CHECKPOINT_HOLD before fork(). No memory 
 	   synchronization mechanisms are needed here since we just killed any 

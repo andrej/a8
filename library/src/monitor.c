@@ -110,7 +110,7 @@ long monmod_handle_syscall(struct syscall_trace_func_stack * const stack)
 	if(monitor.checkpoint_env->last_checkpoint.valid) {
 		if(monitor.is_leader && r < monitor.conf.restore_probability) {
 	#if VERBOSITY >= 2
-			SAFE_LOG("Leader inducing fake error.\n");
+			SAFE_LOGF("Leader inducing fake error (r=%f).\n", r);
 	#endif
 			SAFE_NZ_TRY(synchronize(&monitor, exchange_fake_error));
 		}
@@ -557,7 +557,7 @@ int monitor_init(struct monitor *monitor, int own_id, struct config *conf)
 	SAFE_NZ_TRY(replication_init(monitor, conf->replication_batch_size));
 
 	/* Initiate random number generator used for fault injection */
-	monitor_init_random(monitor);
+	monitor_init_random(monitor, 0);
 
 	/* -- Register Tracing With Kernel Module -- */
 	register_monitor_in_kernel(monitor);
@@ -625,7 +625,7 @@ int monitor_child_fix_up(struct monitor *monitor,
 #endif
 	monitor->comm = *child_comm;
 
-	monitor_init_random(monitor);
+	monitor_init_random(monitor, 0);
 	
 	/* Register tracing in new child. */
 	register_monitor_in_kernel(monitor);

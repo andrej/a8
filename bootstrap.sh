@@ -7,6 +7,8 @@ then
 	mkdir dependencies
 fi
 
+sudo apt install -y libvma libvma-utils
+
 # libconfig
 
 if [ ! -d 'dependencies/libconfig-1.7.3' ]
@@ -43,7 +45,8 @@ fi
 
 if [ ! -d dependencies/criu-install ]
 then
-	sudo apt-get -y --no-install-recommends install libprotobuf-dev libprotobuf-c-dev protobuf-c-compiler protobuf-compiler python-protobuf asciidoc xmlto pkg-config python-ipaddress libbsd-dev iproute2 libnftnl4 libnftnl-dev libcap-dev libnl-3-dev libnet-dev libaio-dev libgnutls28-dev python3-future &&
+	sudo apt-get -y --no-install-recommends install python3-pip libprotobuf-dev libprotobuf-c-dev protobuf-c-compiler protobuf-compiler asciidoc xmlto pkg-config libbsd-dev iproute2 libnftnl11 libnftnl-dev libcap-dev libnl-3-dev libnet-dev libaio-dev libgnutls28-dev python3-future &&
+	pip3 install protobuf ipaddress &&
 	cd dependencies/criu-3.17.1 &&
 	make
 	if [ $? != 0 ]

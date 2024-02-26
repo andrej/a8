@@ -13,10 +13,13 @@ LIB_DIRS     ?= ../dependencies/criu-install/lib/$(ARCH)-linux-gnu
 LIBCONFIG_OBJECTS_DIR ?= ../dependencies/libconfig-1.7.3/lib/.libs
 VMA_SERVER_DIR ?= vma-server
 
+LIBVMA_PATH?=$(shell realpath $(shell gcc --print-file-name=libvma.so))
+
 CC      := gcc
 CFLAGS  := -g -fpic $(INCLUDE_DIRS:%=-I%) \
            -fvisibility=hidden \
-           -fno-omit-frame-pointer 
+           -fno-omit-frame-pointer \
+		   '-DLIBVMA_PATH="${LIBVMA_PATH}"'
 ifdef opt
 CFLAGS  += -O3 -flto 
 endif

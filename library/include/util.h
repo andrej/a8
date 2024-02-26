@@ -49,7 +49,7 @@
 		                       (long)_logf_len, 0, 0, 0); \
 	} \
 }
-#define SAFE_LOGF(msg, ...) SAFE_LOGF_LEN(256, msg, __VA_ARGS__)
+#define SAFE_LOGF(msg, ...) SAFE_LOGF_LEN(512, msg, __VA_ARGS__)
 #define SAFE_LOG(msg) SAFE_LOGF(msg "%s", "")
 #define SAFE_WARNF(msg, ...) SAFE_LOGF(__FILE__ ": %d: " msg, __LINE__, \
                                        __VA_ARGS__)

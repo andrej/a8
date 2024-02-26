@@ -3,6 +3,9 @@
 #include <unistd.h>
 #include <sys/syscall.h>
 
+#define GLIBC_VERSION_GEQ(maj, min) \
+       (__GLIBC__ > maj || (__GLIBC__ == maj && __GLIBC_MINOR__ >= min))
+
 /**
  * Certain system calls never enter kernel space through a mechanism called
  * "virtual system calls." Due to this, we are unable to monitor them --
@@ -25,7 +28,12 @@ __vdso_time            LINUX_2.6
 
 int
 __attribute__((visibility("default")))
+#if GLIBC_VERSION_GEQ(2, 31)
+// glibc commit 2f2c76e made tz argument a void*
+gettimeofday(struct timeval *restrict tv, void *restrict tz)
+#else
 gettimeofday(struct timeval *restrict tv, struct timezone *restrict tz)
+#endif
 {
 
 	return syscall(__NR_gettimeofday, (long)tv, (long)tz, 0, 0, 0, 0);

@@ -115,7 +115,7 @@ static inline int init_vma_redirect() {
         return 0;
     }
     void *handle = NULL;
-    Z_TRY(handle = dlopen("/usr/lib/libvma.so", RTLD_NOW));
+    Z_TRY(handle = dlopen(LIBVMA_PATH, RTLD_NOW));
     #define DEFINE_LIBVMA_SOCKET_FN(fn) s.fn = (fn##_fptr_t)\
                             dlsym(handle, #fn);
     SOCKET_FNS(DEFINE_LIBVMA_SOCKET_FN);
@@ -282,7 +282,7 @@ extern struct smem *vmas_smem;
 #define ARG_STRUCT_IMM(T, N) T N;
 #define ARG_STRUCT_PTR(T, L_static, L_dynamic, N) T N[L_static];
 #define DEF_ARG_STRUCT(NAME) \
-    struct __attribute__((packed)) vmas_ ## NAME ## _args {\
+    struct vmas_ ## NAME ## _args {\
         VMAS_ ## NAME ## _ARGS(ARG_STRUCT_IMM, \
                                ARG_STRUCT_PTR, \
                                ARG_STRUCT_PTR, \
@@ -366,14 +366,14 @@ static inline int init_vma_redirect() {
     } else {
         /* Parent: This is the server handling the requests. */
         char * const args[] = { "vma-server", smem_name, NULL };
-        setenv("LD_PRELOAD", "/usr/lib/libvma.so", 1);
+        setenv("LD_PRELOAD", LIBVMA_PATH, 1);
         LZ_TRY_EXCEPT(execvp("vma-server", args),
                       exit(1));
     }
 #endif
 #if USE_LIBVMA == USE_LIBVMA_LOCAL
     void *handle = NULL;
-    Z_TRY(handle = dlopen("/usr/lib/libvma.so", RTLD_NOW));
+    Z_TRY(handle = dlopen(LIBVMA_PATH, RTLD_NOW));
     #define DEFINE_LIBVMA_SOCKET_FN(fn) s.fn = (fn##_fptr_t)\
                             dlsym(handle, #fn);
     SOCKET_FNS(DEFINE_LIBVMA_SOCKET_FN);

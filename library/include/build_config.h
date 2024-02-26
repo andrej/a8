@@ -37,6 +37,10 @@
  */
 #define USE_LIBVMA USE_LIBVMA_SERVER
 
+#ifndef LIBVMA_PATH
+#define LIBVMA_PATH "/usr/lib/libvma.so"
+#endif
+
 /**
  * This can only be set in combination with USE_LIBVMA==USE_LIBVMA_SERVER. When
  * true, writes to sockets are "fire-and-forget": They return immediately and

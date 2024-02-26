@@ -41,10 +41,6 @@ size_t monmod_page_size = 0;
  * Local variables                                                            *
  * ************************************************************************** */
 
-#if ENABLE_CHECKPOINTING
-struct checkpoint_env checkpoint_env = {};  // dumped checkpoints, ...
-#endif
-
 int own_id;
 struct variant_config *own_variant_conf;
 

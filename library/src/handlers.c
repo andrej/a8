@@ -772,7 +772,7 @@ SYSCALL_ENTER_PROT(fstatat)
 {
 	struct descriptor_info *di = NULL;
 	if(AT_FDCWD != (int)actual->args[0]) {
-		get_di(0);
+		di = get_di(0);
 		remap_fd(di, 0);
 	}
 	alloc_scratch(2 * sizeof(struct type)

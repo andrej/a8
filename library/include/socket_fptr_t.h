@@ -13,6 +13,7 @@
 //#include <resolv.h> // conflicts with elf.h p_type
 #include <sys/epoll.h>
 #include <sys/socket.h>
+#include <sys/uio.h>
 
 // --------------------------------------------------------------------------
 //  function pointer type defs

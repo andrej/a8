@@ -2,11 +2,20 @@
 #define UTIL_H
 
 #ifndef TEST_H
+#include <linux/version.h>
 #include <linux/printk.h>
 #include <linux/kernel.h>  // kstrtoint (linux/kstrtox.h in newer kernels)
 #include <linux/string.h>
 #include <linux/ctype.h>
 #include <linux/uaccess.h>
+#endif
+
+// access_ok signature changed with 
+// commit 96d4f267e40f9509e8a66e2b39e8b95655617693
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5,0,0)
+#define compat_access_ok(type, addr, size) access_ok(addr, size)
+#else
+#define compat_access_ok(type, addr, size) access_ok(type, addr, size)
 #endif
 
 #include "build_config.h"
@@ -61,7 +70,7 @@ static inline int compare_user_region(const void __user *user_buffer,
 	const size_t u64_len = len/sizeof(u64);
 	size_t i = 0;
 	u64 v = 0;
-	if(!access_ok(VERIFY_READ, user_buffer, len)) {
+	if(!compat_access_ok(VERIFY_READ, user_buffer, len)) {
 		return 0;
 	}
 	for(; i < u64_len; i++) {
@@ -92,7 +101,7 @@ static inline u64 hash_user_region(void __user const *start_addr, size_t len)
 #if MONMOD_USE_XXH
 	const u64 seed = 0;
 #endif
-	if(!access_ok(VERIFY_READ, start_addr, len)) {
+	if(!compat_access_ok(VERIFY_READ, start_addr, len)) {
 		return 0;
 	}
 #if MONMOD_USE_XXH

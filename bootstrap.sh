@@ -7,7 +7,7 @@ then
 	mkdir dependencies
 fi
 
-sudo apt install -y libvma libvma-utils
+sudo apt install -y libvma libvma-utils build-essential
 
 # libconfig
 

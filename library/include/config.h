@@ -2,6 +2,7 @@
 #define CONFIG_H
 
 #include <sys/socket.h>
+#include <stdbool.h>
 
 #ifndef MAX_N_VARIANTS
 #define MAX_N_VARIANTS 8
@@ -15,7 +16,8 @@
  * PC.
  */
 struct breakpoint_config {
-	void *pc;
+	char symbol[64];
+	size_t offset;
 	size_t instr_len;  /* width of instruction at pc; must be given in
 	                      config until we include an instruction decoder */
 	long interval;

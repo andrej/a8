@@ -123,10 +123,21 @@ int parse_config(const char *path, struct config *dest)
 				Z_TRY(breakpoint_config = 
 				     config_setting_get_elem(breakpoints_config,
 				                             j));
-				Z_TRY(config_setting_lookup_int64(
-					breakpoint_config, "pc", &tmp_long));
-				dest->variants[i].breakpoints[j].pc = \
-					(void *)tmp_long;
+				bool symbol_or_offset_defined = false;
+				if(config_setting_lookup_string(breakpoint_config, "symbol", 
+				                                &tmp_str)) {
+					strncpy(dest->variants[i].breakpoints[j].symbol, 
+					        tmp_str, 
+							sizeof(dest->variants[i].breakpoints[j].symbol));
+					symbol_or_offset_defined = true;
+				}
+				if(config_setting_lookup_int64(
+						breakpoint_config, "offset", &tmp_long)) {
+					dest->variants[i].breakpoints[j].offset = tmp_long;
+					symbol_or_offset_defined = true;
+				}
+				NZ_TRY(!symbol_or_offset_defined && "must define either "
+				       "offset, symbol, or both for each breakpoint.");
 				Z_TRY(config_setting_lookup_int64(
 					breakpoint_config, "instr_len",
 					&tmp_long));

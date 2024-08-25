@@ -42,6 +42,7 @@ static int create_criu_checkpoint(struct checkpoint_env *env);
 #endif
 static int inject_breakpoint(struct checkpoint_env *env, void *loc, 
                              size_t instr_len, int interval);
+static void *get_pc_for_breakpoint(struct breakpoint_config *bp);
 
 
 
@@ -116,7 +117,9 @@ int init_checkpoint_env(struct checkpoint_env *env,
 			// location; easy way to temporarily disable
 			continue;
 		}
-		NZ_TRY(inject_breakpoint(env, config->breakpoints[i].pc,
+		void *pc = NULL;
+		Z_TRY(pc = get_pc_for_breakpoint(&config->breakpoints[i]));
+		NZ_TRY(inject_breakpoint(env, pc,
 		                         config->breakpoints[i].instr_len,
 		                         config->breakpoints[i].interval));
 	}
@@ -311,6 +314,15 @@ handle_breakpoint(struct checkpoint_env *env, void *loc)
 	return loc;
 }
 
+static void *get_pc_for_breakpoint(struct breakpoint_config *bp)
+{
+	void *pc = NULL;
+	if(bp->symbol[0] != '\0') {
+		Z_TRY_EXCEPT(pc = dlsym(RTLD_DEFAULT, bp->symbol), return NULL);
+	}
+	pc += bp->offset;
+	return pc;
+}
 
 #if ENABLE_CHECKPOINTING == FORK_CHECKPOINTING
 /* ************************************************************************** *

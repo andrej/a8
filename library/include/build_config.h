@@ -14,7 +14,7 @@
  *    - Replication of results
  *    - Adding/removing of descriptor mappings
  */
-#define VERBOSITY 1
+#define VERBOSITY 4
 
 /**
  * CHECK_HASHES_ONLY
@@ -60,7 +60,7 @@
  * If set to true, execution of the program is terminated if a system call
  * that we do not have a handler for is attempted to be executed.
  */
-#define NO_HANDLER_TERMINATES 0
+#define NO_HANDLER_TERMINATES 1
 
 #define NO_CHECKPOINTING 0
 #define FORK_CHECKPOINTING 1

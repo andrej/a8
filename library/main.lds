@@ -10,7 +10,7 @@ SECTIONS
 		__unprotected_end = .;
 	}
 }
-INSERT AFTER .eh_frame;
+INSERT BEFORE .rodata;
 
 
 SECTIONS 

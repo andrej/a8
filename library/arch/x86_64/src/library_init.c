@@ -16,7 +16,7 @@ void __attribute__((constructor)) monmod_do_init()
 	    "movq %%rax, %0"
 	  : "=rm" (ret)
 	  : 
-	  : "rsp", "rax", "rdi", "rsi", "memory");
+	  : "rax", "rdi", "rsi", "memory");
 	WARNF("Reprotect failed with return value %ld.\n", ret);
 	exit(1);
 }
@@ -38,7 +38,7 @@ monmod_unprotected_reprotect()
 	    "movq %%rax, %0"
 	  : "=rm" (ret)
 	  : 
-	  : "rsp", "rax", "rdi", "rsi", "memory");
+	  : "rax", "rdi", "rsi", "memory");
 	WARNF("Reprotect failed with return value %ld.\n", ret);
 	exit(1);
 }

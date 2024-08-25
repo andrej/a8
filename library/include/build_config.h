@@ -35,7 +35,7 @@
  * to zero). It appears the libVMA library causes a tgkill call that we 
  * currently have no handler for.
  */
-#define USE_LIBVMA USE_LIBVMA_SERVER
+#define USE_LIBVMA USE_LIBVMA_NO
 
 #ifndef LIBVMA_PATH
 #define LIBVMA_PATH "/usr/lib/libvma.so"

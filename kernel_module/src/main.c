@@ -42,6 +42,11 @@ static int redirect_to_user_trace_func(void __user *target,
 	void __user *old_sp = (void __user *)STACK_PTR_REG(regs);
 	struct syscall_trace_func_stack stack = {};
 	void __user *new_sp = old_sp - sizeof(stack) - 128;
+	if((long long)new_sp % 16 != 0) {
+		// The x86_64 ABI requires a 16-byte alignment of the stack
+		// see https://stackoverflow.com/questions/51070716/glibc-scanf-segmentation-faults-when-called-from-a-function-that-doesnt-align-r
+		new_sp -= 8;
+	}
 	memcpy(&stack.regs, regs, sizeof(stack.regs));
 	TRY(copy_to_user(new_sp, (void *)&stack, sizeof(stack)),
 	    return 1);

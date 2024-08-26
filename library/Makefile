@@ -26,8 +26,8 @@ endif
 # Linking with -pthread is required for the POSIX semaphores used for
 # checkpointing
 LDFLAGS := -g -shared $(LIB_DIRS:%=-L%) \
-           -fvisibility=hidden -Tmain.lds \
-	   -pthread 
+           -fvisibility=hidden -T$(ARCH).lds \
+	       -pthread 
 ifdef opt
 LDFLAGS += -O3 -flto
 endif

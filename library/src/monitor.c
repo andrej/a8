@@ -446,7 +446,7 @@ void register_monitor_in_kernel(struct monitor *monitor) {
 	   the program. */
 	SAFE_NZ_TRY(find_mapped_region_bounds(&monmod_library_init, 
 	                                      (void **)&code_start, 
-					      &code_len));
+	                                      &code_len));
 	
 	start = code_start;
 	len = &__monitor_end - start;

@@ -783,7 +783,10 @@ SYSCALL_ENTER_PROT(fstatat)
 
 	int dispatch = get_dispatch_by_path((const char *)actual->args[1]);
 	if(!(dispatch & DISPATCH_UNCHECKED)) {
-		/* See fstat docuementation why whe dispatch on leader. */
+		/* See fstat documentation why we dispatch on leader. */
+		dispatch = DISPATCH_LEADER | DISPATCH_NEEDS_REPLICATION
+		           | DISPATCH_CHECKED;
+	} else if(di && (di->flags & DI_OPENED_ON_LEADER)) {
 		dispatch = DISPATCH_LEADER | DISPATCH_NEEDS_REPLICATION
 		           | DISPATCH_CHECKED;
 	}

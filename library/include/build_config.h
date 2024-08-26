@@ -14,7 +14,9 @@
  *    - Replication of results
  *    - Adding/removing of descriptor mappings
  */
+#ifndef VERBOSITY
 #define VERBOSITY 4
+#endif
 
 /**
  * CHECK_HASHES_ONLY
@@ -35,7 +37,9 @@
  * to zero). It appears the libVMA library causes a tgkill call that we 
  * currently have no handler for.
  */
+#ifndef USE_LIBVMA
 #define USE_LIBVMA USE_LIBVMA_NO
+#endif
 
 #ifndef LIBVMA_PATH
 #define LIBVMA_PATH "/usr/lib/libvma.so"

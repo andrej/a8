@@ -1,5 +1,14 @@
 ARCH ?= $(shell uname -m)
 
+ifdef OPT
+ifndef VERBOSITY
+VERBOSITY=0
+endif
+ifneq (VERBOSITY, 0)
+$(warning Optimized build with nonzero verbosity will be slow due to printed debug messages.)
+endif
+endif
+
 ARCH_DIR     ?= arch
 SOURCE_DIRS  ?= src $(ARCH_DIR)/$(ARCH)/src
 TESTS_DIR    ?= tests
@@ -20,15 +29,18 @@ CFLAGS  := -g -fpic $(INCLUDE_DIRS:%=-I%) \
            -fvisibility=hidden \
            -fno-omit-frame-pointer \
 		   '-DLIBVMA_PATH="${LIBVMA_PATH}"'
-ifdef opt
+ifdef OPT
 CFLAGS  += -O3 -flto 
+endif
+ifdef VERBOSITY
+CFLAGS += -DVERBOSITY=$(VERBOSITY)
 endif
 # Linking with -pthread is required for the POSIX semaphores used for
 # checkpointing
 LDFLAGS := -g -shared $(LIB_DIRS:%=-L%) \
            -fvisibility=hidden -T$(ARCH).lds \
 	       -pthread 
-ifdef opt
+ifdef OPT
 LDFLAGS += -O3 -flto
 endif
 LDLIBS  := -lrt -ldl -lcriu

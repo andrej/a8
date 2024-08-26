@@ -1,7 +1,9 @@
 
 EXTRA_CFLAGS += -I$(src)/include -I$(src)/arch/$(ARCH)/include
+ifdef VERBOSITY
+EXTRA_CFLAGS += -DMONMOD_LOG_VERBOSITY=$(VERBOSITY)
+endif
 obj-m += monmod.o
-#CC += -ggdb
 cflags-y := -I$(src)/include -I$(src)/arch/$(ARCH)/include 
 monmod-y := \
 	src/main.o \

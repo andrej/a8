@@ -18,7 +18,9 @@
  *    logged.
  * 3: All of the above, plus unmonitored system calls are additionally logged.
  */
+#ifndef MONMOD_LOG_VERBOSITY
 #define MONMOD_LOG_VERBOSITY 2
+#endif
 
 /**
  * For benchmarking, memory protection calls for the monitor can be disabled.

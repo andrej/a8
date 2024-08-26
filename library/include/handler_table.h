@@ -294,9 +294,12 @@ SYSCALL_EXIT_PROT(default_creates_fd);
  X( __NR_unlink,     unlink,    SYSCALL_ENTER(unlink), \
                                 NULL, \
                                 SYSCALL_EXIT(unlink) ) \
- X( __NR_unlinkat,   unlinkat,  SYSCALL_ENTER(unlinkat), \
+ X( __NR_unlinkat,  unlinkat,  SYSCALL_ENTER(unlinkat), \
                                 NULL, \
                                 SYSCALL_EXIT(unlinkat) ) \
+ X( __NR_prctl,     prctl,      SYSCALL_ENTER(default_checked_arg1), \
+                                NULL, \
+                                NULL ) \
  
 #include "handler_table_prototypes.h"
 

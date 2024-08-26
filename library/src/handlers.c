@@ -780,8 +780,22 @@ SYSCALL_ENTER_PROT(fstatat)
 	struct type *stat_buf_type = (struct type *)*scratch;
 	struct type *str_type = ((struct type *)*scratch) + 1;
 	char *fixed_path_buf = (char *)(*scratch + 2*sizeof(struct type));
+	int flags = (int)actual->args[3];
 
-	int dispatch = get_dispatch_by_path((const char *)actual->args[1]);
+	int dispatch = 0;
+	if((flags & AT_EMPTY_PATH) && ((char*)actual->args[1])[0] == '\0') {
+		/* flag AT_EMPTY_PATH: If pathname is an empty string, operate on the 
+		   file referred to by dirfd */
+		if(di->flags & DI_UNCHECKED && di->flags & DI_OPENED_LOCALLY) {
+			dispatch = DISPATCH_EVERYONE | DISPATCH_UNCHECKED;
+		} else {
+			/* See fstat documentation why we dispatch on leader. */
+			dispatch = DISPATCH_LEADER | DISPATCH_NEEDS_REPLICATION
+					| DISPATCH_CHECKED;
+		}
+	} else {
+		dispatch = get_dispatch_by_path((const char *)actual->args[1]);
+	}
 	if(!(dispatch & DISPATCH_UNCHECKED)) {
 		/* See fstat documentation why we dispatch on leader. */
 		dispatch = DISPATCH_LEADER | DISPATCH_NEEDS_REPLICATION

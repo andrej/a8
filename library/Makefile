@@ -35,6 +35,9 @@ endif
 ifdef VERBOSITY
 CFLAGS += -DVERBOSITY=$(VERBOSITY)
 endif
+ifdef USE_LIBVMA
+CFLAGS += -DUSE_LIBVMA=$(USE_LIBVMA)
+endif
 # Linking with -pthread is required for the POSIX semaphores used for
 # checkpointing
 LDFLAGS := -g -shared $(LIB_DIRS:%=-L%) \

@@ -64,7 +64,11 @@
  * If set to true, execution of the program is terminated if a system call
  * that we do not have a handler for is attempted to be executed.
  */
+#if USE_LIBVMA==0
 #define NO_HANDLER_TERMINATES 1
+#else
+#define NO_HANDLER_TERMINATES 0
+#endif
 
 #define NO_CHECKPOINTING 0
 #define FORK_CHECKPOINTING 1

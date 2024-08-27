@@ -382,7 +382,7 @@ SYSCALL_ENTER_PROT(munmap)
 	canonical->arg_types[0] = IMMEDIATE_TYPE(int);
 	canonical->args[1] = (canonical->args[1] == 0 ? 0 : 1);
 	canonical->arg_types[1] = IMMEDIATE_TYPE(size_t);
-	return DISPATCH_EVERYONE | DISPATCH_CHECKED;
+	return DISPATCH_EVERYONE | DISPATCH_UNCHECKED;
 }
 
 

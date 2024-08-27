@@ -106,23 +106,26 @@
  * Path Handling                                                              *
  * ************************************************************************** */
 
-#define MAX_PATH_LENGTH 256
+//#define MAX_PATH_LENGTH 256
+//save a little on (protected) memory that the kernel will need to check
+#define MAX_PATH_LENGTH PATH_MAX
 
 static inline int get_dispatch_by_path(const char *path)
 {
 	static struct cache {
-		char key[PATH_MAX];
-		char value[PATH_MAX];
-	} full_path_cache[32] = {};
-	int cache_i = 0;
-	int cache_len = 0;
+		char key[MAX_PATH_LENGTH];
+		char value[MAX_PATH_LENGTH];
+	} full_path_cache[4] = {};
+	static int cache_i = 0;
+	static int cache_len = 0;
+
 	const char *full_path = NULL;
-	char realpath_buf[PATH_MAX];
+	char realpath_buf[MAX_PATH_LENGTH];
 
 	// Check for path in cache
 	for(int i = 0; i < cache_len; i++) {
 		if(strlen(path) == strlen(full_path_cache[i].key)
-		   && 0 == strncmp(path, full_path_cache[i].key, PATH_MAX)) {
+		   && 0 == strncmp(path, full_path_cache[i].key, MAX_PATH_LENGTH)) {
 			full_path = full_path_cache[i].value;
 		}
 	}
@@ -131,12 +134,11 @@ static inline int get_dispatch_by_path(const char *path)
 	if(NULL == full_path) {
 		full_path = realpath(path, realpath_buf);
 		if(NULL != full_path) {
-			strncpy(full_path_cache[cache_i].key, path, PATH_MAX);
+			strncpy(full_path_cache[cache_i].key, path, MAX_PATH_LENGTH);
 			strncpy(full_path_cache[cache_i].value, full_path, 
-			        PATH_MAX);
+			        MAX_PATH_LENGTH);
 			cache_i = (cache_i + 1) %
-			          sizeof(full_path_cache)
-				  /sizeof(full_path_cache[0]);
+			          (sizeof(full_path_cache)/sizeof(full_path_cache[0]));
 			if(cache_i > cache_len) {
 				cache_len = cache_i;
 			}

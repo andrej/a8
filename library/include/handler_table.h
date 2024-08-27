@@ -300,6 +300,9 @@ SYSCALL_EXIT_PROT(default_creates_fd);
  X( __NR_prctl,     prctl,      SYSCALL_ENTER(default_checked_arg1), \
                                 NULL, \
                                 NULL ) \
+ X( __NR_getdents64,getdents64, SYSCALL_ENTER(default_arg1_fd), \
+                                NULL, \
+                                NULL ) \
  
 #include "handler_table_prototypes.h"
 

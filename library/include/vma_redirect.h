@@ -362,6 +362,13 @@ static inline int init_vma_redirect() {
         #define DEFINE_VMAS_CLIENT_SOCKET_FN(fn) s.fn = \
             (fn##_fptr_t)&vmas_req_ ## fn;
         VMAS_COMMANDS(DEFINE_VMAS_CLIENT_SOCKET_FN);
+        /* When using VMA, we may have started he monitor with root privileges
+           to enable fast network communication (required for memory-mapped 
+           networking). Now we should drop these privileges, as (a) it's unsafe 
+           to run stuff as root and (b) it causes the monitored programs to 
+           behave differently when they pick up on the fact that they're root. 
+           */
+        SAFE_NZ_TRY(drop_privileges());
         return 0;
     } else {
         /* Parent: This is the server handling the requests. */

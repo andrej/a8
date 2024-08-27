@@ -10,6 +10,7 @@
 #include <elf.h>
 #include <signal.h>
 #include <wait.h>
+#include <stdlib.h>
 
 #include "build_config.h"
 #include "monmod_syscall.h"
@@ -136,5 +137,11 @@ static inline int kill_and_wait(pid_t target)
 	waitpid(target, &status, 0);
 	return 0;
 }
+
+/**
+ * Drop all root privileges.
+ * See: https://stackoverflow.com/a/44658506
+ */
+int drop_privileges(void);
 
 #endif

@@ -65,17 +65,23 @@ static inline int compare_user_region(const void __user *user_buffer,
                                       const void *kernel_buffer,
                                       const size_t len)
 {
-	const u64 *user_longs = (const u64 *)user_buffer;
+	//const u64 *user_longs = (const u64 *)user_buffer;
+	const u64 user_longs[len];
 	const u64 *kernel_longs = (const u64 *)kernel_buffer;
 	const size_t u64_len = len/sizeof(u64);
 	size_t i = 0;
+	size_t s = 0;
 	u64 v = 0;
 	if(!compat_access_ok(VERIFY_READ, user_buffer, len)) {
 		return 0;
 	}
+	if(0 != (s = copy_from_user((void*)user_longs, user_buffer, len))) {
+		printk(KERN_WARNING "monmod: %lu bytes not copied in "
+		       "compare_user_region", s);
+	}
 	for(; i < u64_len; i++) {
 		get_user(v, user_longs + i);
-		if(v != kernel_longs[i]) {
+		if(user_longs[i] != kernel_longs[i]) {
 			return 1;
 		}
 	}
@@ -86,12 +92,18 @@ static inline int compare_user_region(const void __user *user_buffer,
 
 static inline unsigned long sdbm_hash(const unsigned char *buf, size_t len)
 {
+	const size_t u64_len = len/sizeof(u64);
 	unsigned long hash = 0;
-	unsigned int c = 0;
 	size_t i = 0;
-	for(; i < len; i++) {
-		c = buf[i];
-		hash = c + (hash << 6) + (hash << 16) - hash;
+	size_t s = 0;
+	const unsigned char buf_cpy[len];
+	if(0 != (s = copy_from_user((void*)buf_cpy, buf, len))) {
+		printk(KERN_WARNING "monmod: %lu bytes not copied in sdbm_hash", s);
+	}
+	for(; i < u64_len; i++) {
+		u64 c = ((u64 *)buf_cpy)[i];
+		//hash = c + (hash << 6) + (hash << 16) - hash;
+		hash += c;
 	}
 	return hash;
 }

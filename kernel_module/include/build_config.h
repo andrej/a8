@@ -45,6 +45,6 @@
 /**
  * If set to 1, use xxhash, otherwise use sdbm_hash.
  */
-#define MONMOD_USE_XXH 1
+#define MONMOD_USE_XXH 0
 
 #endif

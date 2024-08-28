@@ -77,6 +77,13 @@ struct config {
 	double inject_fault_probability;
 
 	unsigned long socket_read_usleep;
+
+	/**
+	 * Allow the first N system calls during execution to pass unchecked.
+	 * This is useful to avoid beningn start-up divergences, e.g. due to 
+	 * different shared libraries being loaded.
+	 */
+	unsigned long ignore_first_n;
 };
 
 /**

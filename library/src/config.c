@@ -87,6 +87,13 @@ int parse_config(const char *path, struct config *dest)
 		dest->socket_read_usleep = 0;
 	}
 
+	if(config_lookup_int(&config, "ignore_first_n", &tmp_int))
+	{
+		dest->ignore_first_n = tmp_int;
+	} else {
+		dest->ignore_first_n = 0;
+	}
+
 	for(int i = 0; i < n_variants; i++) {
 		Z_TRY(variant_config = config_setting_get_elem(variants_config,
 		                                               i));

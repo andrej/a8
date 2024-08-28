@@ -86,6 +86,8 @@ static void terminate(struct monitor * const monitor);
  * System Call Monitoring                                                     *
  * ************************************************************************** */
 
+unsigned long syscall_n = 0;
+
 /* All monitored system calls go through this function, registered with the
    monmod_init system call. */
 long monmod_handle_syscall(struct syscall_trace_func_stack * const stack)
@@ -102,6 +104,7 @@ long monmod_handle_syscall(struct syscall_trace_func_stack * const stack)
 		terminate(&monitor);
 	}
 
+	syscall_n++;
 	int s = 0;
 	struct pt_regs * const regs = &(stack->regs);
 
@@ -181,7 +184,8 @@ long monmod_handle_syscall(struct syscall_trace_func_stack * const stack)
 		dispatch = handler->enter(&monitor.env, handler, &actual, 
 		                          &canonical, &handler_scratch_space);
 	}
-	if(policy_is_exempt(monitor.policy, &canonical, &monitor.env)) {
+	if(policy_is_exempt(monitor.policy, &canonical, &monitor.env) ||
+	   syscall_n < monitor.conf.ignore_first_n) {
 #if VERBOSITY >= 3
 		SAFE_LOGF("Policy \"%s\" exempted system call from "
 		          "cross-checking.\n", monitor.policy->name);

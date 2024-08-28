@@ -3,10 +3,10 @@
 For better performance, we connect two machines directly through an InfiniBand 
 connection.  We have the following setup:
 
-alexPC2 (blackforest): **Mellanox ConnectX-5** card with 
+<username>PC2 (<redacted2>): **Mellanox ConnectX-5** card with 
 `mlx5_core` driver in kernel.
 
-eiger (ARM server): Network card on **Cavium ThunderX** motherboard, using 
+<redacted> (ARM server): Network card on **Cavium ThunderX** motherboard, using 
 `thunder-nic` driver in kernel. The double-width slot that is connected to the 
 Infini-Band is the `enP2p1s0f5` interface. The Mellanox ConntectX-5 card that is 
 the fastest and is the currently connected one is the `enP5p144s0` interface.
@@ -18,7 +18,7 @@ Check that the interfaces are up and list them using `ip link`.
 
 ## Current Setup
 
-Blackforest and Eiger are connected. Blackforest is on 10.0.0.30 and Eiger is on
+<redacted2> and <redacted> are connected. <redacted2> is on 10.0.0.30 and <redacted> is on
 10.0.0.15.
 
 ## Setting up Mellanox driver on ARM server
@@ -53,23 +53,23 @@ Decide on subnet to use for Mellanox card. We use the `10.0.0.0/24` subnet.
 
 0. Set interfaces up
 
-       # On eiger:
+       # On <redacted>:
        # sudo ip link set enP5p144s0 up
-       # On blackforest / dreamer:
+       # On <redacted2> / <redacted3>:
        # sudo ip link set enp1s0 up
 
 1. Set interface IPs:
    
-       # On eiger:
+       # On <redacted>:
        sudo ip addr add 10.0.0.15/32 dev enP5p144s0
-       # On blackforest / dreamer:
+       # On <redacted2> / <redacted3>:
        sudo ip addr add 10.0.0.10/32 dev enp1s0
 
 2. Add route to other machines to the routing tables:
 
-       # On eiger:
+       # On <redacted>:
        sudo ip route add 10.0.0.0/24 dev enP5p144s0
-       # On blackforest / dreamer:
+       # On <redacted2> / <redacted3>:
        sudo ip route add 10.0.0.0/24 dev enp1s0
 
 Follow the instructions in `docs/vma.md` on how to use the libVMA accelerator

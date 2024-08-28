@@ -142,7 +142,7 @@ If the kernel module was compiled with a positive `VERBOSITY` value, it will
 print its logging information to `/var/log/syslog`. (May require root 
 privileges to read.)
 
-_More examples of running monmod for some benchmarks are given in the [benchmarks repository](https://github.com/andrej/monmod-benchmarks/)._
+_More examples of running monmod for some benchmarks are given in the [benchmarks repository](https://github.com/<username>j/monmod-benchmarks/)._
 
 ### Resetting the kernel module
     

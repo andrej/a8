@@ -49,7 +49,7 @@
  *
  * Name            Speed       Q.Score   Author
  * xxHash          5.4 GB/s     10
- * CrapWow         3.2 GB/s      2       Andrew
+ * CrapWow         3.2 GB/s      2       <username>w
  * MumurHash 3a    2.7 GB/s     10       Austin Appleby
  * SpookyHash      2.0 GB/s     10       Bob Jenkins
  * SBox            1.4 GB/s      9       Bret Mulvey

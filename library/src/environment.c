@@ -152,11 +152,14 @@ int purge_epoll_data_fd(struct environment *env, int fd)
 int append_epoll_data_info(struct environment *env, 
                            struct epoll_data_info info)
 {
-	if(NULL != 
-	   get_epoll_data_info_for(env, info.epfd, info.fd, info.event.events)){
+	struct epoll_data_info *existing;
+	if(NULL != (existing = 
+	   get_epoll_data_info_for(env, info.epfd, info.fd, info.event.events))){
 		SAFE_WARNF("An epoll_info entry for (%d, %d, %x) already "
 		           "exists.\n", info.epfd, info.fd, info.event.events);
-		return 1;
+		//return 1;
+		// Ignore for now; FIXME
+		remove_epoll_data_info(env, existing);
 	}
 	int s = list_put(*env->epoll_data_infos, info);
 	SAFE_LZ_TRY_EXCEPT(s, return 1);

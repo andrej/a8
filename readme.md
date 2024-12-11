@@ -1,8 +1,25 @@
-# Monmod: Monitor Module
+# A⁸: Monitor Module
 
-Monmod enables distributed multi-variant execution through a kernel module and a preloadable shared library.
+A⁸ enables _survivable_ distributed, heterogeneous multi-variant execution with checkpoint-restore through a kernel module and a preloadable shared library.
+
+A⁸ was presented at the [2024 Annual Compuer Security Applications Conference (ACSAC)](https://www.openconf.org/acsac2024/modules/request.php?module=oc_program&action=summary.php&id=73).
+The artifacts used in that paper are available on the _ae2_ branches of this repository and the a8-benchmarks repository, see [here](https://github.com/andrej/a8-benchmarks/blob/ae2/artifact_eval/README.md). This is the abstract of that publication:
+
+> Abstract—Multi-variant execution (MVX) is a low-friction approach to increase the security of critical software applications.
+> MVX systems execute multiple diversified implementations of the same software in lockstep on the same inputs, while monitoring each variant’s behavior. 
+> MVX systems can detect attacks quickly and with high probability, because low-level vulnerabilities are unlikely to manifest in precisely the same manner across sufficiently diversified variants. 
+> Existing MVX systems terminate execution when they detect a divergence in behavior between variants.
+> In this paper, we present A⁸, which we believe is the first full-scale survivable MVX system that not only detects attacks as they happen, but is also able to recover from them. 
+> Our implementation is comprised of two parts, an MVX portion that leverages the natural heterogeneity of variants running on diverse platforms (ARM64 and x86 64), and a checkpoint/restore portion that periodically creates snapshots of the variants’ states and forces variants to roll back to those snapshots upon detection of any irregular behavior. 
+> In this way, A⁸ achieves availability even in the face of continuous remote attacks.
+> We consider several design choices and evaluate their security and performance trade-offs using microbenchmarks.
+> Chiefly among these, we devise a system call interposition and monitor implementation approach that provides secure isolation of the MVX monitor, minimal kernel changes (small privileged TCB), and low overheads – a combination not before seen in the context of MVX.
+> We also perform a real-world evaluation of our system on two popular web servers, lighttpd and nginx, and the database server redis, which are able to maintain 53%-71% of their throughput compared to native execution.
 
 The kernel module forwards all untrusted system calls to the shared library, which resides in a protected memory region. On each host running a program variant, the shared library maintains connections to other variants, and cross-checks that the same system calls are executed across all of them. Upon a divergence, it aborts execution.
+
+> Note: The working title of this project was **monmod**, which is why it pops up everywhere in the source code.
+> We may rename these occurences to "a8" in the future.
 
 ## Installation / Building
 
@@ -142,7 +159,7 @@ If the kernel module was compiled with a positive `VERBOSITY` value, it will
 print its logging information to `/var/log/syslog`. (May require root 
 privileges to read.)
 
-_More examples of running monmod for some benchmarks are given in the [benchmarks repository](https://github.com/andrej/monmod-benchmarks/)._
+_More examples of running A⁸ for some benchmarks are given in the [benchmarks repository](https://github.com/andrej/a8-benchmarks/)._
 
 ### Resetting the kernel module
     

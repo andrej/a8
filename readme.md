@@ -1,4 +1,4 @@
-# A⁸: Monitor Module
+# A⁸: Survivable Heterogeneous Multi-Variant Execution (MVX)
 
 A⁸ enables _survivable_ distributed, heterogeneous multi-variant execution with checkpoint-restore through a kernel module and a preloadable shared library.
 

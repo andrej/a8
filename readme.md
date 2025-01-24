@@ -72,27 +72,98 @@ The built kernel module will be in `kernel_module/build/monmod.ko` if successful
 
 A configuration file is used to describe which hosts will participate in the multi variant exectuion.  It looks something like this:
 
-	leader_id = 1;
-	variants = (
-		{
-			id = 1;
-			address = "10.0.0.15";
-			port = 7772;
-		},
-		{
-			id = 2;
-			address = "10.0.0.30";
-			port = 7772;
-		}
-	);
+#### Simple Configuration (No Checkpoint/Restore)
+
+```
+leader_id = 0;
+variants = (
+	{
+		id = 0;
+		address = "10.0.0.15";
+		port = 7772;
+	},
+	{
+		id = 1;
+		address = "10.0.0.30";
+		port = 7772;
+	}
+);
+```
+
+The IDs can be arbitrarily chosen and must be unique. On each host, that host's 
+own ID must be supplied when exeucting the program using the `MONMOD_ID` 
+environment variable. The `scripts/run.sh` wrapper will do this for you.
+
 
 > **Note:** The configuration structures in `library/include/config.h` are 
 documented thoroughly and describe all available configuration options in detail 
 in the comments.
 
-The IDs can be arbitrarily chosen and must be unique. On each host, that host's 
-own ID must be supplied when exeucting the program using the `MONMOD_ID` 
-environment variable. The `scripts/run.sh` wrapper will do this for you.
+<details>
+<summary>
+
+#### More complete configuration example
+
+To enable checkpoint/restore, you will need to add brakpoints to this configuration. Where you add breakpoints depends on your target application. Here is an example of a more complete configuration:
+
+</summary>
+
+```
+leader_id = 0;
+
+# The policy decides which system calls are allowed to go unchecked.
+policy = "socket_rw_oc";
+# The replication batch size determines how many back-to-back unchecked system
+# calls can proceed before all variants are synchronized.
+replication_batch_size = 8192;
+
+# The following two options can be used to simulate divergences and test the
+# checkpoint restoring feature.
+restore_probability = 0;
+inject_fault_probability = 0;
+
+variants = (
+	{ # variant 0
+		id = 0;
+		address = "10.0.0.15";
+		port = 7773;
+		# Breakpoints indicate where checkpoints are created.
+		breakpoints = (
+			{
+				# An interval of 1 means a checkpoint is created
+				# every time this breakpoint is hit (2 would
+				# mean every other time, and so on).
+				interval = 1;
+				# The following determines where the breakpoint
+				# is created, using the address of the symbol
+				# plus a fixed offset (in bytes). `instr_len`
+				# *must* match the exact size of the 
+				# instruction at that address (use e.g.
+				# `objdump --disassemble` to determine this).
+				symbol = "ngx_close_connection";
+				offset = 0;
+				instr_len = 4;
+			}
+		) 
+	},
+	{ # variant 1
+		id = 1;
+		address = "10.0.0.30";
+		port = 7774;
+		breakpoints = (
+			{
+				interval = 1;
+				symbol = "ngx_close_connection";
+				offset = 4;
+				instr_len = 2;
+			}
+
+		) 
+	}
+);
+```
+
+</details>
 
 ### Running
 
@@ -131,7 +202,6 @@ all variants.
    export PATH=/path/to/monmod/scripts:$PATH
    ```
 
-
 3. Run the target program:  
    
    ```
@@ -160,6 +230,26 @@ print its logging information to `/var/log/syslog`. (May require root
 privileges to read.)
 
 _More examples of running A⁸ for some benchmarks are given in the [benchmarks repository](https://github.com/andrej/a8-benchmarks/)._
+
+### Debugging
+
+If you run into trouble, first increase the `VERBOSITY` configuration values in 
+`library/include/build_config.h` and `kernel_module/include/build_config.h` to their max values (4 and 3, respectively). Re-compile as outlined above and re-run the broken example. Then, examine the log files:
+
+- `monmod_<id>_<child_id>.log` for potential issues in the shared library
+- `/var/log/syslog` (any outputs prefixed "monmod") for the kernel moduel
+
+A likely category of bugs is for unmapped or improperly mapped system calls. We have not tested any other benchmarks except for the ones in the benchmark repository; new applications will likely exercise different system calls for which we don't have handlers yet or for which the handlers are incomplete. The configuration `NO_HANDLER_TERMINATES` in `library/include/build_config.h` should be set to `1`; this way, the program will quit as soon as it encounters a system call for which no handler exists. It may be tempting to disable this and allow the program to continue executing, but this will likely lead to problems down the line. We need handlers for all system calls to properly update our internal states (e.g. canonical file descriptor handles to "real" file descriptor handles).
+
+For bugs in the kernel module, it can be beneificial to run `sudo tail -F /var/log/syslog` concurrently in a different terminal. That way, if the kernel crashes and the server needs to be restarted, you will have a terminal that shows the last logs written before the server crashed.
+
+Lastly, it can be beneficial to attach a debugger to a program executing under A8. This is only possible if we do not use checkpoint/restore. When using checkpoint/restore, new processes will be constantly spawned, and the debugger will not know which child proces to follow. To attach a debugger to a program under A8 execution, use the `monmod_run.sh` script with `DEBUG=1` environment variable. This will start the target program under gdb:
+
+```
+DEBUG=1 monmod_run.sh <id> <config> ...
+```
+
+You can then set a breakpoint at the function `monmod_handle_syscall`; this will allow you to inspect every system call that A8 monitors.
 
 ### Resetting the kernel module
     

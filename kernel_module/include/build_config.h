@@ -44,7 +44,10 @@
 
 /**
  * If set to 1, use xxhash, otherwise use sdbm_hash.
+ * FIXME: xxhash is currently *broken*; it appears it accesses memory out of
+ * bounds. Activating this option *will crash* your system. Leaving here in
+ * case we want to fix and potentially use this hash function in the future.
  */
-#define MONMOD_USE_XXH 1
+#define MONMOD_USE_XXH 0
 
 #endif

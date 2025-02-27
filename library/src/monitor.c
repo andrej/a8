@@ -4,8 +4,6 @@
 #include <sys/user.h>
 #include <unistd.h>
 #include <sys/syscall.h>
-#include <time.h>
-#include <sys/time.h>
 #include <netinet/in.h>
 
 #include "monitor.h"
@@ -141,7 +139,7 @@ long monmod_handle_syscall(struct syscall_trace_func_stack * const stack)
 	int dispatch = 0;
 
 #if VERBOSITY >= 2
-	struct timeval tv, rel_tv;
+	struct timeval rel_tv;
 #endif
 
 #if ENABLE_CHECKPOINTING
@@ -167,8 +165,7 @@ long monmod_handle_syscall(struct syscall_trace_func_stack * const stack)
 
 	/* Phase 1: Determine call dispatch type through entry handler. */
 #if VERBOSITY >= 2
-	SAFE_LZ_TRY(gettimeofday(&tv, NULL));
-	timersub(&tv, &monitor.start_tv, &rel_tv);
+	rel_tv = monitor_get_runtime(&monitor);
 	if(NULL != handler) {
 		SAFE_LOGF("[%3ld.%06ld] >> %s (%ld) -- enter from PC %p, PID "
 			  "%d.\n", rel_tv.tv_sec, rel_tv.tv_usec,
@@ -256,8 +253,7 @@ long monmod_handle_syscall(struct syscall_trace_func_stack * const stack)
 	}
 
 #if VERBOSITY >= 2
-	SAFE_LZ_TRY(gettimeofday(&tv, NULL));
-	timersub(&tv, &monitor.start_tv, &rel_tv);
+	rel_tv = monitor_get_runtime(&monitor);
 	SAFE_LOGF("[%3ld.%06ld] << Return %ld.\n\n", rel_tv.tv_sec, 
 	          rel_tv.tv_usec, actual.ret);
 #endif
@@ -587,13 +583,11 @@ monmod_library_destroy()
 
 static void terminate(struct monitor * const monitor)
 {
-	struct timeval end_tv, duration;
 	synchronize(monitor, exchange_terminate);
 	replication_destroy(monitor);
 	comm_destroy(&monitor->comm);
 #if VERBOSITY >= 1
-	SAFE_NZ_TRY(gettimeofday(&end_tv, NULL));
-	timersub(&end_tv, &monitor->start_tv, &duration);
+	struct timeval duration = monitor_get_runtime(monitor);
 	SAFE_LOGF("Terminated after %ld.%06ld seconds.\n",
 	          duration.tv_sec, duration.tv_usec);
 #endif

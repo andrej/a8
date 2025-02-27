@@ -85,4 +85,15 @@ static inline double monitor_random(const struct monitor *monitor)
 }
 
 
+/**
+ * Return a struct timeval indicating how long the monitor has been running for.
+ */
+static inline struct timeval monitor_get_runtime(const struct monitor *monitor)
+{
+	struct timeval end_tv, duration;
+	SAFE_NZ_TRY(gettimeofday(&end_tv, NULL));
+	timersub(&end_tv, &monitor->start_tv, &duration);
+	return duration;
+}
+
 #endif

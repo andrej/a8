@@ -133,8 +133,9 @@ int restore_last_checkpoint(struct checkpoint_env *env)
 	if(!env->last_checkpoint.valid) {
 		return 1;
 	}
-#if VERBOSITY >= 2
-	SAFE_LOGF("<%d> Restoring last checkpoint.\n", getpid());
+#if VERBOSITY >= 1
+	struct timeval tv = monitor_get_runtime(env->monitor);
+	SAFE_LOGF("[%3ld.%06ld] <%d> Restoring last checkpoint.\n", tv.tv_sec, tv.tv_usec, getpid());
 #endif
 #if ENABLE_CHECKPOINTING == FORK_CHECKPOINTING
 #if USE_LIBVMA == USE_LIBVMA_LOCAL
@@ -154,6 +155,9 @@ int restore_last_checkpoint(struct checkpoint_env *env)
 
 void syscall_handle_checkpointing(struct checkpoint_env *env)
 {
+#if VERBOSITY >= 1
+	struct timeval duration;
+#endif
 	/* We cannot successfully create a checkpoint from within the signal
 	   handler in a breakpoint with CRIU. This workaround creates a
 	   checkpoint after system call handler entry after an appropriate
@@ -163,19 +167,19 @@ void syscall_handle_checkpointing(struct checkpoint_env *env)
 #if VERBOSITY >= 1
 		/* Log after synchronizing. We might not get to here if there
 		   was a disagreement during synchronization. */
-		struct timeval tv, duration;
-		SAFE_NZ_TRY(gettimeofday(&tv, NULL));
-		timersub(&tv, &env->monitor->start_tv, &duration);
+		duration = monitor_get_runtime(env->monitor);
 		if(!env->last_checkpoint.valid) {
-			SAFE_LOGF("<%d> Creating first checkpoint after "
-			          "%ld.%06ld seconds.\n", getpid(),
+			SAFE_LOGF("[%3ld.%06ld] <%d> Creating first checkpoint.\n", 
 				  duration.tv_sec,
-				  duration.tv_usec);
+				  duration.tv_usec,
+				  getpid());
 		}
 #endif
 #if VERBOSITY >= 2
 		if(env->last_checkpoint.valid) {
-			SAFE_LOGF("<%d> Creating checkpoint.\n", getpid());
+			duration = monitor_get_runtime(env->monitor);
+			SAFE_LOGF("[%3ld.%06ld] <%d> Creating checkpoint.\n",
+		              duration.tv_sec, duration.tv_usec, getpid());
 		}
 #endif
 #if ENABLE_CHECKPOINTING == FORK_CHECKPOINTING
@@ -415,6 +419,10 @@ static int _fork_checkpoint_main(struct checkpoint_env *cenv, pid_t parent)
 			while(parent == getppid());
 #if USE_LIBVMA == USE_LIBVMA_LOCAL
 			_recreate_connections();
+#endif
+#if VERBOSITY >= 1
+			struct timeval duration = monitor_get_runtime(cenv->monitor);
+			SAFE_LOGF("[%3ld.%06ld] Restored checkpoint.\n", duration.tv_sec, duration.tv_usec);
 #endif
 			/* This longjump resumes execution right before creation of the
 			   checkpoint. This duplicates this current checkpoint if we want to

@@ -145,12 +145,14 @@ long monmod_handle_syscall(struct syscall_trace_func_stack * const stack)
 #if ENABLE_CHECKPOINTING
 	syscall_handle_checkpointing(monitor.checkpoint_env);
 #endif
-#if NO_HANDLER_TERMINATES
 	if(NULL == handler) {
 		SAFE_WARNF("No handler for system call %ld.\n", syscall_no);
+#if NO_HANDLER_TERMINATES
 		exit(1);
-	}
+#else
+		handle_divergence(&monitor);
 #endif
+	}
 
 	/* Preparation: Initialize data structures. */
 	actual.no = syscall_no;
